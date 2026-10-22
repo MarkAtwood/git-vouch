@@ -33,6 +33,7 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
         home korg
         cd registry
         git fetch -q origin "$1"
+        git diff --name-status HEAD...FETCH_HEAD
         git merge -q --no-edit FETCH_HEAD
         git vouch check .
         git push -q origin main
@@ -117,10 +118,10 @@ merge register-bob
     home dave
     git clone -q "$PGPKEYS" pgpkeys
     git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
-    echo enable-ssh-support >>"$GNUPGHOME/gpg-agent.conf"
+    echo enable-ssh-support >>"${GNUPGHOME:-$HOME/.gnupg}/gpg-agent.conf"
     gpg --list-secret-keys --with-colons --with-keygrip |
         awk -F: '$1 == "sec" || $1 == "ssb" {auth = $1 == "ssb" && $12 ~ /a/}
-                 $1 == "grp" && auth {print $10}' >>"$GNUPGHOME/sshcontrol"
+                 $1 == "grp" && auth {print $10}' >>"${GNUPGHOME:-$HOME/.gnupg}/sshcontrol"
     gpgconf --kill gpg-agent
     gpgconf --launch gpg-agent
     SSH_AUTH_SOCK=$(gpgconf --list-dirs agent-ssh-socket)
