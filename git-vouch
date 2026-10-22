@@ -1485,6 +1485,19 @@ def check_registry(root: Path) -> CheckResult:
         claim = claimed_at(approver, i)
         return claim is not None and RANK[claim] < RANK[tier]
 
+    def lowered(handle: str, tier: str, added: tuple[int, ...]) -> list[int]:
+        # Commits concurrent with ``added`` that took from ``handle`` the
+        # authority to grant ``tier``: which of the two came first is not
+        # recorded.
+        return [
+            j
+            for path in ("anchors.json", f"tiers/{handle}.json")
+            for j, _ in history.versions.get(path, [])
+            if any(history.concurrent(j, a) for a in added)
+            and not may_grant(handle, j, tier)
+            and any(may_grant(handle, p, tier) for p in history.parents[j])
+        ]
+
     def tier_at(handle: str, i: int) -> Optional[str]:
         if handle in anchors_at(i):
             return "anchor" if handle in people else None
@@ -1515,20 +1528,14 @@ def check_registry(root: Path) -> CheckResult:
         if t.approver == t.subject:
             raise VouchError(f"{rel}: {t.subject} cannot approve themselves")
         # The approver must have held the authority where the record was added
-        # and must not have lost it on a branch merged in alongside: which of
-        # two such branches came first is not recorded.
-        lowered = [
-            j
-            for path in ("anchors.json", f"tiers/{t.approver}.json")
-            for j, _ in history.versions.get(path, [])
-            if any(history.concurrent(j, a) for a in added)
-            and not may_grant(t.approver, j, t.tier)
-            and any(may_grant(t.approver, p, t.tier) for p in history.parents[j])
-        ]
-        for j in [*added, *lowered]:
+        # and must not have lost it on a branch merged in alongside.
+        concurrent = lowered(t.approver, t.tier, added)
+        for j in [*added, *concurrent]:
             if not may_grant(t.approver, j, t.tier):
                 where = (
-                    f" in concurrent commit {history.name(j)}" if j in lowered else ""
+                    f" in concurrent commit {history.name(j)}"
+                    if j in concurrent
+                    else ""
                 )
                 raise VouchError(
                     f"{rel}: {t.approver} ({claimed_at(t.approver, j) or 'no tier'})"
@@ -1536,29 +1543,42 @@ def check_registry(root: Path) -> CheckResult:
                 )
         if any(history.at(f"people/{t.subject}.json", a) is None for a in added):
             raise Void(f"{rel}: void: committed before people/{t.subject}.json existed")
+        # Like the approver, the accountable maintainer is judged where the
+        # record was added, so stepping down later voids nothing.
+        accountables: list[tuple[str, int]] = []
         if t.tier == "automation":
             require_accountable(parsed[t.subject][0])
             for a in added:
                 person = person_at(t.subject, a)
-                accountable = person.accountable if person else None
-                if claimed_at(accountable or "", a) not in ("anchor", "maintainer"):
-                    raise VouchError(
-                        f"people/{t.subject}.json: accountable: {accountable}"
-                        " is not a maintainer or anchor"
-                    )
+                accountable = (person.accountable if person else None) or ""
+                # A maintainer or anchor is exactly who may grant contributor.
+                for j in [a, *lowered(accountable, "contributor", (a,))]:
+                    if not may_grant(accountable, j, "contributor"):
+                        where = (
+                            "" if j == a else f" in concurrent commit {history.name(j)}"
+                        )
+                        raise VouchError(
+                            f"people/{t.subject}.json: accountable: {accountable}"
+                            f" is not a maintainer or anchor{where}"
+                        )
+                accountables.append((accountable, a))
         check_signer(rel, t, data, sig, t.approver)
         if any(tier_at(t.approver, a) is None for a in added):
             raise Void(f"{rel}: void: {t.approver} has no valid tier")
         if t.subject not in people:
             raise Void(f"{rel}: void: the person file of {t.subject} is invalid")
-        # An accountable maintainer stepping down is no error, as for an
-        # approver, but the robot has no tier until someone takes it on.
-        accountable = people[t.subject].accountable or ""
-        if t.tier == "automation" and tier_at(accountable, final) not in (
-            "anchor",
-            "maintainer",
-        ):
-            raise Void(f"{rel}: void: {accountable} has no valid tier")
+        for accountable, a in accountables:
+            if tier_at(accountable, a) not in ("anchor", "maintainer"):
+                raise Void(f"{rel}: void: {accountable} has no valid tier")
+        # The accountable is judged only with an approval, so naming another
+        # one needs a new approval.
+        person = person_at(t.subject, i)
+        now = person.accountable if person else None
+        if any(accountable != now for accountable, _ in accountables):
+            raise Void(
+                f"{rel}: void: accountable changed to {now} after the record"
+                " was added; needs a new approval"
+            )
         return t.tier
 
     tiers: dict[str, str] = {}

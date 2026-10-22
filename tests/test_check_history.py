@@ -19,6 +19,7 @@ import pytest
 
 from conftest import Key, run_script
 from test_check import ADDED, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
+from test_export import export, sign_file, ssh_verify
 
 
 class GitRegistry(Registry):
@@ -307,20 +308,94 @@ def test_keys_first_listed_in_one_commit_go_to_the_current_listing(
     assert result.problems == snapshot(vouch, reg, tmp_path).problems
 
 
-def test_accountable_stepping_down_voids_without_failing(
-    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+def test_automation_keeps_its_tier_after_accountable_steps_down(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
 ) -> None:
     reg.person("bot", key("bot"), accountable="gregkh")
     reg.tier("bot", "automation", "gregkh", key("gregkh"))
     reg.commit()
-    assert vouch.check_registry(reg.root).tiers["bot"] == "automation"
     reg.delete("tiers/gregkh.json")
     reg.commit()
     result = vouch.check_registry(reg.root)
-    assert result.problems == []
-    assert has(result.voids, "tiers/bot.json", "gregkh has no valid tier")
-    assert "bot" not in result.tiers
+    assert result.problems == [] and result.voids == []
+    assert "gregkh" not in result.tiers
+    assert result.tiers["bot"] == "automation"
     assert run_script("check", str(reg.root)).returncode == 0
+    out = export(reg, tmp_path, "--include-automation")
+    data, sig = sign_file(tmp_path, key("bot"), "file")
+    assert ssh_verify(data, sig, out.signers, "bot", "file")
+
+
+def test_automation_grant_concurrent_with_accountable_removal_fails(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.git("branch", "side")
+    reg.delete("tiers/gregkh.json")
+    reg.commit()
+    reg.git("checkout", "-q", "side")
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "people/bot.json", "gregkh", "concurrent commit")
+    assert "bot" not in result.tiers
+
+
+def test_automation_accountable_changed_later_voids(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.person("bot", key("bot"), accountable="dave")
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(result.voids, "tiers/bot.json", "dave", "new approval")
+    assert "bot" not in result.tiers
+    reg.tier(
+        "bot", "automation", "torvalds", key("torvalds"), date="2026-04-01T00:00:00Z"
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "people/bot.json", "dave is not a maintainer")
+
+
+def test_revoked_accountable_key_keeps_automation(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # The accountable maintainer signed nothing for the bot; only a revoked
+    # key under the accountable's own tier voids it (next test).
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.revoke("gregkh", key("gregkh"), key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(result.voids, "tiers/alice.json", "revoked")
+    assert result.tiers["bot"] == "automation"
+    assert result.tiers["gregkh"] == "maintainer"
+
+
+def test_revoked_key_under_accountables_tier_voids_automation(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.anchors("torvalds", "dave")
+    reg.person("kees", key("kees"))
+    reg.tier("kees", "maintainer", "dave", key("dave"))
+    reg.person("bot", key("bot"), accountable="kees")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"))
+    reg.commit()
+    assert vouch.check_registry(reg.root).tiers["bot"] == "automation"
+    reg.revoke("dave", key("dave"), key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(result.voids, "tiers/kees.json", "revoked")
+    assert has(result.voids, "tiers/bot.json", "kees has no valid tier")
+    assert "bot" not in result.tiers
 
 
 def test_merge_that_discarded_a_side_change_keeps_the_grant(
