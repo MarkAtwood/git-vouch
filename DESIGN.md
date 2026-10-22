@@ -75,7 +75,7 @@ short enough to read in a sitting.
 | `git-vouch` | The core: registry rules, records, export | `git`, `ssh-keygen` |
 | `git-vouch-migrate` | Flag day only: drafts person files and endorsements from the frozen `pgpkeys.git` | `gpg`, `git-vouch` |
 | `git-vouch-attest` | Verifies a FIDO key's attestation against a vendor root the user supplies | `openssl` |
-| `git-vouch-patatt` | Writes the patch-signing keyring that patatt and b4 read, from the registry | `git`, `git-vouch` |
+| patatt fork | patatt with a `vouch:` keyring source, so b4 checks patch signatures against the registry ([github.com/MarkAtwood/patatt](https://github.com/MarkAtwood/patatt)) | `git vouch keys` |
 | `git-vouch-trqp` | Optional TRQP bridge so OpenVTC's `verify-trust` can ask whether a DID may sign for the kernel; a thin shim over `git-vouch` | `git-vouch` |
 
 `git-vouch-migrate` is the only tool that runs `gpg`, and it is retired
@@ -429,6 +429,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
+| `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
 `DIR` defaults to the synced registry copy once `setup` has run.
@@ -507,7 +508,12 @@ revocation or validity dates: a key in its keyring is trusted. Today
 the kernel's b4 keyring is `pgpkeys.git`'s `.keyring/`, which the flag
 day freezes.
 
-`git-vouch-patatt` writes that keyring from the registry:
+A fork of patatt adds one keyring source, `keyringsrc = vouch:`, which
+asks `git vouch keys <email>` for the signer's current keys instead of
+reading a keyring tree. The registry is the keyring; nothing is
+generated, published or trusted in between. The fork's change is kept
+small and in upstream style so it could be offered upstream. The rules
+`git vouch keys` applies:
 
 - **Who:** any registered person with at least one endorsed email,
   whatever their tier, including automation identities whose email is
@@ -521,12 +527,10 @@ day freezes.
   fingerprint), one rule for every key, so a person's main and backup
   tokens never collide. `git vouch status` prints the selector to set as
   `patatt.selector`.
-- **Where:** a branch in the registry repository, regenerated after each
-  merge, which `git vouch sync` fetches and patatt reads with
-  `patatt.keyringsrc = ref:...`. The branch is derived entirely from the
-  registry, so `git-vouch-patatt --check` regenerates it locally and
-  reports any difference; whoever runs the regeneration cannot slip in
-  a key unnoticed.
+- **Where:** nowhere new. The fork reads the local registry copy that
+  `git vouch sync` keeps current, through `git vouch keys`. b4 uses the
+  fork when it is installed in place of patatt. Stock patatt still works
+  with its existing keyrings, but does not see the registry.
 
 ## Flag day
 
@@ -706,10 +710,9 @@ Decided 2026-10-22:
   optional free-text note, no minimum count; they bind
   name, key and `subjectEmails`, carry over to later keys, and only
   endorsed emails are exported.
-- **Patch signing:** `git-vouch-patatt` writes patatt's keyring to a
-  branch in the registry from endorsed emails and current keys, any tier,
-  bots included; selectors derived from the key; `--check` audits the
-  branch against a local regeneration.
+- **Patch signing:** a patatt fork with a `vouch:` keyring source asks
+  `git vouch keys <email>`; endorsed emails and current keys, any tier,
+  bots included; selectors derived from the key; no generated keyring.
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.

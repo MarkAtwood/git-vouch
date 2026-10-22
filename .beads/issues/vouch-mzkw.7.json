@@ -1,0 +1,39 @@
+{
+  "id": "vouch-mzkw.7",
+  "title": "patatt fork: 'vouch:' keyring source",
+  "description": "In ~/PROJECT/patatt (github.com/MarkAtwood/patatt, branch git-vouch; upstream git.kernel.org, push disabled): add keyringsrc type 'vouch:' (optionally 'vouch:\u003cregistry dir\u003e') to get_public_key: for openssh keys, run 'git vouch keys \u003cidentity\u003e' (argument list, no shell), pick the line matching the selector, return the key. Smallest possible diff to upstream, in upstream style, so it could be offered upstream later. No change to signing. Fork-local tests use real ssh-keygen and a fixture registry built with git-vouch; patatt's own test suite must still pass unchanged.",
+  "acceptance_criteria": "patatt's existing tests pass unmodified; new tests: valid patch signed by a registry key verifies via vouch:; revoked/retired key, unendorsed email and wrong selector fail; git vouch missing gives a clear error.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:57:00.790389214Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:57:00.790389214Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-mzkw.7",
+      "depends_on_id": "vouch-mzkw",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:57:00.805453671Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.7",
+      "depends_on_id": "vouch-mzkw.6",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:57:01.022472522Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.7",
+      "depends_on_id": "vouch-mzkw.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:57:01.308271903Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

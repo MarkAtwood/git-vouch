@@ -4,13 +4,14 @@
   "description": "Separate executable, Python 3.9+ stdlib only, imports git-vouch's check result. Writes the keyring tree to a directory (atomic replace, stale entries removed, paths built like patatt's make_pkey_path with urlencoding), per the decision bead. Optional --commit-ref REF writes it as a commit on a git ref with plain git plumbing. Never prompts; untrusted registry values never reach a shell.",
   "acceptance_criteria": "Tests: tree layout matches patatt's make_pkey_path for sample identities; revoked and unendorsed entries absent; rerun is idempotent; --commit-ref produces a ref readable via git show.",
   "notes": "Per mzkw.2 decisions: write to a branch in the registry repo (git plumbing, no checkout), plus --check mode that regenerates locally and diffs against the published branch (non-zero on difference). Eligibility, current keys only, bots included, derived selectors.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T18:46:45.039600376Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T18:51:56.885464421Z",
+  "updated_at": "2026-10-22T18:57:01.415738751Z",
+  "closed_at": "2026-10-22T18:57:01.415737901Z",
   "dependencies": [
     {
       "issue_id": "vouch-mzkw.3",
@@ -33,6 +34,14 @@
       "depends_on_id": "vouch-ey47.6",
       "type": "blocks",
       "created_at": "2026-10-22T18:46:45.767064522Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.3",
+      "depends_on_id": "vouch-mzkw.7",
+      "type": "supersedes",
+      "created_at": "2026-10-22T18:57:01.410360952Z",
       "created_by": "agent",
       "metadata": "{}"
     }

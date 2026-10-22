@@ -3,13 +3,14 @@
   "title": "End-to-end test with real patatt",
   "description": "Use patatt from ~/GIT/patatt (dev-only, run from source) as the independent oracle: sign a patch with patatt using a registry person's ssh key, point patatt at the exported keyring (dir and ref: forms), validate. Cover: endorsed email + current key passes; revoked key fails; unendorsed email fails; key not in registry fails; automation key per decision.",
   "acceptance_criteria": "All cases behave as specified using unmodified patatt; fully offline.",
+  "notes": "Now tests the patatt fork with keyringsrc=vouch: (Mark 2026-10-22 reversed P5). Stock patatt remains the oracle for signature format: a patch signed by stock patatt must verify in the fork and vice versa.",
   "status": "open",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T18:46:45.158467518Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T18:46:45.158467518Z",
+  "updated_at": "2026-10-22T18:57:01.489167906Z",
   "dependencies": [
     {
       "issue_id": "vouch-mzkw.4",
@@ -24,6 +25,14 @@
       "depends_on_id": "vouch-mzkw.3",
       "type": "blocks",
       "created_at": "2026-10-22T18:46:45.583750616Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.4",
+      "depends_on_id": "vouch-mzkw.7",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:57:01.57762418Z",
       "created_by": "agent",
       "metadata": "{}"
     }
