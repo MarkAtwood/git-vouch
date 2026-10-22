@@ -19,7 +19,7 @@ import pytest
 
 from conftest import Key, run_script
 from test_check import ADDED, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
-from test_export import export, sign_file, ssh_verify
+from test_export import export, repo, sign_file, ssh_verify, tag, verifies  # noqa: F401 (repo is a fixture)
 
 
 class GitRegistry(Registry):
@@ -30,11 +30,18 @@ class GitRegistry(Registry):
         subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
         self.day = 0
 
-    def commit(self) -> None:
-        """Commit everything, one day after the previous commit."""
+    def commit(self, author: str | None = None) -> None:
+        """Commit everything, one day after the previous commit.
+
+        The author date is the committer date unless ``author`` is given.
+        """
         self.day += 1
         date = f"2026-01-{self.day:02d}T00:00:00Z"
-        env = {**os.environ, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_DATE": date}
+        env = {
+            **os.environ,
+            "GIT_COMMITTER_DATE": date,
+            "GIT_AUTHOR_DATE": author or date,
+        }
         for args in (["add", "-A"], ["commit", "-q", "-m", date]):
             subprocess.run(
                 ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
@@ -907,3 +914,214 @@ def test_reverted_person_file_is_judged_at_its_latest_version(
     assert [k.did for k in result.people["dave"].keys] == [did(key("dave2"))]
     warned = key_change_warnings(result)
     assert len(warned) == 1 and first_a in warned[0]
+
+
+# DESIGN.md, Tier record: a deleted tier ends at the deleting commit's
+# committer date, a demoted one at the new record's date. GitRegistry commits
+# day N at 2026-01-0NT00:00:00Z; git verify-tag judges each tag at its date.
+DAY1_NOON = "2026-01-01T12:00:00Z"
+DAY2_NOON = "2026-01-02T12:00:00Z"
+DAY3_NOON = "2026-01-03T12:00:00Z"
+
+
+def test_deleted_tier_ends_at_the_deleting_commit(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    reg.delete("tiers/gregkh.json")
+    reg.commit(author="2026-01-01T06:00:00Z")  # the committer date, day 2, counts
+    for min_tier in ("maintainer", "contributor"):
+        out = export(reg, tmp_path, "--min-tier", min_tier)
+        assert verifies(repo, tag(repo, f"a-{min_tier}", key("gregkh"), DAY1_NOON), out)
+        assert not verifies(
+            repo, tag(repo, f"b-{min_tier}", key("gregkh"), DAY2_NOON), out
+        )
+    assert verifies(repo, tag(repo, "alice", key("alice"), DAY2_NOON), out)
+    out = export(reg, tmp_path, "--min-tier", "anchor")
+    assert not verifies(repo, "a-maintainer", out)
+
+
+def test_deleted_record_invalid_at_its_parent_ends_nothing(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    reg.tier("dave", "contributor", "alice", key("alice"))  # alice may not grant it
+    reg.commit()
+    reg.delete("tiers/dave.json")
+    reg.commit()
+    out = export(reg, tmp_path)
+    assert not verifies(repo, tag(repo, "d1", key("dave"), DAY2_NOON), out)
+
+
+def test_demotion_ends_the_higher_tier_at_the_new_records_date(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    reg.tier(
+        "gregkh", "contributor", "torvalds", key("torvalds"), "2026-02-01T00:00:00Z"
+    )
+    reg.commit()
+    early = tag(repo, "early", key("gregkh"), "2026-01-15T00:00:00Z")
+    late = tag(repo, "late", key("gregkh"), "2026-02-02T00:00:00Z")
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, early, out)
+    assert not verifies(repo, late, out)
+    out = export(reg, tmp_path)
+    assert verifies(repo, late, out)
+
+
+def test_tier_deleted_then_regranted_lower_keeps_the_deletion_date(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    reg.delete("tiers/gregkh.json")
+    reg.commit()
+    reg.tier("gregkh", "contributor", "torvalds", key("torvalds"))
+    reg.commit()
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "v1", key("gregkh"), DAY1_NOON), out)
+    assert not verifies(repo, tag(repo, "v2", key("gregkh"), DAY2_NOON), out)
+    out = export(reg, tmp_path)
+    assert verifies(repo, tag(repo, "c1", key("gregkh"), DAY3_NOON), out)
+
+
+def test_uncommitted_deletion_ends_the_tier_now(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    reg.delete("tiers/gregkh.json")
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "v1", key("gregkh"), DAY1_NOON), out)
+    assert not verifies(
+        repo, tag(repo, "v2", key("gregkh"), "2099-01-01T00:00:00Z"), out
+    )
+
+
+def test_deleted_automation_tier_ends_its_file_signatures(
+    reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "gregkh", key("gregkh"))
+    reg.commit()
+    reg.delete("tiers/bot.json")
+    reg.commit()
+    data, sig = sign_file(tmp_path, key("bot"), "file")
+    out = export(reg, tmp_path, "--include-automation")
+    assert ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260102120000Z"
+    )
+    assert not ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260103120000Z"
+    )
+    out = export(reg, tmp_path)
+    assert not ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260102120000Z"
+    )
+
+
+def test_tier_replaced_by_a_void_record_ends_at_the_replacing_commit(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    # A record without effect leaves the person as if the record were deleted.
+    reg.tier("dave", "maintainer", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.git("branch", "side")
+    reg.delete("tiers/dave.json")
+    reg.commit()
+    reg.git("checkout", "-q", "side")
+    reg.tier("gregkh", "contributor", "dave", key("dave"), "2026-03-01T00:00:00Z")
+    reg.commit()  # day 4
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(result.voids, "tiers/gregkh.json", "concurrent commit")
+    assert "gregkh" not in result.tiers
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "v1", key("gregkh"), DAY3_NOON), out)
+    assert not verifies(
+        repo, tag(repo, "v2", key("gregkh"), "2026-01-04T12:00:00Z"), out
+    )
+
+
+@pytest.mark.parametrize("via_deletion", [False, True])
+def test_human_tier_replaced_by_automation(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+    via_deletion: bool,
+) -> None:
+    if via_deletion:  # ends at the deleting commit's committer date, day 2
+        reg.delete("tiers/gregkh.json")
+        reg.commit()
+        early, late = DAY1_NOON, DAY2_NOON
+    else:  # ends at the automation record's date
+        early, late = "2026-01-15T00:00:00Z", "2026-02-02T00:00:00Z"
+    reg.person("gregkh", key("gregkh"), accountable="torvalds")
+    reg.tier(
+        "gregkh", "automation", "torvalds", key("torvalds"), "2026-02-01T00:00:00Z"
+    )
+    reg.commit()
+    data, sig = sign_file(tmp_path, key("gregkh"), "file")
+    for options in ((), ("--include-automation",)):
+        out = export(reg, tmp_path, "--min-tier", "maintainer", *options)
+        assert verifies(repo, tag(repo, f"a{len(options)}", key("gregkh"), early), out)
+        assert not verifies(
+            repo, tag(repo, f"b{len(options)}", key("gregkh"), late), out
+        )
+        assert ssh_verify(
+            data, sig, out.signers, "gregkh", "file", "-Overify-time=20260101120000Z"
+        )
+        # Only the automation line, exported on request, outlasts the human tier.
+        assert ssh_verify(
+            data, sig, out.signers, "gregkh", "file", "-Overify-time=20260301000000Z"
+        ) == bool(options)
+
+
+def test_committer_date_out_of_range(reg: GitRegistry) -> None:
+    # git stores any timestamp; datetime cannot hold this one.
+    def far_commit(message: str) -> None:
+        def out(*args: str) -> str:
+            return subprocess.run(
+                ["git", *args], cwd=reg.root, check=True, capture_output=True, text=True
+            ).stdout.strip()
+
+        tree, parent = out("write-tree"), out("rev-parse", "HEAD")
+        who = "t <t@example.org> 99999999999999 +0000"
+        body = f"tree {tree}\nparent {parent}\nauthor {who}\ncommitter {who}\n\n{message}\n"
+        commit = subprocess.run(
+            ["git", "hash-object", "-t", "commit", "-w", "--literally", "--stdin"],
+            cwd=reg.root,
+            input=body,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        out("update-ref", "HEAD", commit)
+
+    (reg.root / "README").write_text("unrelated\n")
+    reg.git("add", "README")
+    far_commit("unrelated")
+    proc = run_script("check", str(reg.root))
+    assert proc.returncode == 0, proc.stderr
+    reg.git("rm", "-q", "tiers/gregkh.json", "tiers/gregkh.json.sig")
+    far_commit("delete gregkh")
+    proc = run_script("check", str(reg.root))
+    assert proc.returncode == 1
+    assert "committer date out of range" in proc.stderr
+    assert "Traceback" not in proc.stderr

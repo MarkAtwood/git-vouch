@@ -1,0 +1,7 @@
+{
+  "id": "1792699465351318452-1",
+  "issue_id": "vouch-omzm.3",
+  "author": "agent",
+  "text": "Implemented: git-vouch-migrate drafts --as HANDLE (tests/migrate/test_drafts.py, 8 tests). Choices: certifier's own continuity must be proven (ties --as to the GPG key whose certifications are read); certifications must verify in gpg --check-sigs --allow-weak-key-signatures; per unrevoked UID latest 0x10-0x13 counts unless a 0x30 by the certifier is as new or newer; endorserKey/subjectKey = first current unrevoked key; n = next free in registry. git vouch endorse not implemented yet (vouch-ey47.7), so 'validates once signed' is tested by ssh-keygen -Y sign -n git-vouch-endorse + git vouch check. Open: certification expiry is not checked; certs made by a merged (non-migratedFrom) GPG key of the certifier are not read.",
+  "created_at": "2026-10-22T20:04:25.351318452Z"
+}

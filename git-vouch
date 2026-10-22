@@ -257,7 +257,8 @@ def file_history(root: Path, rel: str) -> list[Version]:
     Raises:
         VouchError: ``rel`` is not a plain path, the repository is a shallow
             clone, git fails, or a version is not a regular file (a
-            directory, symlink or submodule) or is too large.
+            directory, symlink or submodule) or is too large, or a commit's
+            date is beyond what datetime can hold.
     """
     parts = rel.split("/")
     if any(p in ("", ".", "..") for p in parts) or not rel.isprintable():
@@ -301,15 +302,16 @@ def file_history(root: Path, rel: str) -> list[Version]:
             raise VouchError(f"{rel} at {commit}: not a regular file")
         found.append((commit, ctime, tuple(parents), mode, blob))
     contents = read_blobs(root, rel, [f[4] for f in found if f[3] != "000000"])
-    return [
-        Version(
-            commit,
-            datetime.fromtimestamp(int(ctime), timezone.utc),
-            parents,
-            None if mode == "000000" else contents[blob],
+    versions = []
+    for commit, ctime, parents, mode, blob in found:
+        try:
+            date = datetime.fromtimestamp(int(ctime), timezone.utc)
+        except (ValueError, OverflowError, OSError) as e:
+            raise VouchError(f"commit {commit}: committer date out of range") from e
+        versions.append(
+            Version(commit, date, parents, None if mode == "000000" else contents[blob])
         )
-        for commit, ctime, parents, mode, blob in found
-    ]
+    return versions
 
 
 def b58encode(data: bytes) -> str:
@@ -964,6 +966,8 @@ class CheckResult(NamedTuple):
     problems: list[str]  # each makes check fail
     voids: list[str]  # records without effect; reported, not failures
     warnings: list[str]  # anything else reported without failing
+    # handle -> tier -> when it ended, for tiers deleted or demoted (see tier_ends)
+    ended: dict[str, dict[str, datetime]]
 
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
@@ -990,6 +994,7 @@ class History(NamedTuple):
     """
 
     commits: list[str]  # per position, final excluded
+    dates: list[int]  # committer time per position, as git prints it; final excluded
     parents: list[tuple[int, ...]]  # per position, final included
     ancestors: list[int]  # per position, bit j set if j is a strict ancestor
     # rel -> [(position, content or None if deleted)], by position
@@ -1003,6 +1008,21 @@ class History(NamedTuple):
     def name(self, i: int) -> str:
         """Return the commit at position ``i``, or "the working tree"."""
         return self.commits[i] if i < self.final else "the working tree"
+
+    def date(self, i: int) -> datetime:
+        """Return the committer date at position ``i``; the working tree is dated now.
+
+        Raises:
+            VouchError: the date is beyond what datetime can hold.
+        """
+        if i == self.final:
+            return datetime.now(timezone.utc)
+        try:
+            return datetime.fromtimestamp(self.dates[i], timezone.utc)
+        except (ValueError, OverflowError, OSError) as e:
+            raise VouchError(
+                f"commit {self.commits[i]}: committer date out of range"
+            ) from e
 
     def before(self, j: int, i: int) -> bool:
         """Return whether position ``j`` is a strict ancestor of position ``i``."""
@@ -1062,16 +1082,20 @@ def registry_history(root: Path, paths: Iterable[str]) -> History:
     Raises:
         VouchError: git fails, or a version cannot be read (see ``file_history``).
     """
-    commits: list[list[str]] = []  # [commit, parent...], parents first
+    commits: list[list[str]] = []  # [committer time, commit, parent...], parents first
     if _is_repo_top(root):
-        rev_list = [*GIT, "rev-list", "--topo-order", "--reverse", "--parents", "HEAD"]
+        rev_list = [*GIT, "rev-list", "--topo-order", "--reverse", "--parents"]
         commits = [
-            line.split() for line in run(rev_list, cwd=root).decode().splitlines()
+            line.split()
+            for line in run([*rev_list, "--timestamp", "HEAD"], cwd=root)
+            .decode()
+            .splitlines()
         ]
-    order = {c[0]: i for i, c in enumerate(commits)}
-    hashes = [c[0] for c in commits]
+    order = {c[1]: i for i, c in enumerate(commits)}
+    hashes = [c[1] for c in commits]
+    dates = [int(c[0]) for c in commits]
     final = len(commits)
-    parents = [tuple(order[p] for p in c[1:]) for c in commits]
+    parents = [tuple(order[p] for p in c[2:]) for c in commits]
     parents.append((final - 1,) if commits else ())
     # ponytail: one int of len(commits) bits per commit, quadratic memory;
     # fine for tens of thousands of commits.
@@ -1143,11 +1167,11 @@ def registry_history(root: Path, paths: Iterable[str]) -> History:
             now: Optional[bytes] = read_capped(root, rel)
         except VouchError:
             now = None  # missing, or reported by check as a record problem
-        head = History(hashes, parents, ancestors, {rel: history}).at(rel, final)
+        head = History(hashes, dates, parents, ancestors, {rel: history}).at(rel, final)
         if head != now:
             history.append((final, now))
         versions[rel] = history
-    return History(hashes, parents, ancestors, versions)
+    return History(hashes, dates, parents, ancestors, versions)
 
 
 def _record_paths(root: Path, problems: list[str]) -> list[str]:
@@ -1214,6 +1238,11 @@ def check_registry(root: Path) -> CheckResult:
     unrevoked key current in its previous version signed. Void records and
     warnings do not fail the check, so a revocation never blocks the export
     that spreads it.
+
+    A tier ends where a commit deleted its record or replaced it with one
+    that has no effect, at that commit's committer date, or where a lower
+    tier or one across the automation line replaced it, at the new record's
+    ``date``, provided the record verified at the parent commit.
 
     Raises:
         VouchError: ssh-keygen cannot be run, or the history cannot be read.
@@ -1652,6 +1681,48 @@ def check_registry(root: Path) -> CheckResult:
         else:
             problems.append(str(result))
 
+    def tier_ends(handle: str) -> dict[str, datetime]:
+        # Walk back from the working tree through every version of the tier
+        # record; a tier held more than once ends at its latest end.
+        rel = f"tiers/{handle}.json"
+        ends: dict[str, datetime] = {}
+        todo, seen = [final], set()
+        while todo:
+            i = todo.pop()
+            if i in seen:
+                continue
+            seen.add(i)
+            is_deleted = history.at(rel, i) is None
+            held = None if is_deleted else judge(handle, i)
+            record = record_at(rel, i)
+            for a in history.added(rel, i):
+                for p in history.parents[a]:
+                    if history.at(rel, p) is None:
+                        todo.append(p)  # created here; look for an earlier deletion
+                        continue
+                    was = judge(handle, p)
+                    if not isinstance(was, str):
+                        continue
+                    end: Optional[datetime] = None
+                    if not (isinstance(held, str) and isinstance(record, Tier)):
+                        end = history.date(a)  # deleted, or replaced without effect
+                    elif (held == "automation") != (was == "automation") or (
+                        RANK[was] < RANK[held]
+                    ):
+                        end = record.date
+                    if end is not None:
+                        ends[was] = max(end, ends.get(was, end))
+                    todo.append(p)
+        return ends
+
+    ended: dict[str, dict[str, datetime]] = {}
+    for rel in history.versions:
+        handle = rel[len("tiers/") : -len(".json")]
+        if rel == f"tiers/{handle}.json" and handle in people and handle not in anchors:
+            ends = tier_ends(handle)
+            if ends:
+                ended[handle] = ends
+
     claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
     automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
@@ -1697,7 +1768,7 @@ def check_registry(root: Path) -> CheckResult:
                     f"people/{handle}.json: {email} is not endorsed, so not exported"
                 )
 
-    return CheckResult(people, tiers, revoked, emails, problems, voids, warnings)
+    return CheckResult(people, tiers, revoked, emails, problems, voids, warnings, ended)
 
 
 def _report(result: CheckResult) -> None:
@@ -1732,34 +1803,46 @@ def allowed_signers(
     emails as principals, ``namespaces="git,file"`` (``"file"`` for
     automation, which appears only with ``include_automation``),
     ``valid-after`` from ``added`` and
-    ``valid-before`` from ``retired``. Revoked keys are left out; they also
-    go in the revocation file.
+    ``valid-before`` from ``retired`` or from when the person's tier at or
+    above ``min_tier`` ended (see ``check_registry``), whichever is
+    earlier. Revoked keys are left out; they also go in the revocation file.
 
     Args:
         result: A check result with no problems.
         min_tier: ``anchor``, ``maintainer`` or ``contributor``.
         include_automation: Also list automation keys, for file signatures only.
     """
+    kinds = [({t for t in TIERS[:3] if RANK[t] <= RANK[min_tier]}, "git,file")]
+    if include_automation:
+        kinds.append(({"automation"}, "file"))
     lines = []
-    for handle in sorted(result.tiers):
-        tier = result.tiers[handle]
-        if tier == "automation":
-            if not include_automation:
-                continue
-            namespaces = "file"
-        elif RANK[tier] > RANK[min_tier]:
-            continue
-        else:
-            namespaces = "git,file"
-        person = result.people[handle]
-        principals = ",".join((handle, *result.emails[handle]))
-        for key in person.keys:
-            if key.did in result.revoked:
-                continue
-            options = f'namespaces="{namespaces}",valid-after="{_ssh_time(key.added)}"'
-            if key.retired is not None:
-                options += f',valid-before="{_ssh_time(key.retired)}"'
-            lines.append(f"{principals} {options} {key.ssh}\n")
+    for handle in sorted(result.people):
+        # A key whose human tier ended can also be current automation: two
+        # lines, each with its own namespaces and valid-before.
+        for allowed, namespaces in kinds:
+            until: Optional[datetime] = None
+            if result.tiers.get(handle) not in allowed:
+                ends = [
+                    d for t, d in result.ended.get(handle, {}).items() if t in allowed
+                ]
+                if not ends:
+                    continue
+                until = max(ends)
+            principals = ",".join((handle, *result.emails[handle]))
+            for key in result.people[handle].keys:
+                if key.did in result.revoked or (
+                    until is not None and until <= key.added
+                ):
+                    continue
+                options = (
+                    f'namespaces="{namespaces}",valid-after="{_ssh_time(key.added)}"'
+                )
+                before = [d for d in (key.retired, until) if d is not None]
+                if before:
+                    options += f',valid-before="{_ssh_time(min(before))}"'
+                lines.append(f"{principals} {options} {key.ssh}\n")
+            if until is None:
+                break  # a current human tier covers "file" too
     return "".join(lines)
 
 
