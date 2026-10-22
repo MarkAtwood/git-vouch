@@ -1,6 +1,6 @@
 {
   "id": "LFDID-ey47",
-  "title": "lf-did revised design",
+  "title": "git-vouch design (was lf-did)",
   "description": "Revised single-document design for lf-did: Python stdlib-only CLI, git-native SSH signing, registry repo of signed files. Replaces the March 2026 docs' custom signature format and git patch series. Draft written: DESIGN.md (2026-10-21). Moved from home-level beads mark-8wpz.",
   "status": "open",
   "priority": 2,
@@ -8,5 +8,5 @@
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T14:53:17.944414443Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T14:53:17.944414443Z"
+  "updated_at": "2026-10-22T15:23:50.44427985Z"
 }
