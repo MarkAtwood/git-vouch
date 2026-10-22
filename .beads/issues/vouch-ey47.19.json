@@ -1,0 +1,23 @@
+{
+  "id": "vouch-ey47.19",
+  "title": "check/export: round-3 consistency fixes",
+  "description": "Settled by Claude on implementer recommendation, for Mark's review (round 3, 2026-10-22): (1) an automation grant concurrent with a commit removing its accountable's authority is VOID with a warning, not an error (consistency with decision C and DESIGN 'like any approval'); (2) removal from anchors.json gives the ex-anchor's keys valid-before = committer date of the removing commit (consistency with D5); (3) a demotion/replacement tier record that does not verify does not end the earlier tier; (4) a replacement across the automation line ends the old tier at the new signed record's date; (5) a bot switching its accountable needs a new tier record; (6) a record signed by a since-revoked key is reported void before any date check (no spurious 'dated outside validity' error); (7) retire-key/export: a signature in the same second as retirement must not verify (valid-before is inclusive in ssh-keygen: export retired-1s or retire at now+1s, pick one and test); (8) merges: a person-file version may be signed by a key current in ANY parent (keep), and a merge restoring a version signed by a concurrently retired/revoked key gets the D1 warning; (9) an older already-merged person-file version that no longer parses strictly does not reset continuity (continuity depends on keys only).",
+  "acceptance_criteria": "Each item has a test with real ssh-keygen signatures and real git history; DESIGN.md updated where it states the rule.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T23:21:58.56575319Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T23:21:58.56575319Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.19",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T23:21:58.576260196Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
