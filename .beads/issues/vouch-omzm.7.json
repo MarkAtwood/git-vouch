@@ -1,0 +1,23 @@
+{
+  "id": "vouch-omzm.7",
+  "title": "port: include expired-but-unrevoked keys (D9)",
+  "description": "Critic 2026-10-22: git-vouch-migrate port skips keys expired before C (NOT_LIVE, line ~58), but D9 accepts expired-but-unrevoked keys as continuity proof, so those holders get no draft with migratedFrom. port must emit drafts for expired-but-unrevoked person keys (still skip revoked and non-person keys).",
+  "acceptance_criteria": "Synthetic keyring test: expired-unrevoked key gets a draft with migratedFrom; revoked key does not; counts against ~/GIT/pgpkeys@af88128 include the 17 expired keys.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:34:31.64313708Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:34:31.64313708Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.7",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:34:31.655237262Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

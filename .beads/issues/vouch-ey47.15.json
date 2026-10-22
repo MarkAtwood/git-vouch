@@ -3,7 +3,7 @@
   "title": "git-vouch-attest: verify FIDO attestations (separate tool)",
   "description": "Separate executable per METARULE 2. Stdlib Python; all crypto via the openssl CLI. Input: a person file key's attestation {blob, challenge} (or files) plus a user-supplied vendor root (--ca FILE); no bundled roots. Steps: parse ssh-sk-attest-v01 blob, verify the attestation signature over authData||SHA-256(challenge) with the cert key (openssl), confirm the credential public key in authData matches the SSH key, verify the cert chain to --ca (openssl verify). Packed format first; fido-u2f optional.",
   "acceptance_criteria": "Cross-validated against OpenSSH regress/misc/ssh-verify-attestation (built from ~/GIT/openssh-portable) on the same inputs; fixture = a real hardware attestation supplied by Mark (until then, tests using a self-generated chain prove parsing/sig/key-match; chain-to-vendor test pending fixture). Tampered blob/challenge/key all rejected.",
-  "notes": "Implemented git-vouch-attest + tests/attest. Reference ssh-verify-attestation built offline: git archive of ~/GIT/openssh-portable 26b1363 into scratch, autoreconf \u0026\u0026 ./configure, make libssh.a openbsd-compat; make ssh-verify-attestation with a local fido.h declaring the 14 fido_cred_* prototypes, LIBFIDO2=/usr/lib/x86_64-linux-gnu/libfido2.so.1. Set SSH_VERIFY_ATTESTATION= to run the cross-check tests.\nReview round 1 fixed (uncommitted): chain check now 'openssl verify -no-CApath -no-CAstore -CAfile' (system store/SSL_CERT_DIR no longer trusted; test added); openssl's verify reason passed through; AAGUID read from cert DER by a small TLV walker (asn1parse text parsing removed: UTF-8 crash + line forgery); openssl output decoded errors=replace; new fixtures/cases with reference verdicts: wrong-application, no-AT, key-type-mismatch, aaguid-mismatch, aaguid-malformed; every reject case asserts its stderr reason. 41 pass on 3.12 and 3.9 with reference binary; ruff clean; mutation run kills rpid/at/typematch/aaguid/self/no-store/reason.\nRemaining: (1) real hardware fixture + vendor root from Mark (acceptance criterion). (2) OPEN QUESTION for Mark: at which time should the chain be validated - now (current), the key's 'added' date (-attime), or no time check (-no_check_time)? A stored attestation fails once the vendor cert expires.",
+  "notes": "2026-10-22: code complete, 41 tests pass. 14 cross-validation tests skip unless SSH_VERIFY_ATTESTATION points at OpenSSH's regress/misc/ssh-verify-attestation; building it needs libfido2-dev (sudo apt install libfido2-dev), not installed. Remaining: build the oracle, run the 14, and add Mark's real YubiKey attestation + vendor root fixture.",
   "status": "open",
   "priority": 3,
   "issue_type": "task",
@@ -11,7 +11,7 @@
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T17:27:49.632327049Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T17:45:53.868044307Z",
+  "updated_at": "2026-10-22T18:34:10.060823205Z",
   "started_at": "2026-10-22T17:28:51.848079417Z",
   "dependencies": [
     {
