@@ -2,14 +2,14 @@
   "id": "vouch-mzkw.6",
   "title": "git-vouch: add 'git vouch keys \u003cemail\u003e'",
   "description": "Core command for the patatt fork (METARULE 2: tools talk via CLI, not imports). Given an email, if it is an endorsed email of a registered person (any tier, bots included per P2/P3), print that person's current keys, one per line: '\u003cselector\u003e \u003cssh public key\u003e' with the derived selector (P4: 'k-' + short fingerprint). Exit 1 if the email is not endorsed or unknown. Uses the configured registry copy and check's result; revoked and retired keys never printed.",
-  "acceptance_criteria": "Tests with fixture registries: endorsed email prints current keys with stable selectors; retired/revoked keys absent; unendorsed or unknown email exits 1; selector derivation matches a hand-computed value from ssh-keygen -l output (independent oracle).",
+  "acceptance_criteria": "Tests with fixture registries: endorsed email prints current keys with stable selectors; retired/revoked keys absent; unendorsed or unknown email exits 1; selector derivation matches a hand-computed value from ssh-keygen -l output (independent oracle). Also (DESIGN.md P4, moved from vouch-ey47.8): 'git vouch status' prints the selector to set as patatt.selector for the user's signing key, using the same derivation; tested against the same hand-computed value.",
   "status": "open",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T18:57:00.662303854Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T18:57:00.662303854Z",
+  "updated_at": "2026-10-22T20:43:12.042410808Z",
   "dependencies": [
     {
       "issue_id": "vouch-mzkw.6",

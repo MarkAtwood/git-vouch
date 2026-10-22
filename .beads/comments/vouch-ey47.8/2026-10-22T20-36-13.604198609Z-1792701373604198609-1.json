@@ -1,0 +1,7 @@
+{
+  "id": "1792701373604198609-1",
+  "issue_id": "vouch-ey47.8",
+  "author": "agent",
+  "text": "Implemented (A2-core). Decisions: local copy at $XDG_DATA_HOME/git-vouch/registry (else ~/.local/share), exports beside it (allowed_signers, revoked_keys); config written with git config --global (vouch.registry, vouch.minTier, vouch.includeAutomation, gpg.*); sync = git init + 'git fetch --no-tags -- URL HEAD:refs/vouch/registry' (no '+') + checkout --force --detach; fetch age from a stamp \u003ccopy\u003e/.git/vouch-fetched touched only after a successful fetch, because git rewrites FETCH_HEAD even on a refused/failed fetch (verified on git 2.55); stale warning in status, and in check/export when DIR is the synced copy; setup without --registry keeps an already-configured URL; --[no-]include-automation via BooleanOptionalAction. QUESTION: default registry URL is a placeholder (DEFAULT_REGISTRY = https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git) until kernel.org admins choose the path. Not done here: patatt selector line in status (needs the keys selector rule, vouch-mzkw.6).",
+  "created_at": "2026-10-22T20:36:13.604198609Z"
+}

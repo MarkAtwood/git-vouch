@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional, Union
 
@@ -33,6 +33,10 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 # DID Core syntax: did:<method>:<method-specific-id>
 DID_RE = re.compile(r"did:[a-z0-9]+:(?:[A-Za-z0-9._%-]*:)*[A-Za-z0-9._%-]+")
 SEQ_RE = re.compile(r"(.+)-([1-9][0-9]*)")  # "<handle>-<n>" file stems
+# ponytail: placeholder; the kernel.org administrators choose the real path.
+DEFAULT_REGISTRY = "https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git"
+FETCHED_REF = "refs/vouch/registry"
+STALE_AFTER = timedelta(days=7)
 
 B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ED25519_CODEC = b"\xed\x01"  # multicodec ed25519-pub (0xed) as a varint
@@ -1783,6 +1787,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     The exit status is 1 if there is any error; warnings alone exit 0.
     """
+    _fetched(Path(args.registry))
     result = check_registry(Path(args.registry))
     for handle in sorted(result.people):
         print(handle, result.tiers.get(handle, "none"))
@@ -1886,6 +1891,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     revocations = _output_path(
         args.revocation_file, "--revocation-file", "gpg.ssh.revocationFile"
     )
+    _fetched(Path(args.registry))
     result = check_registry(Path(args.registry))
     _report(result)
     if result.problems:
@@ -1897,6 +1903,214 @@ def cmd_export(args: argparse.Namespace) -> int:
         _write_atomic(signers, signer_lines)
     except OSError as e:
         raise VouchError(f"cannot write the exported files: {e}") from e
+    return 0
+
+
+def _data_dir() -> Path:
+    """Return git-vouch's own directory: $XDG_DATA_HOME/git-vouch, or ~/.local/share/git-vouch."""
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    base = Path(xdg) if os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    return base / "git-vouch"
+
+
+def registry_copy() -> Path:
+    """Return the local registry copy that ``sync`` keeps current."""
+    return _data_dir() / "registry"
+
+
+def _config(name: str, kind: str = "") -> Optional[str]:
+    """Return git config ``name`` from any scope, or None if it is unset.
+
+    Args:
+        name: The config key.
+        kind: A ``git config --type`` such as ``bool`` or ``path``, or "".
+
+    Raises:
+        VouchError: git fails for any reason other than the key being unset.
+    """
+    cmd = ["git", "config", "--get", *([f"--type={kind}"] if kind else []), name]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, check=False)
+    except OSError as e:
+        raise VouchError(f"cannot run git: {e}") from e
+    if proc.returncode == 1:
+        return None
+    if proc.returncode != 0:
+        err = proc.stderr.decode(errors="replace").strip()
+        raise VouchError(f"git config --get {name} failed: {err}")
+    return proc.stdout.decode().strip()
+
+
+def _set_config(name: str, value: str) -> None:
+    run(["git", "config", "--global", name, value])
+
+
+def _fetched(root: Path) -> Optional[datetime]:
+    """Return when ``sync`` last fetched into ``root``, warning if over 7 days ago.
+
+    Only the copy ``sync`` keeps has a fetch time; for any other directory
+    this returns None and warns about nothing.
+    """
+    # git rewrites FETCH_HEAD even when a fetch fails, so sync keeps its own stamp.
+    try:
+        mtime = (root / ".git" / "vouch-fetched").stat().st_mtime
+    except FileNotFoundError:
+        return None
+    when = datetime.fromtimestamp(mtime, timezone.utc)
+    age = datetime.now(timezone.utc) - when
+    if age > STALE_AFTER:
+        print(
+            f"git-vouch: warning: the registry copy was last fetched {age.days} days"
+            " ago; run git vouch sync",
+            file=sys.stderr,
+        )
+    return when
+
+
+def _fetch(url: str, copy: Path) -> None:
+    """Fetch the registry at ``url`` into ``copy`` and check out what was fetched.
+
+    The refspec has no '+', so git refuses any fetch that is not a
+    fast-forward of the last one from the same URL: a rewritten history
+    is never accepted. A different URL is a different registry, so its
+    first fetch starts a fresh history.
+
+    Raises:
+        VouchError: The fetch fails or is refused, or the checkout fails.
+    """
+    git_dir = copy / ".git"
+    if not git_dir.is_dir():
+        copy.mkdir(parents=True, exist_ok=True)
+        run([*GIT, "init", "-q"], cwd=copy)
+    # Overrides the registry's own .gitattributes, so the working tree holds
+    # the committed bytes: no eol, ident or filter rewriting.
+    (git_dir / "info").mkdir(exist_ok=True)
+    (git_dir / "info" / "attributes").write_text(
+        "* -text -ident -filter -diff -merge -working-tree-encoding\n"
+    )
+    url_file = git_dir / "vouch-url"
+    if url_file.is_file() and url_file.read_text() != url:
+        print(
+            "git-vouch: the registry URL changed; starting a fresh history",
+            file=sys.stderr,
+        )
+        run([*GIT, "update-ref", "-d", FETCHED_REF], cwd=copy)
+    try:
+        run(
+            [*GIT, "fetch", "--no-tags"],
+            values=[url, f"HEAD:{FETCHED_REF}"],
+            cwd=copy,
+        )
+    except VouchError as e:
+        raise VouchError(
+            f"cannot fetch the registry; a rewritten history is refused: {e}"
+        ) from e
+    url_file.write_text(url)
+    run([*GIT, "checkout", "-q", "--force", "--detach", FETCHED_REF], cwd=copy)
+    (git_dir / "vouch-fetched").touch()
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Fetch the registry without a rewind, check it, and re-export with the saved choices.
+
+    Any ``--min-tier`` or ``--include-automation`` given is saved to git
+    config first. The revocation file is written even if the check fails,
+    so a revocation always spreads; the allowed-signers file only if it
+    passes.
+    """
+    url = _config("vouch.registry")
+    if url is None:
+        raise VouchError("no registry configured: run git vouch setup")
+    if args.min_tier is not None:
+        _set_config("vouch.minTier", args.min_tier)
+    if args.include_automation is not None:
+        _set_config("vouch.includeAutomation", str(args.include_automation).lower())
+    min_tier = _config("vouch.minTier") or "contributor"
+    if min_tier not in TIERS[:3]:
+        raise VouchError(f"git config vouch.minTier: {min_tier!r} is not a tier")
+    include_automation = _config("vouch.includeAutomation", "bool") == "true"
+    paths = []
+    for name in ("gpg.ssh.revocationFile", "gpg.ssh.allowedSignersFile"):
+        value = _config(name, "path")
+        if not value:
+            raise VouchError(f"{name} is not set: run git vouch setup")
+        paths.append(Path(value))
+    revocations, signers = paths
+    copy = registry_copy()
+    _fetch(url, copy)
+    result = check_registry(copy)
+    _report(result)
+    try:
+        _write_atomic(revocations, revocation_list(result))
+        if not result.problems:
+            _write_atomic(
+                signers, allowed_signers(result, min_tier, include_automation)
+            )
+    except OSError as e:
+        raise VouchError(f"cannot write the exported files: {e}") from e
+    if result.problems:
+        raise VouchError(
+            "the registry check failed; only the revocation file was written"
+        )
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Record the registry and git's SSH signing config globally, then sync.
+
+    Without ``--registry``, a registry already configured is kept, and the
+    kernel's is the default.
+    """
+    url = args.registry or _config("vouch.registry") or DEFAULT_REGISTRY
+    data = _data_dir()
+    try:
+        data.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise VouchError(f"cannot create {data}: {e}") from e
+    _set_config("vouch.registry", url)
+    _set_config("gpg.format", "ssh")
+    _set_config("gpg.ssh.allowedSignersFile", str(data / "allowed_signers"))
+    _set_config("gpg.ssh.revocationFile", str(data / "revoked_keys"))
+    return cmd_sync(args)
+
+
+def _own_tier(result: CheckResult) -> str:
+    """Return who the user's signing key belongs to in ``result``, and their tier."""
+    try:
+        key = _signing_key(None)
+    except VouchError as e:
+        return f"unknown: {e}"
+    owners = [
+        h
+        for h, p in sorted(result.people.items())
+        if any(k.did == key.did and k.retired is None for k in p.keys)
+    ]
+    if not owners:
+        return f"{key.did} is not a current key in any valid person file"
+    revoked = " (this key is revoked)" if key.did in result.revoked else ""
+    return ", ".join(f"{h} {result.tiers.get(h, 'none')}" for h in owners) + revoked
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print the registry URL, its commit, when it was fetched, and the user's own tier."""
+    url = _config("vouch.registry")
+    copy = registry_copy()
+    if url is None or not (copy / ".git").is_dir():
+        raise VouchError("no registry copy: run git vouch setup")
+    commit = run([*GIT_LOG, "log", "-1", "--format=%H %cI", "HEAD"], cwd=copy)
+    fetched = _fetched(copy)
+    result = check_registry(copy)
+    print(f"registry: {url}")
+    print(f"commit: {commit.decode().strip()}")
+    if fetched is None:
+        print("fetched: unknown")
+    else:
+        age = datetime.now(timezone.utc) - fetched
+        print(f"fetched: {fetched.strftime(DATE_FORMAT)} ({age.days} days ago)")
+    errors = len(result.problems)
+    summary = f"{errors} errors (run git vouch check {copy})" if errors else "ok"
+    print(f"check: {summary}")
+    print(f"you: {_own_tier(result)}")
     return 0
 
 
@@ -2341,10 +2555,33 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=_not_implemented)
         return p
 
+    def export_choices(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--min-tier",
+            choices=TIERS[:3],
+            help="lowest tier exported, saved for later syncs (default: contributor)",
+        )
+        p.add_argument(
+            "--include-automation",
+            action=argparse.BooleanOptionalAction,
+            help='also export automation keys, with namespaces="file"; saved',
+        )
+
     p = add("setup", "record the registry URL, configure git for SSH signing, and sync")
-    p.add_argument("--registry", metavar="URL", help="registry repository URL")
-    add("sync", "fetch the registry without allowing a rewind, check it, and re-export")
-    add("status", "show the registry commit, its fetch age, and your own tier")
+    p.add_argument(
+        "--registry",
+        metavar="URL",
+        help="registry repository URL (default: the one configured, else the kernel's)",
+    )
+    export_choices(p)
+    p.set_defaults(func=cmd_setup)
+    p = add(
+        "sync", "fetch the registry without allowing a rewind, check it, and re-export"
+    )
+    export_choices(p)
+    p.set_defaults(func=cmd_sync)
+    p = add("status", "show the registry commit, its fetch age, and your own tier")
+    p.set_defaults(func=cmd_status)
 
     def signing(name: str, help_text: str) -> argparse.ArgumentParser:
         p = add(name, help_text + " in the registry checkout in the current directory")
