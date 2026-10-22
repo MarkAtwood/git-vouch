@@ -1,0 +1,30 @@
+{
+  "id": "vouch-ey47.16",
+  "title": "QUESTION: automation identity when its accountable maintainer steps down",
+  "description": "From vouch-ey47.13 review. Implemented (Claude, for Mark's review): the accountable's claim must be maintainer/anchor at the commit that added the bot's tier record (else error); if the accountable later has no valid maintainer/anchor tier, the bot's tier record is VOID (warning, check exits 0, bot has no tier until re-assigned). Alternative: pure D6 analogue, bot keeps its tier after the accountable steps down. Owner's call: is accountability ongoing (current) or judged at approval like the approver?",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "decision",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:11:57.700158305Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:11:57.700158305Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.16",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:11:57.711791637Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.16",
+      "depends_on_id": "vouch-ey47.13",
+      "type": "discovered-from",
+      "created_at": "2026-10-22T18:11:57.718078717Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "vouch-ey47.17",
+  "title": "QUESTION: concurrent branches - grants and revocations racing a demotion/revocation",
+  "description": "From vouch-ey47.13 review. Order is now ancestry (git-vouch History.before), since topo order of merged branches is author-controlled. Implemented (Claude, for Mark's review): (a) a tier record added on a branch concurrent with a commit that lowered its approver's authority is an error (conservative; a real grant made on a long-lived branch while the approver was demoted on main must be re-approved). (b) A revocation signed by a key that is revoked in a concurrent (not ancestor) commit still counts, extending 'revocations in one commit all count'; the other choice can leave a stolen key unrevoked when owner and thief revoke each other on concurrent branches. Risk of (b): a compromised anchor key can still revoke keys from a branch forked before its own revocation, and committed revocations cannot be undone. Owner's call on both.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "decision",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:11:57.766928291Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:11:57.766928291Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.17",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:11:57.777861224Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.17",
+      "depends_on_id": "vouch-ey47.13",
+      "type": "discovered-from",
+      "created_at": "2026-10-22T18:11:57.783635754Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
