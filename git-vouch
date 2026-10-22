@@ -478,6 +478,7 @@ class Endorsement(NamedTuple):
     subject_name: str
     note: Optional[str]
     date: datetime
+    subject_emails: tuple[str, ...] = ()
 
 
 class Revocation(NamedTuple):
@@ -608,14 +609,17 @@ def _person_key(obj: object, where: str) -> PersonKey:
         raise VouchError(f"{where}.{e}") from e
 
 
+def _emails(key: str, values: list[object]) -> tuple[str, ...]:
+    for email in values:
+        if not isinstance(email, str) or not EMAIL_RE.fullmatch(email):
+            raise VouchError(f"{key}: invalid address {email!r:.60}")
+    return tuple(str(e) for e in values)
+
+
 def _person(obj: Mapping[str, object], stem: str) -> Person:
     handle = _matching_handle(obj, "handle", stem)
     name = _text(obj, "name")
-    emails = []
-    for email in _list(obj, "emails"):
-        if not isinstance(email, str) or not EMAIL_RE.fullmatch(email):
-            raise VouchError(f"emails: invalid address {email!r:.60}")
-        emails.append(email)
+    emails = _emails("emails", _list(obj, "emails"))
     keys = tuple(_person_key(k, f"keys[{i}]") for i, k in enumerate(_list(obj, "keys")))
     if len({k.did for k in keys}) != len(keys):
         raise VouchError("keys: the same key is listed twice")
@@ -628,7 +632,7 @@ def _person(obj: Mapping[str, object], stem: str) -> Person:
         and all(isinstance(d, str) and DID_RE.fullmatch(d) for d in aka)
     ):
         raise VouchError("alsoKnownAs: must be a list of DIDs")
-    return Person(handle, name, tuple(emails), keys, accountable)
+    return Person(handle, name, emails, keys, accountable)
 
 
 def _tier(obj: Mapping[str, object], stem: str) -> Tier:
@@ -653,6 +657,9 @@ def _endorsement(obj: Mapping[str, object], subject: str, endorser: str) -> Endo
     note = obj.get("note")
     if note is not None and not isinstance(note, str):
         raise VouchError("note: must be a string")
+    emails = obj.get("subjectEmails", [])
+    if not isinstance(emails, list):
+        raise VouchError("subjectEmails: must be a list")
     return Endorsement(
         _matching_handle(obj, "endorser", endorser),
         _did_key(obj, "endorserKey"),
@@ -661,6 +668,7 @@ def _endorsement(obj: Mapping[str, object], subject: str, endorser: str) -> Endo
         _text(obj, "subjectName"),
         note,
         _date(obj, "date"),
+        _emails("subjectEmails", emails),
     )
 
 
@@ -915,6 +923,7 @@ class CheckResult(NamedTuple):
     people: dict[str, Person]  # person files whose signatures are valid
     tiers: dict[str, str]  # handle -> tier, for people with a valid tier
     revoked: dict[str, str]  # did:key -> "type base64" as listed in the person file
+    emails: dict[str, tuple[str, ...]]  # handle -> endorsed emails, as listed
     problems: list[str]  # each makes check fail
     voids: list[str]  # records without effect; reported, not failures
     warnings: list[str]  # anything else reported without failing
@@ -1160,7 +1169,10 @@ def check_registry(root: Path) -> CheckResult:
     someone without the authority to make it. A void record is valid in
     itself but has no effect: it was signed by a key since revoked, it
     depends on a record that is void or has a problem, or it is a tier
-    record committed before its subject's person file. Void records and
+    record committed before its subject's person file. An email may be
+    listed in only one person file, ignoring case; it is endorsed if a
+    valid endorsement lists it in ``subjectEmails``, and an unendorsed
+    email is a warning. Void records and
     warnings do not fail the check, so a revocation never blocks the export
     that spreads it.
 
@@ -1194,6 +1206,16 @@ def check_registry(root: Path) -> CheckResult:
             tier_records.append((rel, record, data, sig))
         elif isinstance(record, Endorsement):
             endorsements.append((rel, record, data, sig))
+
+    # An email becomes a principal, so two files listing it could sign as each other.
+    email_owner: dict[str, str] = {}
+    for handle, (person, _, _) in sorted(parsed.items()):
+        for email in person.emails:
+            other = email_owner.setdefault(email.lower(), handle)
+            if other != handle:
+                problems.append(
+                    f"people/{handle}.json: {other} and {handle} both list the email {email}"
+                )
 
     people: dict[str, Person] = {}
     for handle, (person, data, sig) in parsed.items():
@@ -1464,6 +1486,7 @@ def check_registry(root: Path) -> CheckResult:
     claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
     automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
+    endorsed: dict[str, set[str]] = {}  # handle -> lowercased endorsed emails
     for rel, e, data, sig in endorsements:
         try:
             if e.subject not in parsed:
@@ -1480,19 +1503,32 @@ def check_registry(root: Path) -> CheckResult:
                 raise Void(f"{rel}: void: {e.subject_key} of {e.subject} is revoked")
             if e.subject_name != subject.name:
                 raise Void(f"{rel}: void: endorses the name {e.subject_name!r:.60}")
+            if e.endorser == e.subject:
+                raise Void(f"{rel}: void: {e.subject} cannot endorse themselves")
+            endorsed.setdefault(e.subject, set()).update(
+                m.lower() for m in e.subject_emails
+            )
         except VouchError as err:
             problems.append(str(err))
         except Void as err:
             voids.append(str(err))
 
+    emails: dict[str, tuple[str, ...]] = {}
     for handle, person in sorted(people.items()):
         for key in person.keys:
             if key.retired is None and key.did in revoked:
                 warnings.append(
                     f"people/{handle}.json: {key.did} is revoked but not retired"
                 )
+        ok = endorsed.get(handle, set())
+        emails[handle] = tuple(m for m in person.emails if m.lower() in ok)
+        for email in person.emails:
+            if email.lower() not in ok:
+                warnings.append(
+                    f"people/{handle}.json: {email} is not endorsed, so not exported"
+                )
 
-    return CheckResult(people, tiers, revoked, problems, voids, warnings)
+    return CheckResult(people, tiers, revoked, emails, problems, voids, warnings)
 
 
 def _report(result: CheckResult) -> None:
@@ -1523,9 +1559,10 @@ def allowed_signers(
 ) -> str:
     """Return git's allowed-signers file for everyone at or above ``min_tier``.
 
-    Each key gets one line: the person's emails as principals,
-    ``namespaces="git,file"`` (``"file"`` for automation, which appears only
-    with ``include_automation``), ``valid-after`` from ``added`` and
+    Each key gets one line: the handle and then the person's endorsed
+    emails as principals, ``namespaces="git,file"`` (``"file"`` for
+    automation, which appears only with ``include_automation``),
+    ``valid-after`` from ``added`` and
     ``valid-before`` from ``retired``. Revoked keys are left out; they also
     go in the revocation file.
 
@@ -1533,13 +1570,8 @@ def allowed_signers(
         result: A check result with no problems.
         min_tier: ``anchor``, ``maintainer`` or ``contributor``.
         include_automation: Also list automation keys, for file signatures only.
-
-    Raises:
-        VouchError: Two exported people list the same email, ignoring case;
-            either could then sign as the other.
     """
     lines = []
-    claimed: dict[str, str] = {}
     for handle in sorted(result.tiers):
         tier = result.tiers[handle]
         if tier == "automation":
@@ -1551,17 +1583,14 @@ def allowed_signers(
         else:
             namespaces = "git,file"
         person = result.people[handle]
-        for email in person.emails:
-            other = claimed.setdefault(email.casefold(), handle)
-            if other != handle:
-                raise VouchError(f"{other} and {handle} both list the email {email}")
+        principals = ",".join((handle, *result.emails[handle]))
         for key in person.keys:
             if key.did in result.revoked:
                 continue
             options = f'namespaces="{namespaces}",valid-after="{_ssh_time(key.added)}"'
             if key.retired is not None:
                 options += f',valid-before="{_ssh_time(key.retired)}"'
-            lines.append(f"{','.join(person.emails)} {options} {key.ssh}\n")
+            lines.append(f"{principals} {options} {key.ssh}\n")
     return "".join(lines)
 
 

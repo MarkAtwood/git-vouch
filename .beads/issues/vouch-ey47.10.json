@@ -3,14 +3,16 @@
   "title": "Emails: unique across person files, and vouched for by endorsements",
   "description": "Found by flag-day critic 2026-10-22, reproduced: a person file may list any email; emails become allowed_signers principals and git prints only the first, so a tag signed by Alice's key with torvalds@example.org listed first verifies as 'Good \"git\" signature for torvalds@example.org' rc 0. Endorsements bind only name+key, so nobody vouches for emails. Recommended fix (pending Mark): git vouch check fails when one email (lowercased) appears in more than one person file; migrated files may only use emails from their GPG UIDs.",
   "acceptance_criteria": "Duplicate email across two person files fails check; endorsement with subjectEmails validates; export emits only endorsed emails as principals; unendorsed email produces a check warning. Real ssh-keygen signatures in fixtures.",
-  "notes": "DECIDED (Mark, 2026-10-22): (1) check fails when one email (lowercased) appears in more than one person file. (2) Endorsements gain a subjectEmails list: the endorser vouches for those emails along with name and key. Proposed follow-on (Claude, pending Mark's DESIGN.md review): only emails covered by at least one valid endorsement become allowed_signers principals; unendorsed emails stay in the person file, are not exported, and check warns. Flag-day drafts fill subjectEmails from the certified GPG UIDs. Touches DESIGN.md (endorsement record, export), record validation, check, export, endorse command.",
+  "notes": "DECIDED (Mark, 2026-10-22): (1) check fails when one email (lowercased) appears in more than one person file. (2) Endorsements gain a subjectEmails list: the endorser vouches for those emails along with name and key. Proposed follow-on (Claude, pending Mark's DESIGN.md review): only emails covered by at least one valid endorsement become allowed_signers principals; unendorsed emails stay in the person file, are not exported, and check warns. Flag-day drafts fill subjectEmails from the certified GPG UIDs. Touches DESIGN.md (endorsement record, export), record validation, check, export, endorse command.\nIMPLEMENTED (lane A-core, 2026-10-22, not committed): endorsement subjectEmails (optional list, validated like emails); check fails on an email (lowercased) in two person files; endorsed emails = subjectEmails of valid, non-void endorsements; self-endorsement void; unendorsed email warns; export principals = handle then endorsed emails (handle needed so lines without endorsed emails still have a principal). QUESTION: should self-endorsement be a check error instead of void?\nREVIEW (2026-10-22): implementation done and meets acceptance; core suites 579 passed on 3.12 and 3.9, ruff clean. Left OPEN on an owner question: DESIGN.md does not state any self-endorsement rule (only 'any registered human may endorse'), but code voids self-endorsements (git-vouch check_registry, ~line 1506). Some rule is required: without it anyone can self-endorse an unlisted email and get it exported, reopening this bug. QUESTION for Mark (widened): should DESIGN.md state a self-endorsement rule, and if so, void (current behaviour) or check error? Guard kept until decided. Not committed.",
   "status": "open",
   "priority": 1,
   "issue_type": "bug",
+  "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T16:36:58.897167301Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T16:42:23.187852187Z",
+  "updated_at": "2026-10-22T18:26:26.015513032Z",
+  "started_at": "2026-10-22T18:13:48.814556461Z",
   "dependencies": [
     {
       "issue_id": "vouch-ey47.10",
