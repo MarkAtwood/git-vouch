@@ -1,0 +1,39 @@
+{
+  "id": "vouch-faq3.5",
+  "title": "Publish the registry DID document with a TRQP service entry",
+  "description": "'git-vouch-trqp did-document' emits the did:web DID document for the authority/registry with the HTTPS TRQP service entry in the exact format verify-trust discovers (per spike). Document where kernel.org would host it.",
+  "acceptance_criteria": "verify-trust's own discovery (built from ~/GIT clone) selects the HTTPS endpoint from the generated document.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T16:32:59.281439661Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T16:32:59.281439661Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-faq3.5",
+      "depends_on_id": "vouch-faq3",
+      "type": "parent-child",
+      "created_at": "2026-10-22T16:32:59.296765105Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.5",
+      "depends_on_id": "vouch-faq3.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T16:32:59.687413852Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.5",
+      "depends_on_id": "vouch-faq3.2",
+      "type": "blocks",
+      "created_at": "2026-10-22T16:32:59.949753207Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

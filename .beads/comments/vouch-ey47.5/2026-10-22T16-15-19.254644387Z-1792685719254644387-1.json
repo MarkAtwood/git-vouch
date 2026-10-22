@@ -1,0 +1,7 @@
+{
+  "id": "1792685719254644387-1",
+  "issue_id": "vouch-ey47.5",
+  "author": "agent",
+  "text": "Hand-off from ey47.4 review: do NOT carry endorsements/tiers across keys based on verify_person alone; it is snapshot-only and accepts a file whose old keys were all retired and a new key added signed only by the new key. Rotation rule (prior current key must sign key-set changes, via git history) is an open owner question. Also: verify_person ignores revocations; proposed policy is reject a person file listing a revoked key with retired=null.",
+  "created_at": "2026-10-22T16:15:19.254644387Z"
+}

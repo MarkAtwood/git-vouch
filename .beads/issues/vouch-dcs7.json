@@ -1,0 +1,13 @@
+{
+  "id": "vouch-dcs7",
+  "title": "User docs: guides for anchors, captains (maintainers) and regulars",
+  "description": "Mark 2026-10-22: a set of docs, per audience, covering what to do on flag day, what to do on an ongoing basis, how to rotate keys, how to sign your own records and endorse each other, and how people are appointed (tier approval) via vouching that someone is a real person. Audiences: Linus et al (anchors), captains (= subsystem maintainers, assumed), regulars (contributors). Shared vouching reference so guides link rather than repeat. Guides quote exact commands, so they depend on the implemented CLI (ey47.7, ey47.8) and git-vouch-migrate (flag-day epic vouch-omzm). Plain task-oriented prose, copy-pasteable commands, each guide readable on its own.",
+  "design": "Layout: docs/vouching.md (shared policy), docs/guide-anchors.md, docs/guide-captains.md, docs/guide-regulars.md. Each guide has the same five sections: Flag day, Day to day, Rotating your key, Endorsing and approving, If you lose a key. Commands are tested by running them in a throwaway registry before publishing (doc test).",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "epic",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T17:25:57.589099757Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T17:25:57.589099757Z"
+}

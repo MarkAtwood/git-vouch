@@ -3,13 +3,18 @@
   "title": "'git vouch export': allowed_signers and revocation file",
   "description": "From check's result write allowed_signers: email principals, namespaces=\"git,file\" (\"file\" for automation, only with --include-automation), valid-after from added, valid-before from retired or tier-removal date. --min-tier anchor|maintainer|contributor. Write gpg.ssh.revocationFile from revocations.",
   "acceptance_criteria": "End-to-end test: git verify-tag accepts a maintainer tag with --min-tier maintainer and rejects a contributor tag; automation key fails git namespace; revoked key fails; retired key verifies a signature made before retirement.",
-  "status": "open",
+  "notes": "DECIDED (Mark, 2026-10-22): tier-removal date comes from git. Deletion: valid-before = committer date of the deleting commit (only a record that verified at its parent commit). Demotion: higher tier ends at the new signed record's date. ALSO per DESIGN.md 2026-10-22: every exported line's principals = handle first, then endorsed emails only (D2); --include-automation flag on export; automation lines namespaces=\"file\".",
+  "status": "in_progress",
   "priority": 2,
   "issue_type": "task",
+  "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T15:38:09.714126222Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T15:38:09.714126222Z",
+  "updated_at": "2026-10-22T17:27:49.981455691Z",
+  "started_at": "2026-10-22T16:33:33.719708792Z",
+  "lease_expires_at": "2026-10-22T16:38:33.719708792Z",
+  "heartbeat_at": "2026-10-22T16:33:33.719708792Z",
   "dependencies": [
     {
       "issue_id": "vouch-ey47.6",
@@ -32,6 +37,30 @@
       "depends_on_id": "vouch-ey47.5",
       "type": "blocks",
       "created_at": "2026-10-22T15:38:10.255864481Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47.12",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:49.726060472Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47.13",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:49.801941354Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47.10",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:49.849093072Z",
       "created_by": "agent",
       "metadata": "{}"
     }

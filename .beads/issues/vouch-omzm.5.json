@@ -1,0 +1,63 @@
+{
+  "id": "vouch-omzm.5",
+  "title": "Flag-day rehearsal on a synthetic keyring",
+  "description": "End-to-end: a synthetic pgpkeys-like repo of throwaway GPG keys with certifications (incl. SHA-1 and an expired key), run port -\u003e register --from -\u003e verify-continuity -\u003e drafts -\u003e endorse -\u003e approve -\u003e check -\u003e export -\u003e sign a tag -\u003e git verify-tag. Proves the runbook.",
+  "acceptance_criteria": "Scripted rehearsal passes; every step's command is the one the docs will print.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T17:27:50.398977863Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T17:27:50.398977863Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-22T17:27:50.408796583Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-omzm.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:50.640111206Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-omzm.2",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:50.67728782Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-omzm.3",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:50.718800784Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-omzm.4",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:50.763296553Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-omzm.5",
+      "depends_on_id": "vouch-ey47.7",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:50.805625764Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "1792686783438966894-1",
+  "issue_id": "vouch-ey47.5",
+  "author": "agent",
+  "text": "Review fixes: key ownership now from verified person files only; a current key decides owner, a file listing another's current key is the problem and dropped (owner kept); key current in two files drops both; key only retired in two files = problem, no eviction (squatting is owner Q). Automation tier void if accountable has no resolved maintainer/anchor tier. Unprintable registry file names reported with repr and skipped. verify_person prefixes split_signatures error with rel. Added tests: validity lower bound, subjectName void, both automation rules, invalid subject file, accountable void, escaped names. Open owner Qs: revocation signed by a since-revoked key (spec literal vs fail-safe), retired-key squatting, check default dir.",
+  "created_at": "2026-10-22T16:33:03.438966894Z"
+}

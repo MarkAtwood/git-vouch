@@ -1,0 +1,23 @@
+{
+  "id": "vouch-faq3.1",
+  "title": "Spike: pin down verify-trust's exact interop surface",
+  "description": "Read verify-trust, trql-client and vgi-core in ~/GIT/OpenVTC_* and write docs/trqp-interop.md answering: (1) HTTPS request/response wire format — plain TRQP POST /authorization or a Trust Task envelope (trusttasks.org/spec/registry/authorization/0.1)? (2) DID-document service entry format that ServiceCapabilities::from_document accepts for an HTTPS TRQP binding. (3) How the signer DID is written in the committer header, and whether a git-vouch user can produce it with plain git config. (4) Whether did:key resolves in its resolver. (5) Key types accepted: ssh-ed25519 only, or also sk-ssh-ed25519 / P-256? (6) Action string(s) used for commit/tag signing (e.g. git.commit.sign) and resource grammar. Every answer cited file:line.",
+  "acceptance_criteria": "docs/trqp-interop.md exists with all six answers cited to source; any blocker to interop (e.g. Trust-Task-only HTTPS, no did:key resolution) stated plainly.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T16:32:58.993150211Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T16:32:58.993150211Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-faq3.1",
+      "depends_on_id": "vouch-faq3",
+      "type": "parent-child",
+      "created_at": "2026-10-22T16:32:59.005570574Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

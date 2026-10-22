@@ -1,0 +1,27 @@
+{
+  "id": "vouch-omzm.1",
+  "title": "git-vouch-migrate port: person-file drafts from pgpkeys@C",
+  "description": "Separate tool (METARULE 2), the only one that runs gpg. Imports keys/*.asc from a pgpkeys checkout pinned at commit C into a temp GNUPGHOME and writes unsigned person-file drafts: handle derivation rule with deterministic collision handling, names decoded defensively (one UID is Latin-1), emails from unrevoked UIDs, migratedFrom openpgp4fpr:\u003c40hex\u003e, one draft per person (13 people hold two keys: merge or pick, documented), skip non-person keys (26 remail/security list keys). Also pre-derives SSH keys for holders whose GPG auth subkey is ed25519/P-256 (gpg --export-ssh-key).",
+  "acceptance_criteria": "Run against ~/GIT/pgpkeys@af88128 produces ~606 drafts; counts reported match the research (645 live keys, 26 non-person, 93 reusable auth subkeys); every draft validates with git-vouch record validation (minus signature).",
+  "status": "in_progress",
+  "priority": 2,
+  "issue_type": "task",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T17:27:50.16289104Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T17:28:52.22814544Z",
+  "started_at": "2026-10-22T17:28:52.22814544Z",
+  "lease_expires_at": "2026-10-22T17:33:52.22814544Z",
+  "heartbeat_at": "2026-10-22T17:28:52.22814544Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.1",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-22T17:27:50.172886015Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

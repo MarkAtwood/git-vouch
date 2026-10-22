@@ -1,0 +1,7 @@
+{
+  "id": "1792685088764152431-1",
+  "issue_id": "vouch-ey47.3",
+  "author": "agent",
+  "text": "Implemented parse_record(rel, data) / parse_anchors(data) / require_accountable(person) in git-vouch; tests/test_records.py. Decisions: caller reads via read_capped and passes the same bytes on to sig verification (no re-read); dates strictly YYYY-MM-DDTHH:MM:SSZ UTC; @context must be a JSON list (a bare string is rejected); tier record tier in maintainer|contributor|automation (anchor only from anchors.json); emails restricted to ASCII [A-Za-z0-9._%+-]@[A-Za-z0-9.-] because they become allowed_signers principals; key lines normalized to 'type base64' (comment dropped); duplicate JSON keys, NaN/Infinity, non-UTF-8 and BOM rejected; name/subjectName/reason must be printable non-empty; note any string; alsoKnownAs optional list of DID-syntax strings; duplicate did:keys in one person rejected; \u003chandle\u003e-\u003cn\u003e stems validated per component (handle regex + n=[1-9][0-9]*), so 39-char handles can still endorse; anchors.json = non-empty JSON list of distinct handles; records are NamedTuples (dataclasses break under the conftest loader, which does not register the module in sys.modules). Open questions: anchors.json format, revocation reason enum.",
+  "created_at": "2026-10-22T16:04:48.764152431Z"
+}

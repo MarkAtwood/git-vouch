@@ -1,0 +1,47 @@
+{
+  "id": "vouch-faq3.7",
+  "title": "End-to-end interop test with real verify-trust",
+  "description": "Build verify-trust from ~/GIT/OpenVTC_verifiable-git-infrastructure. Locally: a git-vouch registry, git-vouch-trqp, a generated DID document, and a repo with commits signed by registry keys. OpenVTC's tool is the independent oracle.",
+  "acceptance_criteria": "verify-trust passes a commit by a registered contributor-or-above key; fails an unregistered key, a revoked key, and a retired key's post-retirement signature; fails closed when the service is down.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T16:32:59.420829911Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T16:32:59.420829911Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-faq3.7",
+      "depends_on_id": "vouch-faq3",
+      "type": "parent-child",
+      "created_at": "2026-10-22T16:32:59.435311012Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.7",
+      "depends_on_id": "vouch-faq3.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T16:32:59.77563331Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.7",
+      "depends_on_id": "vouch-faq3.4",
+      "type": "blocks",
+      "created_at": "2026-10-22T16:33:00.035877981Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.7",
+      "depends_on_id": "vouch-faq3.5",
+      "type": "blocks",
+      "created_at": "2026-10-22T16:33:00.079082005Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

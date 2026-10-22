@@ -1,0 +1,7 @@
+{
+  "id": "1792686353528312289-1",
+  "issue_id": "vouch-ey47.5",
+  "author": "agent",
+  "text": "Implemented check_registry(root)-\u003eCheckResult(people, tiers, revoked{did:ssh}, problems, voids) + 'git vouch check [DIR]' (default cwd). Problems fail (exit 1); void records (signed by a since-revoked key, or depending on a void/invalid record) are warnings and exit 0 so a revocation never blocks sync's export. Tiers resolved in rank order. Extra rules: a did:key in two person files invalidates both; tier record for an anchor is a problem; record date must fall in signer key's [added, retired); automation = tier record says automation OR accountable set; accountable must claim maintainer/anchor. Revocations count at face value (self key, subject's current key, any anchor's current key). For ey47.6: use result.people/tiers/revoked; revoked ssh line keeps the sk- type from the person file. Open Qs recorded in hand-off: removed/demoted approver, revoked-but-current keys, check default dir, rotation chain.",
+  "created_at": "2026-10-22T16:25:53.528312289Z"
+}

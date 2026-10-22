@@ -1,0 +1,7 @@
+{
+  "id": "1792684099977225184-1",
+  "issue_id": "vouch-ey47.1",
+  "author": "agent",
+  "text": "Review fixes: approve tier choices limited to maintainer/contributor/automation (anchors come only from anchors.json). export --min-tier default removed; default for plain export (and what setup/sync export) left to vouch-ey47.6 / owner. read_capped now takes (root, rel) and opens each component with openat+O_NOFOLLOW, final O_NONBLOCK + fstat S_ISREG: refuses symlinked parents, FIFOs, '..'. validate_handle rejects non-str.",
+  "created_at": "2026-10-22T15:48:19.977225184Z"
+}

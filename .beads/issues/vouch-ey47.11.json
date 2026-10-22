@@ -1,0 +1,32 @@
+{
+  "id": "vouch-ey47.11",
+  "title": "Warn loudly on person-file key changes not signed by an old key",
+  "description": "Confirmed 2026-10-22 against git-vouch:886-889: check validates only the current snapshot. Anyone whose merge lands (incl. the registry maintainer) can replace people/\u003chandle\u003e.json with new keys self-signed by those new keys; the handle-only tier record and endorsements carry over. Contradicts DESIGN.md claims that the merger cannot forge a change and that endorsements carry over because rotation was signed by the old key. Fix needs a decision from Mark: (a) check walks git history of people/ and requires each new version to be signed by a key current in the previous version (or anchor-signed recovery); (b) tier records bind subjectKey like endorsements do, with rotation following a signed chain; (c) both.",
+  "acceptance_criteria": "Fixture registry history with (1) a rotation signed by the old key: no warning; (2) a replacement signed only by new keys: prominent warning naming handle/commit/old+new did:keys, check still exits 0 if nothing else is wrong. Real ssh-keygen signatures.",
+  "notes": "DECIDED (Mark, 2026-10-22): registry review is the gate; accepted risk like anchors.json. check never fails on this, but walks git history of people/ and prints a prominent WARNING for every version whose .sig has no valid signature from a key current in the previous version (lost key or swap), naming handle, commit, old and new did:keys. Lost-key recovery = a reviewed merge; tier carries over. DESIGN.md claims ('merger cannot forge', 'endorsements carry over because rotation was signed by the old key') must be reworded to match.\nDECIDED D11 (Mark, 2026-10-22): a person file change needs a signature from ANY ONE key current in the previous version (not every current key), so backup tokens stay in the drawer. Replaces verify_person's 'one signature per current key' rule (git-vouch:708-742). First version of a person file: signed by at least one of its own keys.",
+  "status": "open",
+  "priority": 1,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T16:36:58.952428113Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T17:14:36.237819754Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.11",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T16:36:58.961453106Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.11",
+      "depends_on_id": "vouch-ey47.12",
+      "type": "blocks",
+      "created_at": "2026-10-22T17:27:49.682775314Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

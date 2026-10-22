@@ -1,0 +1,28 @@
+{
+  "id": "vouch-ey47.12",
+  "title": "Registry history reader (git log per registry path)",
+  "description": "Per METARULE 1 the registry's history is part of the registry. Add one internal helper that lists, for a registry path, every version with commit id, committer date, parent, and content (or deletion), via git log/show with argument lists. Used by D1 warnings (ey47.11), D5 removal dates (ey47.6), and history-based check rules. Must work on a real clone; refuse a shallow clone with a clear error.",
+  "acceptance_criteria": "Tests on a real temp git repo: versions listed in commit order with correct dates; deletions reported; shallow clone refused. Oracle: git history built by the test itself with fixed GIT_COMMITTER_DATE values.",
+  "notes": "Implemented file_history(root, rel) -\u003e list[Version(commit, date UTC committer, parent first-parent|None, data bytes|None=deleted)] in git-vouch; tests/test_history.py. Uses git log default simplification + --topo-order --reverse (side-branch versions listed individually, merge commit not listed). Open question for owner: for D5 removal dates, should a deletion made on a merged branch use the side commit's committer date (current) or the merge commit's?",
+  "status": "in_progress",
+  "priority": 1,
+  "issue_type": "task",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T17:27:49.448971423Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T17:31:59.220166651Z",
+  "started_at": "2026-10-22T17:28:49.086841711Z",
+  "lease_expires_at": "2026-10-22T17:33:49.086841711Z",
+  "heartbeat_at": "2026-10-22T17:28:49.086841711Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.12",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T17:27:49.460432321Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
