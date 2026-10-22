@@ -3,13 +3,14 @@
   "title": "Decide: authority DID, action/resource mapping, tier policy",
   "description": "Owner decision (bd human). Needs: the authority_id (e.g. did:web on kernel.org) and who hosts its DID document; which TRQP actions map to which minimum git-vouch tier (e.g. git.commit.sign -\u003e contributor, tag signing -\u003e maintainer); whether resource is ignored (registry-wide tiers, the git-vouch model) or scoped per repository (git-vouch has no per-repo scope today); staleness policy (refuse authorized=true when the registry copy is older than N days?).",
   "acceptance_criteria": "Decisions recorded in DESIGN.md (new 'TRQP bridge' section) and bead closed with the choices.",
+  "notes": "DECIDED (Mark, 2026-10-22):\nB1 Authority DID is operator-configured: did:web on a configured domain, or did:webvh. Implementation (Claude, for review): the bridge's did-document command emits the DID document content (TRQPRest service entry, https endpoint); for did:web the operator publishes it at /.well-known/did.json; for did:webvh the operator feeds it to an existing webvh tool to create/update the signed log (our tools stay crypto-free). The bridge echoes authority_id and answers authorized=false for any authority_id other than its configured DID.",
   "status": "open",
   "priority": 3,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T16:32:59.065676837Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T16:32:59.065676837Z",
+  "updated_at": "2026-10-22T19:42:15.789639385Z",
   "dependencies": [
     {
       "issue_id": "vouch-faq3.2",

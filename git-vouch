@@ -438,6 +438,13 @@ def did_to_ssh(did: str) -> str:
     return f"{parts[0].decode()} {base64.b64encode(blob).decode()}"
 
 
+class Attestation(NamedTuple):
+    """A FIDO key's ``attestation``: base64 of ssh-keygen's write-attestation output and challenge."""
+
+    blob: str
+    challenge: str
+
+
 class PersonKey(NamedTuple):
     """One entry of a person file's ``keys``; ``ssh`` is "type base64" with any comment dropped."""
 
@@ -445,7 +452,7 @@ class PersonKey(NamedTuple):
     did: str
     added: datetime
     retired: Optional[datetime]
-    attestation: Optional[str] = None
+    attestation: Optional[Attestation] = None
 
 
 class Person(NamedTuple):
@@ -579,6 +586,18 @@ def _list(obj: Mapping[str, object], key: str) -> list[object]:
     return value
 
 
+def _base64(obj: Mapping[str, object], key: str) -> str:
+    value = _required(obj, key)
+    try:
+        if not isinstance(value, str) or not value:
+            raise ValueError
+        if base64.b64encode(base64.b64decode(value, validate=True)).decode() != value:
+            raise ValueError  # stray padding or non-canonical trailing bits
+    except ValueError as e:
+        raise VouchError(f"{key}: must be a non-empty base64 string") from e
+    return value
+
+
 def _person_key(obj: object, where: str) -> PersonKey:
     if not isinstance(obj, dict):
         raise VouchError(f"{where}: must be an object")
@@ -593,16 +612,16 @@ def _person_key(obj: object, where: str) -> PersonKey:
         retired = None if obj.get("retired") is None else _date(obj, "retired")
         attestation = obj.get("attestation")
         if attestation is not None:
-            try:
-                if not isinstance(attestation, str) or not attestation:
-                    raise ValueError
-                raw = base64.b64decode(attestation, validate=True)
-                if base64.b64encode(raw).decode() != attestation:  # stray padding
-                    raise ValueError
-            except ValueError as e:
+            if not isinstance(attestation, dict):
                 raise VouchError(
-                    "attestation: must be a non-empty base64 string"
-                ) from e
+                    "attestation: must be an object with blob and challenge"
+                )
+            try:
+                attestation = Attestation(
+                    _base64(attestation, "blob"), _base64(attestation, "challenge")
+                )
+            except VouchError as e:
+                raise VouchError(f"attestation.{e}") from e
         ssh = " ".join(ssh.split()[:2])
         return PersonKey(ssh, did, _date(obj, "added"), retired, attestation)
     except VouchError as e:

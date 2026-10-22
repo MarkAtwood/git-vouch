@@ -34,7 +34,10 @@ DID_P256 = next(iter(CCG_P256_JWKS))
 RSA_DID = CCG_UNSUPPORTED_DIDS[0]
 # Base64 of an ssh-keygen attestation header: uint32 length 17 + "ssh-sk-attest-v01"
 # (cross-checked with: printf "\x00\x00\x00\x11ssh-sk-attest-v01" | base64).
-ATTESTATION = "AAAAEXNzaC1zay1hdHRlc3QtdjAx"
+ATTESTATION_BLOB = "AAAAEXNzaC1zay1hdHRlc3QtdjAx"
+# printf 'git-vouch registration challenge' | base64
+ATTESTATION_CHALLENGE = "Z2l0LXZvdWNoIHJlZ2lzdHJhdGlvbiBjaGFsbGVuZ2U="
+ATTESTATION = {"blob": ATTESTATION_BLOB, "challenge": ATTESTATION_CHALLENGE}
 
 KEY = {"ssh": EVEN_Y_P256_SSH + " alice@laptop", "added": "2026-11-01T00:00:00Z"}
 PERSON = {
@@ -143,8 +146,12 @@ def test_person_attestation_carried(vouch: ModuleType) -> None:
         "keys": [{"ssh": SK_ED_SSH, "added": KEY["added"], "attestation": ATTESTATION}],
     }
     key = vouch.parse_record(PERSON_REL, encode(record)).keys[0]
-    assert key.attestation == ATTESTATION
+    assert key.attestation == (ATTESTATION_BLOB, ATTESTATION_CHALLENGE)
+    assert key.attestation.blob == ATTESTATION_BLOB
+    assert key.attestation.challenge == ATTESTATION_CHALLENGE
     assert vouch.parse_record(PERSON_REL, encode(PERSON)).keys[0].attestation is None
+    nulled = {**PERSON, "keys": [{**KEY, "attestation": None}]}
+    assert vouch.parse_record(PERSON_REL, encode(nulled)).keys[0].attestation is None
 
 
 def test_person_key_comment_cannot_inject_lines(vouch: ModuleType) -> None:
@@ -330,13 +337,78 @@ INVALID = [
     (PERSON_REL, {**PERSON, "keys": [drop(KEY, "added")]}, "keys[0].added: required"),
     (PERSON_REL, with_key(retired="soon"), "keys[0].retired: must be a UTC time"),
     (PERSON_REL, with_key(retired=False), "keys[0].retired: must be a UTC time"),
-    (PERSON_REL, with_key(attestation=12345), "keys[0].attestation: must be"),
-    (PERSON_REL, with_key(attestation=["x"]), "keys[0].attestation: must be"),
-    (PERSON_REL, with_key(attestation={"a": 1}), "keys[0].attestation: must be"),
-    (PERSON_REL, with_key(attestation=""), "keys[0].attestation: must be"),
-    (PERSON_REL, with_key(attestation="not base64 !!!"), "keys[0].attestation: must"),
-    (PERSON_REL, with_key(attestation="AAAAEXNz="), "keys[0].attestation: must be"),
-    (PERSON_REL, with_key(attestation="Zm9v\u00e9"), "keys[0].attestation: must be"),
+    (PERSON_REL, with_key(attestation=12345), "keys[0].attestation: must be an object"),
+    (PERSON_REL, with_key(attestation=["x"]), "keys[0].attestation: must be an object"),
+    (
+        PERSON_REL,
+        with_key(attestation=ATTESTATION_BLOB),
+        "keys[0].attestation: must be an object",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={"challenge": ATTESTATION_CHALLENGE}),
+        "keys[0].attestation.blob: required",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={"blob": ATTESTATION_BLOB}),
+        "keys[0].attestation.challenge: required",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": None}),
+        "keys[0].attestation.blob: required",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": 12345}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": ["x"]}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": ""}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": "not base64 !!!"}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": "AAAAEXNz="}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "blob": "Zm9v\u00e9"}),
+        "keys[0].attestation.blob: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "challenge": 7}),
+        "keys[0].attestation.challenge: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "challenge": ""}),
+        "keys[0].attestation.challenge: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "challenge": "Zm9vYg"}),
+        "keys[0].attestation.challenge: must be",
+    ),
+    (
+        PERSON_REL,
+        with_key(attestation={**ATTESTATION, "challenge": "Zm9vYh=="}),
+        "keys[0].attestation.challenge: must be",
+    ),
     (PERSON_REL, {**PERSON, "accountable": "Bob"}, "accountable: invalid handle"),
     (PERSON_REL, {**PERSON, "accountable": 3}, "accountable: invalid handle"),
     (PERSON_REL, {**PERSON, "alsoKnownAs": "did:web:x"}, "alsoKnownAs: must be"),
