@@ -1322,11 +1322,13 @@ def check_registry(root: Path) -> CheckResult:
             person_versions.append((handle, i, previous, gone))
 
     # A key belongs to one person, or export would credit their signatures to
-    # another: the one whose person file, in any version, listed it first.
-    # First means in an ancestor commit; files that listed it in one commit,
-    # or on branches merged together, are tied. Among tied files only a
-    # current key is proven by the file's signature, so it decides; listing
-    # someone else's current key drops the lister.
+    # another. Listing a key as current, in a validly signed version of a
+    # person file that the key itself signed, is proven by that signature; any
+    # other listing proves nothing, so a proven listing always wins. Among current listings, or among
+    # retired ones when there is no current listing, the first wins: first
+    # means in an ancestor commit, and files that listed it in one commit, or
+    # on branches merged together, are tied. Losing to a current listing
+    # drops the lister.
     # ponytail: a key only ever retired, and first listed by two tied files,
     # is reported but evicts nobody.
     first: dict[str, dict[str, int]] = {}  # did -> handle -> first listing
@@ -1336,49 +1338,78 @@ def check_registry(root: Path) -> CheckResult:
                 version = person_at(rel[7:-5], i)
                 for key in version.keys if version else ():
                     first.setdefault(key.did, {}).setdefault(rel[7:-5], i)
+    # did -> each version listing it current: (handle, position, previous keys)
+    listings: dict[str, list[tuple[str, int, Optional[list[PersonKey]]]]] = {}
+    for handle, i, previous, _ in sorted(person_versions, key=lambda v: v[1]):
+        version = person_at(handle, i)
+        for key in version.keys if version else ():
+            if key.retired is None:
+                listings.setdefault(key.did, []).append((handle, i, previous))
+    signed: dict[tuple[str, int, str], bool] = {}
 
-    def tied(did: str) -> list[str]:
+    def is_signed(
+        handle: str, i: int, previous: Optional[list[PersonKey]], did: str
+    ) -> bool:
+        """Return whether version ``i`` is valid and signed by the key ``did``."""
+        if (handle, i, did) not in signed:
+            version = person_at(handle, i)
+            body, signature = pair_at(f"people/{handle}.json", i)
+            signed[handle, i, did] = False
+            if version and body is not None and signature is not None:
+                key = next(k for k in version.keys if k.did == did)
+                try:
+                    verify_person(version, body, signature, previous)
+                except VouchError:
+                    pass  # an unsigned listing proves nothing
+                else:
+                    signed[handle, i, did] = any(
+                        _verifies(body, block, NAMESPACES["people"], key)
+                        for block in split_signatures(signature)
+                    )
+        return signed[handle, i, did]
+
+    def first_current(did: str) -> dict[str, int]:
+        """Return each file's first listing of ``did`` as current, if proven."""
+        found: dict[str, int] = {}
+        for handle, i, previous in listings.get(did, []):
+            if handle not in found and is_signed(handle, i, previous, did):
+                found[handle] = i
+        return found
+
+    def owners(did: str) -> list[str]:
         listed = first.get(did, {})
+        if len(listed) > 1:
+            listed = first_current(did) or listed
         return sorted(
             h
             for h, i in listed.items()
             if not any(history.before(j, i) for j in listed.values())
         )
 
-    current = {
-        h: {k.did for k in p.keys if k.retired is None} for h, p in people.items()
-    }
-
-    def proven(did: str) -> set[str]:
-        return {h for h in tied(did) if did in current.get(h, ())}
-
     def owns(handle: str, did: str) -> bool:
-        return handle in (proven(did) or tied(did))
+        return handle in owners(did)
 
     claimants: set[str] = set()
     for handle, person in people.items():
         for key in person.keys:
-            listed = first.get(key.did, {})
-            others = sorted(proven(key.did) - {handle})
-            if handle not in tied(key.did):
-                earlier = min(
-                    (i, h)
-                    for h, i in listed.items()
-                    if history.before(i, listed[handle])
-                )
+            others = [h for h in owners(key.did) if h != handle]
+            if not others:
+                continue
+            proven = first_current(key.did)
+            if not owns(handle, key.did) and (not proven or handle in proven):
                 claimants.add(handle)
                 problems.append(
-                    f"people/{handle}.json: {key.did} was listed first by {earlier[1]}"
+                    f"people/{handle}.json: {key.did} was listed first by {others[0]}"
                 )
-            elif others:
+            elif proven:
                 claimants.add(handle)
                 problems.append(
-                    f"people/{handle}.json: {key.did} is a current key of {others[0]}"
+                    f"people/{handle}.json: {key.did} is listed as a current key"
+                    f" of {others[0]}"
                 )
-            elif not proven(key.did) and len(tied(key.did)) > 1:
-                other = next(h for h in tied(key.did) if h != handle)
+            else:
                 problems.append(
-                    f"people/{handle}.json: {key.did} is also listed by {other}"
+                    f"people/{handle}.json: {key.did} is also listed by {others[0]}"
                 )
     for handle in claimants:
         del people[handle]

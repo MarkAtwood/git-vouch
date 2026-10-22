@@ -200,6 +200,64 @@ def test_key_belongs_to_the_file_that_listed_it_first(
     assert has(old.problems, "people/dave.json", "a current key of aaron")
 
 
+def test_current_listing_beats_an_earlier_retired_listing(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    # mallory lists bob's key as one of her retired keys before bob registers.
+    reg.person("mallory", key("mallory"), retired=(key("bob"),))
+    reg.commit()
+    reg.person("bob", key("bob"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [
+        f"people/mallory.json: {did(key('bob'))} is listed as a current key of bob"
+    ]
+    assert "bob" in result.people and "mallory" not in result.people
+    assert result.problems == snapshot(vouch, reg, tmp_path).problems
+    # bob rotates away from the key; his earlier current listing still wins.
+    person_signed_by(reg, "bob", key("bob2"), retired=(key("bob"),), by=(key("bob"),))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(
+        result.problems, "people/mallory.json", did(key("bob")), "a current key of bob"
+    )
+    assert "bob" in result.people and "mallory" not in result.people
+
+
+def test_current_listing_signed_by_another_key_proves_nothing(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # bob registers with his old key already retired.
+    reg.person("bob", key("bob2"), retired=(key("bob"),))
+    reg.commit()
+    # mallory lists bob's old key as current, but signs with her own key only.
+    person_signed_by(reg, "mallory", key("mallory"), key("bob"), by=(key("mallory"),))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [
+        f"people/mallory.json: {did(key('bob'))} was listed first by bob"
+    ]
+    assert "bob" in result.people and "mallory" not in result.people
+
+
+def test_unsigned_current_listing_proves_nothing(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.person("mallory", key("mallory"), retired=(key("bob"),))
+    reg.commit()
+    # A middle version of mallory's file lists bob's key as current, unsigned.
+    reg.person("mallory", key("mallory"), key("bob"))
+    (reg.root / "people/mallory.json.sig").write_bytes(b"garbage\n")
+    reg.commit()
+    reg.person("mallory", key("mallory"))
+    reg.commit()
+    reg.person("bob", key("bob"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert "bob" in result.people and "mallory" in result.people
+
+
 def test_deleted_revocation_still_holds(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
 ) -> None:
