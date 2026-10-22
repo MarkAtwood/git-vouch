@@ -538,6 +538,48 @@ small and in upstream style so it could be offered upstream. The rules
   cutoff. The fallback applies to everyone, registered or not. After the
   late cutoff people delete the legacy line; no code changes.
 
+## TRQP bridge
+
+`git-vouch-trqp` is an optional daemon that lets OpenVTC's
+`verify-trust` ask whether a signer may sign. It is a thin shim over
+`git vouch query`; kernel developers never depend on it, and `git-vouch`
+itself stays a CLI. Facts about `verify-trust` come from
+`docs/trqp-interop.md`.
+
+- **Wire format:** a Trust Task envelope (`registry/authorization/0.1`)
+  at `POST <base>/trust-tasks`, not plain TRQP `/authorization`. The
+  response echoes the tuple and sets `authorized` and `time_evaluated`;
+  errors use a `trust-task-error` body. It serves the path directly,
+  never by redirect.
+- **Authority DID:** configured by the operator: `did:web` on a domain
+  of their choosing, or `did:webvh`. `git-vouch-trqp did-document`
+  prints the document with one `TRQPRest` service entry whose endpoint
+  must be `https://`. For `did:webvh` the operator signs the log with an
+  existing webvh tool; our tools add no cryptography. Queries naming any
+  other `authority_id` get `authorized: false`.
+- **Who is authorized:** for `git.commit.sign`, a did:key that is a
+  current key of a registered person with at least one endorsed email,
+  any tier; automation identities never, since they do not sign commits.
+  Retired and revoked keys get `false`. Any other action gets `false`.
+  This is looser than the default `allowed_signers` export (contributor
+  and above), so the bridge can say yes where `git verify-commit` would
+  not.
+- **Repositories:** not scoped. A yes means "a registry-vouched person"
+  for any repository; each project decides whether that suffices. The
+  resource is validated against `verify-trust`'s grammar and echoed.
+- **Time:** answers are for now. If a request carries `context.time`,
+  the bridge answers as of that time (`git vouch query --at`).
+- **Freshness:** it syncs on a timer and refuses to answer, with an
+  error that makes `verify-trust` fail closed, once 24 hours pass
+  without a successful sync.
+- **Trust:** answers over HTTPS are unsigned, so they rest on the
+  `https://` endpoint named in the DID document. Anyone can check an
+  answer against the public registry.
+- **Key types:** `verify-trust` must accept all four types `git-vouch`
+  does. Today it accepts only `ssh-ed25519`
+  (https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169);
+  the bridge is built assuming that is fixed.
+
 ## Flag day
 
 GPG and `pgpkeys.git` are retired for the kernel on one date, the flag
@@ -721,6 +763,11 @@ Decided 2026-10-22:
   bots included; selectors derived from the key; no generated keyring;
   the legacy GPG keyring stays as a warned fallback for everyone until
   the late cutoff.
+- **TRQP bridge:** optional `git-vouch-trqp` daemon speaking Trust
+  Task envelopes; authority DID configured (`did:web` or `did:webvh`);
+  `git.commit.sign` authorized for current keys of anyone with an
+  endorsed email, no bots; any repository; refuses after 24 hours
+  without a sync; assumes OpenVTC accepts all four key types.
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.
