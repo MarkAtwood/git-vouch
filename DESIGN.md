@@ -2,7 +2,7 @@
 
 **Status:** revised design, 2026-10-21. Replaces the signing format, git
 patch series and multi-project federation in the March 2026 documents
-(`kernel-did.md`, `git-did-design.md`, `git-vouch-architecture.md`), which
+(`kernel-did.md`, `git-did-design.md`, `lf-did-architecture.md`), which
 are kept for history. Not implemented.
 
 ## Summary

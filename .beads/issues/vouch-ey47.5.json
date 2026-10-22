@@ -1,0 +1,39 @@
+{
+  "id": "vouch-ey47.5",
+  "title": "'git vouch check': compute tiers and validate registry",
+  "description": "Walk the registry: validate and verify every record, load anchors.json, compute each person's tier. Approver must sit above granted tier; automation granted only by maintainer/anchor and can approve/endorse nobody. Revoked approver/endorser key voids its records; retired keys keep earlier records. Report every problem; non-zero exit on any.",
+  "acceptance_criteria": "Fixture registries cover: valid tree, self-promotion attempt, approver below tier, automation approving, revoked approver voiding tiers, retired endorser key still valid, revocation by anchor and by other own key.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T15:38:09.655434438Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T15:38:09.655434438Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.5",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T15:38:09.664310444Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.5",
+      "depends_on_id": "vouch-ey47.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T15:38:09.992746064Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.5",
+      "depends_on_id": "vouch-ey47.4",
+      "type": "blocks",
+      "created_at": "2026-10-22T15:38:10.212109809Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

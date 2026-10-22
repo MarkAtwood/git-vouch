@@ -1,0 +1,12 @@
+{
+  "id": "vouch-ey47",
+  "title": "git-vouch design and v1 implementation",
+  "description": "git-vouch: kernel identity without GPG. Python 3.9+ stdlib-only single-file CLI; git SSH signing and ssh-keygen -Y do all crypto; registry git repo of signed JSON-LD records (people, tiers, endorsements, revocations); git-vouch checks trust rules and generates allowed_signers and revocation files. Spec: DESIGN.md (revised 2026-10-21, renamed from lf-did 2026-10-22). March 2026 lf-did docs kept for history only.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "epic",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T14:53:17.944414443Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T15:37:43.186621189Z"
+}

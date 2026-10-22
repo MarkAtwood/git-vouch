@@ -1,0 +1,39 @@
+{
+  "id": "vouch-ey47.6",
+  "title": "'git vouch export': allowed_signers and revocation file",
+  "description": "From check's result write allowed_signers: email principals, namespaces=\"git,file\" (\"file\" for automation, only with --include-automation), valid-after from added, valid-before from retired or tier-removal date. --min-tier anchor|maintainer|contributor. Write gpg.ssh.revocationFile from revocations.",
+  "acceptance_criteria": "End-to-end test: git verify-tag accepts a maintainer tag with --min-tier maintainer and rejects a contributor tag; automation key fails git namespace; revoked key fails; retired key verifies a signature made before retirement.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T15:38:09.714126222Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T15:38:09.714126222Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-22T15:38:09.722977741Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47.1",
+      "type": "blocks",
+      "created_at": "2026-10-22T15:38:10.028541541Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-ey47.6",
+      "depends_on_id": "vouch-ey47.5",
+      "type": "blocks",
+      "created_at": "2026-10-22T15:38:10.255864481Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
