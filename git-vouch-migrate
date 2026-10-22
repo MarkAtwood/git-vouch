@@ -1,0 +1,478 @@
+#!/usr/bin/env python3
+"""git-vouch-migrate: port the frozen pgpkeys.git into git-vouch person-file drafts.
+
+Flag day only, and the only git-vouch tool that runs gpg. It reads
+pgpkeys.git at one signed commit C, after checking C's signature, and
+writes unsigned drafts that holders complete with
+``git vouch register --from``. Person-file checks are git-vouch's own,
+imported from the git-vouch script. See DESIGN.md, Flag day.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from collections.abc import Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from types import ModuleType
+from typing import NamedTuple, Optional
+
+
+def _load_vouch() -> ModuleType:
+    """Return the git-vouch script next to this one (or else on PATH), loaded as a module."""
+    path = Path(__file__).resolve().with_name("git-vouch")
+    if not path.is_file():
+        found = shutil.which("git-vouch")
+        if found is None:
+            sys.exit(
+                "git-vouch-migrate: error: git-vouch not found beside it or on PATH"
+            )
+        path = Path(found)
+    loader = importlib.machinery.SourceFileLoader("git_vouch", str(path))
+    spec = importlib.util.spec_from_loader("git_vouch", loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True  # no git-vouch.cpython-*.pyc beside the script
+    loader.exec_module(module)
+    return module
+
+
+vouch = _load_vouch()
+VouchError = vouch.VouchError
+
+FPR_RE = re.compile(r"[0-9A-F]{40}")
+# Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts.
+REUSABLE_CURVES = ("ed25519", "nistp256")
+NOT_LIVE = {"e": "expired at C", "r": "revoked", "i": "invalid at C"}
+UID_RE = re.compile(r"(.*?)\s*(?:\([^()]*\))?\s*<([^<>]*)>")
+# kernel.org remail and security lists: "Flippant Fireant <flippant-fireant@kernel.org>".
+ROLE_RE = re.compile(r"([A-Za-z]+) ([A-Za-z]+) <([a-z]+)-([a-z]+)@kernel\.org>")
+# Stands in for the key the holder adds, so a keyless draft can be checked;
+# 32 zero bytes, never written to a draft.
+PLACEHOLDER_KEY = (
+    "ssh-ed25519 "
+    + base64.b64encode(b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + bytes(32)).decode()
+)
+
+
+class GpgKey(NamedTuple):
+    """One primary key from the pgpkeys keyring, as gpg lists it at C."""
+
+    fpr: str
+    created: int
+    validity: str
+    uids: tuple[str, ...]  # unrevoked user IDs, primary first
+    auth: tuple[str, ...]  # fingerprints of live auth subkeys on REUSABLE_CURVES
+
+
+class Draft(NamedTuple):
+    """One person's draft and the key it was made from."""
+
+    handle: str
+    key: GpgKey
+    data: bytes
+
+
+def _unescape(field: bytes) -> str:
+    r"""Return a gpg colon-listing field as text: undo ``\xNN`` escapes and decode.
+
+    User IDs should be UTF-8, but pgpkeys has one in Latin-1; any byte
+    string that is not UTF-8 is read as Latin-1, which never fails.
+    """
+    raw = re.sub(rb"\\x([0-9a-fA-F]{2})", lambda m: bytes([int(m.group(1), 16)]), field)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
+def parse_listing(colons: bytes) -> list[GpgKey]:
+    """Return the keys in ``gpg --with-colons --fixed-list-mode --list-keys`` output."""
+    keys: list[GpgKey] = []
+    pub: Optional[list[bytes]] = None
+    fpr = ""
+    uids: list[str] = []
+    auth: list[str] = []
+    sub: Optional[list[bytes]] = None  # the subkey whose fpr line comes next
+
+    def flush() -> None:
+        if pub is not None:
+            keys.append(
+                GpgKey(fpr, int(pub[5]), pub[1].decode(), tuple(uids), tuple(auth))
+            )
+
+    for line in colons.splitlines():
+        f = line.split(b":")
+        if f[0] == b"pub":
+            flush()
+            pub, fpr, uids, auth, sub = f, "", [], [], None
+        elif f[0] == b"fpr" and pub is not None:
+            if not fpr:
+                fpr = f[9].decode()
+            elif sub is not None:
+                if (
+                    sub[1].decode() not in NOT_LIVE
+                    and b"a" in sub[11]
+                    and sub[16].decode() in REUSABLE_CURVES
+                ):
+                    auth.append(f[9].decode())
+                sub = None
+        elif f[0] == b"sub":
+            sub = f
+        elif f[0] == b"uid" and f[1] != b"r":
+            uids.append(_unescape(f[9]))
+    flush()
+    return keys
+
+
+def is_role_key(key: GpgKey) -> bool:
+    """Return whether every user ID is a kernel.org list address named after itself."""
+
+    def is_role(uid: str) -> bool:
+        m = ROLE_RE.fullmatch(uid)
+        return m is not None and (m.group(1).lower(), m.group(2).lower()) == m.group(
+            3, 4
+        )
+
+    return bool(key.uids) and all(is_role(u) for u in key.uids)
+
+
+def _name_and_emails(key: GpgKey) -> tuple[Optional[str], list[str]]:
+    """Return the primary user ID's name and every usable email, lowercased, in UID order."""
+    name = None
+    emails: list[str] = []
+    for uid in key.uids:
+        m = UID_RE.fullmatch(uid)
+        if not m:
+            continue
+        if name is None and m.group(1) and m.group(1).isprintable():
+            name = m.group(1)
+        email = m.group(2).lower()
+        if vouch.EMAIL_RE.fullmatch(email) and email not in emails:
+            emails.append(email)
+    return name, emails
+
+
+def _all_emails(key: GpgKey) -> set[str]:
+    return {m.group(2).lower() for m in map(UID_RE.fullmatch, key.uids) if m}
+
+
+def group_people(keys: Sequence[GpgKey]) -> list[list[GpgKey]]:
+    """Return the keys grouped by shared email, transitively.
+
+    An email may be in only one person file, so two keys that share one
+    cannot become two files; port drafts a group only if it is one person.
+    """
+    parent = {k.fpr: k.fpr for k in keys}
+
+    def root(fpr: str) -> str:
+        while parent[fpr] != fpr:
+            fpr = parent[fpr]
+        return fpr
+
+    owner: dict[str, str] = {}
+    for key in keys:
+        for email in _all_emails(key):
+            other = owner.setdefault(email, key.fpr)
+            parent[root(key.fpr)] = root(other)
+    groups: dict[str, list[GpgKey]] = {}
+    for key in keys:
+        groups.setdefault(root(key.fpr), []).append(key)
+    return sorted(groups.values(), key=lambda g: min(k.fpr for k in g))
+
+
+def _base_handle(email: str) -> Optional[str]:
+    local = re.sub(r"[^a-z0-9_-]", "-", email.split("@")[0]).lstrip("-_")[:39]
+    return local if vouch.HANDLE_RE.fullmatch(local) else None
+
+
+def assign_handles(people: Sequence[tuple[GpgKey, Sequence[str]]]) -> dict[str, str]:
+    """Return a handle for each key fingerprint, from the email local parts.
+
+    The first @kernel.org address is preferred, then the first address,
+    with any character a handle cannot hold turned into '-'. When several
+    people want one handle, kernel.org holders win, then the lowest
+    fingerprint; the others get ``-2``, ``-3``, ... in that order.
+
+    Args:
+        people: Each person's chosen key and usable emails.
+
+    Raises:
+        VouchError: No email of a person yields a handle.
+    """
+    wanted: dict[str, list[tuple[bool, str]]] = {}
+    for key, emails in people:
+        bases = [(e.endswith("@kernel.org"), _base_handle(e)) for e in emails]
+        usable = [b for b in bases if b[1] is not None]
+        if not usable:
+            raise VouchError(f"{key.fpr}: no email gives a handle")
+        is_korg, base = max(usable, key=lambda b: b[0])  # first kernel.org, else first
+        assert base is not None
+        wanted.setdefault(base, []).append((not is_korg, key.fpr))
+    taken = set(wanted)
+    handles = {}
+    for base, claims in sorted(wanted.items()):
+        first, *rest = sorted(claims)
+        handles[first[1]] = base
+        n = 1
+        for _, fpr in rest:
+            while True:
+                n += 1
+                handle = f"{base[: 39 - len(str(n)) - 1]}-{n}"
+                if handle not in taken:
+                    break
+            taken.add(handle)
+            handles[fpr] = handle
+    return handles
+
+
+def check_draft(handle: str, data: bytes) -> None:
+    """Validate a draft with git-vouch's person-file rules, minus the signature.
+
+    A draft with no keys stands in PLACEHOLDER_KEY for the key its holder
+    will add, so every other term is still checked.
+
+    Raises:
+        VouchError: git-vouch rejects the draft.
+    """
+    rel = f"people/{handle}.json"
+    obj = json.loads(data)
+    if not obj["keys"]:
+        obj["keys"] = [{"ssh": PLACEHOLDER_KEY, "added": "2000-01-01T00:00:00Z"}]
+        data = json.dumps(obj).encode()
+    vouch.parse_record(rel, data)
+
+
+class Pgpkeys:
+    """A temporary keyring holding the keys/*.asc of pgpkeys.git at commit C."""
+
+    def __init__(self, repo: Path, commit: str, home: Path) -> None:
+        """Resolve ``commit`` in ``repo`` and import its keys/*.asc into ``home``.
+
+        Raises:
+            VouchError: The commit does not exist or gpg cannot import the keys.
+        """
+        self.repo = repo
+        self.home = home
+        self.commit = self._git(
+            "rev-parse", "--verify", "--end-of-options", commit + "^{commit}"
+        )
+        self.time = int(self._git("show", "-s", "--format=%ct", self.commit))
+        # Judge every key and C's own signature at C, for gpg and git verify-commit alike.
+        (home / "gpg.conf").write_text(f"faked-system-time {self.time}!\n")
+        archive = vouch.run(["git", "archive", self.commit, "keys"], cwd=repo)
+        armored = []
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            for member in tar:
+                if member.isfile() and member.name.endswith(".asc"):
+                    f = tar.extractfile(member)
+                    assert f is not None
+                    armored.append(f.read())
+        self.gpg("--import", stdin=b"\n".join(armored))
+
+    def _git(self, *args: str) -> str:
+        out: bytes = vouch.run(["git", *args], cwd=self.repo)
+        return out.decode().strip()
+
+    def gpg(
+        self, *args: str, values: Sequence[str] = (), stdin: Optional[bytes] = None
+    ) -> bytes:
+        """Run gpg on the temporary keyring, whose clock is set to C's committer date."""
+        cmd = ["gpg", "--homedir", str(self.home), "--batch", "--no-tty", "--quiet"]
+        cmd += ["--no-autostart", "--no-auto-key-retrieve", "--trust-model", "always"]
+        cmd += args
+        return vouch.run(cmd, values=values, stdin=stdin)  # type: ignore[no-any-return]
+
+    def check_signature(self, signer: str) -> None:
+        """Check that C carries a good signature by the key with primary fingerprint ``signer``.
+
+        The signer's key must be in C's own keys/, as it is for pgpkeys.
+
+        Raises:
+            VouchError: C is unsigned, the signature is bad, or someone else made it.
+        """
+        cmd = ["git", "-c", "gpg.format=openpgp", "-c", "gpg.program=gpg"]
+        cmd += ["verify-commit", "--raw", self.commit]
+        proc = subprocess.run(
+            cmd,
+            cwd=self.repo,
+            env=dict(os.environ, GNUPGHOME=str(self.home)),
+            capture_output=True,
+            check=False,
+        )
+        status = [
+            ln.split() for ln in proc.stderr.decode(errors="replace").splitlines()
+        ]
+        valid = [s for s in status if s[:2] == ["[GNUPG:]", "VALIDSIG"]]
+        good = [s for s in status if s[:2] == ["[GNUPG:]", "GOODSIG"]]
+        if proc.returncode != 0 or len(valid) != 1 or len(good) != 1:
+            raise VouchError(
+                f"commit {self.commit} has no good signature by a key in its keys/"
+            )
+        if valid[0][-1] != signer:
+            raise VouchError(
+                f"commit {self.commit} is signed by {valid[0][-1]}, not {signer}"
+            )
+
+    def keys(self) -> list[GpgKey]:
+        """Return every key in the keyring, judged at C."""
+        return parse_listing(
+            self.gpg("--with-colons", "--fixed-list-mode", "--list-keys")
+        )
+
+    def ssh_key(self, subkey: str) -> str:
+        """Return the SSH public key line ("type base64") for one authentication subkey."""
+        line = self.gpg("--export-ssh-key", values=[subkey + "!"]).decode()
+        return " ".join(line.split()[:2])
+
+
+def port(pgp: Pgpkeys, out: Path) -> int:
+    """Write one draft person file per person to ``out``/people and report on stdout.
+
+    Returns:
+        The number of drafts written.
+    """
+    keys = pgp.keys()
+    live = []
+    for key in keys:
+        if key.validity in NOT_LIVE:
+            print(f"skip {key.fpr}: {NOT_LIVE[key.validity]}")
+        elif is_role_key(key):
+            print(f"skip {key.fpr}: not a person: {key.uids[0]}")
+        else:
+            live.append(key)
+    people: list[tuple[GpgKey, list[str]]] = []
+    names = {}
+    for group in group_people(live):
+        # UID emails are the holders' own claims: keys that share one but not
+        # the primary name may be one holder borrowing another's email, so
+        # none of them is drafted and an anchor settles it (as for D3).
+        # ponytail: a holder also sets their own primary name, so one who copies
+        # another's name as well is still merged; the strict upgrade is to draft
+        # no group of two or more keys, which drops 21 people at af88128.
+        if len({_name_and_emails(k)[0] for k in group}) > 1:
+            for key in group:
+                print(
+                    f"conflict {key.fpr}: shares an email with a differently named key"
+                )
+            continue
+        # ponytail: one draft per person, from their newest key; the holder may
+        # edit migratedFrom to another of their keys before signing.
+        chosen = max(group, key=lambda k: (k.created, k.fpr))
+        for other in group:
+            if other is not chosen:
+                print(f"merge {other.fpr}: same person as {chosen.fpr}, which is used")
+        name, emails = _name_and_emails(chosen)
+        if name is None or not emails:
+            print(f"skip {chosen.fpr}: no user ID with a usable name and email")
+            continue
+        names[chosen.fpr] = name
+        people.append((chosen, emails))
+    handles = assign_handles(people)
+    added = datetime.fromtimestamp(pgp.time, timezone.utc).strftime(vouch.DATE_FORMAT)
+    drafts = []
+    for key, emails in people:
+        draft = {
+            "@context": [vouch.CONTEXT],
+            "handle": handles[key.fpr],
+            "name": names[key.fpr],
+            "emails": emails,
+            "keys": [
+                {"ssh": pgp.ssh_key(sub), "added": added, "retired": None}
+                for sub in key.auth
+            ],
+            "migratedFrom": "openpgp4fpr:" + key.fpr,
+        }
+        data = (json.dumps(draft, indent=2, ensure_ascii=False) + "\n").encode()
+        try:
+            check_draft(handles[key.fpr], data)
+        except VouchError as e:
+            print(f"skip {key.fpr}: {e}")
+            continue
+        drafts.append(Draft(handles[key.fpr], key, data))
+    (out / "people").mkdir(parents=True)
+    for d in drafts:
+        (out / "people" / f"{d.handle}.json").write_bytes(d.data)
+    roles = [k for k in keys if is_role_key(k)]
+    print(
+        f"keys {len(keys)}, live {len(keys) - sum(k.validity in NOT_LIVE for k in keys)}, "
+        f"kernel.org list keys {len(roles)} "
+        f"({len(roles) - sum(k.validity in NOT_LIVE for k in roles)} live), "
+        f"people {len(people)}, drafts {len(drafts)}, live keys with a reusable "
+        f"auth subkey {sum(k.validity not in NOT_LIVE and bool(k.auth) for k in keys)} "
+        f"({sum(bool(d.key.auth) for d in drafts)} in drafts)"
+    )
+    return len(drafts)
+
+
+def cmd_port(args: argparse.Namespace) -> int:
+    """Check C's signature, then write the person-file drafts."""
+    signer = args.signer.upper()
+    if not FPR_RE.fullmatch(signer):
+        raise VouchError("--signer: must be a 40-hex fingerprint")
+    out = Path(args.out)
+    if out.exists():
+        raise VouchError(
+            f"{out}: already exists; drafts are only written to a new directory"
+        )
+    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
+        pgp = Pgpkeys(Path(args.pgpkeys), args.commit, Path(home))
+        pgp.check_signature(signer)
+        print(f"pgpkeys at {pgp.commit}, signed by {signer}")
+        port(pgp, out)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser."""
+    parser = argparse.ArgumentParser(prog="git-vouch-migrate", description=__doc__)
+    sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
+    p = sub.add_parser(
+        "port",
+        help="write unsigned person-file drafts from pgpkeys.git at commit C",
+        description=(
+            "Import keys/*.asc from pgpkeys.git at commit C into a temporary keyring, "
+            "check C's signature, and write one unsigned draft people/<handle>.json "
+            "per person to a new directory. Keys are judged at C's committer date: "
+            "expired or revoked keys and kernel.org list keys are skipped; keys "
+            "sharing an email are one person, drafted from the newest key, if "
+            "their primary names match, and otherwise none is drafted. Emails "
+            "come from unrevoked user IDs. An ed25519 or P-256 authentication "
+            "subkey is pre-filled as the SSH key."
+        ),
+    )
+    p.add_argument("pgpkeys", help="a pgpkeys.git clone")
+    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument(
+        "--signer", required=True, help="primary fingerprint expected to sign C"
+    )
+    p.add_argument("--out", required=True, help="new directory for the drafts")
+    p.set_defaults(func=cmd_port)
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the command line and return the process exit status."""
+    args = build_parser().parse_args(argv)
+    try:
+        status: int = args.func(args)
+        return status
+    except VouchError as e:
+        print(f"git-vouch-migrate: error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
