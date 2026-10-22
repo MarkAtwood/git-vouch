@@ -524,7 +524,8 @@ small and in upstream style so it could be offered upstream. The rules
   run, and patch emails it signed stop verifying, which matters little
   once a patch is merged. Revoked keys are never written.
 - **Selector:** derived from the key itself (`k-` plus a short
-  fingerprint), one rule for every key, so a person's main and backup
+  lowercase hex fingerprint; patatt lowercases selectors in file
+  keyrings, so base64 would collide), one rule for every key, so a person's main and backup
   tokens never collide. `git vouch status` prints the selector to set as
   `patatt.selector`.
 - **Where:** nowhere new. The fork reads the local registry copy that
@@ -537,6 +538,12 @@ small and in upstream style so it could be offered upstream. The rules
   `vouch:` gets a warning that the legacy keyring stops after the late
   cutoff. The fallback applies to everyone, registered or not. After the
   late cutoff people delete the legacy line; no code changes.
+- **Limits** (`docs/patatt-interop.md`): patatt cannot enforce FIDO
+  touch or PIN, nor key validity dates beyond what `git vouch keys`
+  returns. b4 caches verdicts for up to 24 hours, so a revoked key can
+  still show a pass in b4 for up to a day, and the legacy-keyring
+  warning appears only on checks b4 has not cached. Fixing either needs
+  a b4 change.
 
 ## TRQP bridge
 
