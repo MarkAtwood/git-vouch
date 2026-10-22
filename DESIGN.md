@@ -115,10 +115,15 @@ endorses. A key used in both registries has the same did:key in both, so
 anyone can cross-check without `git-vouch` resolving anything. An
 endorsement from an independent community is valuable precisely because
 an attacker would have to infiltrate two social graphs, not one.
+Nobody can endorse themselves: a self-endorsement is reported as void
+and counts for nothing, but never fails `check`.
 
 **Automation identities** can sign only files (the `file` namespace:
 tarballs, checksums), never git tags or commits. They cannot endorse or
-approve anyone. Their person file must name the accountable maintainer.
+approve anyone. Their person file must name the accountable maintainer,
+who must hold the maintainer or anchor tier at the commit that adds the
+bot's tier record. Like any approval, that is judged once: if the
+accountable maintainer later steps down, the bot keeps its tier.
 
 ## What git and OpenSSH already do
 
@@ -245,6 +250,10 @@ Two git behaviours address that:
   leave `anchors.json`) without a compromise, the tiers they granted
   stay valid. Only a revoked approver key voids the tier records it
   signed; those people have no tier until someone re-approves them.
+  "At the commit" means by ancestry: a tier record added on a branch
+  that runs concurrently with a commit lowering its approver's authority
+  is void, with a warning, until someone re-approves it. When two keys
+  revoke each other on concurrent branches, both revocations count.
 - **Removal:** when `tiers/<handle>.json` is deleted, the export uses
   the committer date of the deleting commit as `valid-before` for that
   person's keys, provided the record verified at the parent commit.
@@ -304,7 +313,10 @@ Two git behaviours address that:
 - **`keys`** holds every key the person has used, oldest first. A key
   with `retired` set becomes `valid-before` in the export. Its did:key
   is not stored; `git-vouch` derives it. If a key appears in two files,
-  it belongs to the file whose commit listed it first.
+  a listing as a current key (proven by the file's signature) beats any
+  listing of it as retired (unproven), and the unproven claimant is
+  flagged. Between equally proven listings, the file whose commit listed
+  it first wins.
 - **`attestation`** is optional and only meaningful for FIDO (`sk-`)
   keys: an object with `blob` and `challenge`, both base64, from
   `ssh-keygen -O challenge=<file> -O write-attestation=<file>` at key
@@ -522,8 +534,10 @@ itself never runs GPG and never checks the `.asc`.
 **Endorsements.** GPG certifications are not ported as records. Each
 certifier runs `git-vouch-migrate drafts --as <handle>` on their own
 machine, from the public pgpkeys at C and the registry, and gets one
-draft per subject with a continuity proof: the latest verified,
-unrevoked, non-SHA-1 certification. A draft takes `subjectName` from the
+draft per subject with a continuity proof: the latest unrevoked
+certification, including SHA-1 ones that GnuPG 2.4 rejects, because the
+draft is only a reminder and the certifier's new SSH signature is what
+counts. A draft takes `subjectName` from the
 person file, fills `subjectEmails` from the certified UIDs, and puts the
 certified fingerprint, UID and date in `note`. The certifier reads and
 signs them. Drafts are never generated centrally, and unsigned drafts
@@ -640,18 +654,22 @@ Decided 2026-10-22:
   unsigned key changes and tier-record deletions rest on review.
 - **Tiers:** set by a signed approver record; automation is its own tier,
   files only; authority judged at the commit adding the record, so an
-  approver stepping down voids nothing and only a revoked key does; a
-  tier record before its person file is ignored; removal ends at the
+  approver stepping down voids nothing and only a revoked key does (the
+  same for a bot's accountable maintainer); a grant concurrent with its
+  approver's demotion is void with a warning; mutual concurrent
+  revocations both count; a tier record before its person file is
+  ignored; removal ends at the
   deleting commit's committer date, demotion at the new record's date.
 - **Person files:** a change needs one signature from any key current in
   the previous version; a change without one is allowed by review and
   warned about loudly, and lost-key recovery keeps the tier; an
-  all-retired file is frozen; a key in two files belongs to the first
-  that listed it; an email may be in only one file; every exported key
+  all-retired file is frozen; a key in two files belongs to the proven
+  (current) listing over an unproven retired one, then the first listed; an email may be in only one file; every exported key
   has its handle as a principal.
 - **Endorsements:** any registered human may endorse, tier or not, which
   is how cross-project vouching works (no foreign-registry lookups, no
-  federation); optional free-text note, no minimum count; they bind
+  federation); nobody can endorse themselves (void, not an error);
+  optional free-text note, no minimum count; they bind
   name, key and `subjectEmails`, carry over to later keys, and only
   endorsed emails are exported.
 - **Revocations:** never fail `check`; `sync` always writes them; one
