@@ -65,15 +65,10 @@ class Gpg:
         script = f"key {sub}\nrevkey\ny\n0\n\ny\nsave\n"
         subprocess.run(cmd, input=script.encode(), check=True, capture_output=True)
 
-    def revoke_key(self, fpr: str) -> None:
-        """Import the revocation certificate gpg wrote when it made the key."""
+    def revocation(self, fpr: str) -> bytes:
+        """Return the revocation certificate gpg wrote when it made the key, importable."""
         cert = (self.home / "openpgp-revocs.d" / f"{fpr}.rev").read_text()
-        subprocess.run(
-            ["gpg", "--homedir", str(self.home), "--batch", "--quiet", "--import"],
-            input=cert.replace(":-----BEGIN", "-----BEGIN").encode(),
-            check=True,
-            capture_output=True,
-        )
+        return cert.replace(":-----BEGIN", "-----BEGIN").encode()
 
     def key_data(self, fpr: str) -> dict[str, bytes]:
         """Return each subkey fingerprint's public point, from gpg's key packet dump."""
@@ -106,6 +101,8 @@ class Pgpkeys(NamedTuple):
     points: dict[
         str, dict[str, bytes]
     ]  # primary -> {key or subkey fpr: point}, from gpg
+    gpg: Gpg  # holds every secret key; frank is revoked only in pgpkeys
+    revoked_subkey: str  # carol's signing subkey, revoked only in pgpkeys
 
 
 class Ported(NamedTuple):
@@ -151,6 +148,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
     home = base / "gnupg"
     home.mkdir(mode=0o700)
     gpg = Gpg(home)
+    revoker = Gpg(base / "gnupg-revoker")
+    revoker.home.mkdir(mode=0o700)
     try:
         fprs = {
             # Expires after C but before today: live at C, and C's signature is good at C.
@@ -224,14 +223,23 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         gpg.add_key(fprs["sam2"], "ed25519", "auth", "1d")
         # A non-expiring auth subkey under a primary that expired before C.
         gpg.add_key(fprs["eve"], "ed25519", "auth", at="20190101T000000")
-        gpg.revoke_key(fprs["frank"])
+        # A signing subkey revoked in pgpkeys but live in this home: revoke it
+        # in a copy of carol's key.
+        revoked_subkey = gpg.add_key(fprs["carol"], "ed25519", "sign")
+        secret = base / "carol.key"
+        secret.write_bytes(gpg("--export-secret-keys", fprs["carol"]))
+        revoker("--import", str(secret))
+        revoker.revoke_subkey(fprs["carol"], revoked_subkey)
 
         repo = base / "pgpkeys.git"
         (repo / "keys").mkdir(parents=True)
-        for fpr in fprs.values():
-            (repo / "keys" / f"{fpr[-16:]}.asc").write_bytes(
-                gpg("--armor", "--export", fpr)
-            )
+        for name, fpr in fprs.items():
+            armored = gpg("--armor", "--export", fpr)
+            if name == "frank":  # revoked in pgpkeys, but still signs in this home
+                armored += gpg.revocation(fpr)
+            if name == "carol":
+                armored = revoker("--armor", "--export", fpr)
+            (repo / "keys" / f"{fpr[-16:]}.asc").write_bytes(armored)
         (home / "gpg.conf").write_text("faked-system-time 20200601T000000!\n")
         env = dict(
             os.environ,
@@ -251,11 +259,14 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         _git(repo, *ident, "commit", "-q", "--allow-empty", "-m", "after", env=env)
         unsigned = _git(repo, "rev-parse", "HEAD", env=env)
         points = {fpr: gpg.key_data(fpr) for fpr in fprs.values()}
-        yield Pgpkeys(repo, commit, signing_subkey, unsigned, fprs, points)
-    finally:
-        subprocess.run(
-            ["gpgconf", "--homedir", str(home), "--kill", "all"], check=False
+        yield Pgpkeys(
+            repo, commit, signing_subkey, unsigned, fprs, points, gpg, revoked_subkey
         )
+    finally:
+        for h in (home, revoker.home):
+            subprocess.run(
+                ["gpgconf", "--homedir", str(h), "--kill", "all"], check=False
+            )
 
 
 @pytest.fixture(scope="module")

@@ -4,7 +4,8 @@
 Flag day only, and the only git-vouch tool that runs gpg. It reads
 pgpkeys.git at one signed commit C, after checking C's signature, and
 writes unsigned drafts that holders complete with
-``git vouch register --from``. Person-file checks are git-vouch's own,
+``git vouch register --from``, and verifies registered people's
+continuity proofs against C. Person-file checks are git-vouch's own,
 imported from the git-vouch script. See DESIGN.md, Flag day.
 """
 
@@ -23,7 +24,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -53,6 +54,9 @@ vouch = _load_vouch()
 VouchError = vouch.VouchError
 
 FPR_RE = re.compile(r"[0-9A-F]{40}")
+MIGRATED_RE = re.compile(r"openpgp4fpr:([0-9A-Fa-f]{40})")
+# gpg status words that say why a detached signature did not verify.
+GPG_FAILURES = ("NO_PUBKEY", "BADSIG", "REVKEYSIG", "EXPSIG", "ERRSIG")
 # Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts.
 REUSABLE_CURVES = ("ed25519", "nistp256")
 # gpg validity letters for keys not live at C. A primary key is skipped only
@@ -78,6 +82,21 @@ class GpgKey(NamedTuple):
     validity: str
     uids: tuple[str, ...]  # unrevoked user IDs, primary first
     auth: tuple[str, ...]  # fingerprints of live auth subkeys on REUSABLE_CURVES
+
+
+class Proof(NamedTuple):
+    """A verified continuity proof: the GPG key claimed and how its holder proved it."""
+
+    fpr: str
+    how: str  # ".asc", or "auth subkey <fpr>"
+
+
+class Continuity(NamedTuple):
+    """What ``verify_continuity`` found."""
+
+    proven: dict[str, Proof]  # handle -> proof
+    failed: dict[str, str]  # handle -> why its claim is not proven
+    duplicates: dict[str, list[str]]  # fingerprint -> every handle claiming it
 
 
 class Draft(NamedTuple):
@@ -293,10 +312,54 @@ class Pgpkeys:
         self, *args: str, values: Sequence[str] = (), stdin: Optional[bytes] = None
     ) -> bytes:
         """Run gpg on the temporary keyring, whose clock is set to C's committer date."""
+        cmd = [*self._gpg_cmd(), *args]
+        return vouch.run(cmd, values=values, stdin=stdin)  # type: ignore[no-any-return]
+
+    def _gpg_cmd(self) -> list[str]:
         cmd = ["gpg", "--homedir", str(self.home), "--batch", "--no-tty", "--quiet"]
         cmd += ["--no-autostart", "--no-auto-key-retrieve", "--trust-model", "always"]
-        cmd += args
-        return vouch.run(cmd, values=values, stdin=stdin)  # type: ignore[no-any-return]
+        return cmd
+
+    def detached_signer(self, sig: bytes, data: bytes) -> str:
+        """Return the primary fingerprint of the key that made ``sig``, a signature over ``data``.
+
+        ``sig`` must be one detached binary signature (class 00), so it covers
+        ``data``'s exact bytes. A key expired at C counts (D9): gpg then says
+        EXPKEYSIG instead of GOODSIG, and exits 0 for both. A revoked key does
+        not: gpg says REVKEYSIG.
+
+        Raises:
+            VouchError: ``sig`` is not one good binary signature by a key in
+                the keyring over ``data``.
+        """
+        path = self.home / "proof.asc"
+        path.write_bytes(sig)
+        cmd = [*self._gpg_cmd(), "--status-fd", "1", "--verify", "--", str(path), "-"]
+        try:
+            proc = subprocess.run(cmd, input=data, capture_output=True, check=False)
+        except OSError as e:
+            raise VouchError(f"cannot run gpg: {e}") from e
+        status = [
+            ln.split()
+            for ln in proc.stdout.decode(errors="replace").splitlines()
+            if ln.startswith("[GNUPG:] ")
+        ]
+        words = [s[1] for s in status]
+        failure = next((w for w in GPG_FAILURES if w in words), None)
+        if failure is not None:
+            raise VouchError(f"gpg reports {failure}")
+        valid = [s for s in status if s[1] == "VALIDSIG"]
+        if (
+            proc.returncode != 0
+            or words.count("NEWSIG") != 1
+            or words.count("GOODSIG") + words.count("EXPKEYSIG") != 1
+            or len(valid) != 1
+            or len(valid[0]) != 12
+        ):
+            raise VouchError("not one good signature")
+        if valid[0][10] != "00":
+            raise VouchError("not a binary signature over the exact bytes")
+        return valid[0][11]
 
     def check_signature(self, signer: str) -> None:
         """Check that C carries a good signature by the key with primary fingerprint ``signer``.
@@ -422,22 +485,171 @@ def port(pgp: Pgpkeys, out: Path) -> int:
     return len(drafts)
 
 
+def _signed_by(rel: str, data: bytes, sig: bytes, key: vouch.PersonKey) -> bool:
+    """Return whether one of the signatures in ``sig`` is by ``key``, per git-vouch."""
+    for block in vouch.split_signatures(sig):
+        try:
+            vouch.signer_of(rel, data, block, [key])
+        except VouchError:
+            continue
+        return True
+    return False
+
+
+def _prove(
+    pgp: Pgpkeys,
+    root: Path,
+    person: vouch.Person,
+    key: GpgKey,
+    revoked: Collection[str],
+) -> str:
+    """Return how the holder of GPG ``key`` proved that ``person`` is theirs.
+
+    Raises:
+        VouchError: The person file does not prove it.
+    """
+    if key.validity in SKIPPED:
+        raise VouchError(f"{key.fpr} is {SKIPPED[key.validity]}")
+    uid_emails = _all_emails(key)
+    for email in person.emails:
+        if email.lower() not in uid_emails:
+            raise VouchError(f"{email} is not on an unrevoked user ID of {key.fpr}")
+    rel = f"people/{person.handle}.json"
+    data = vouch.read_capped(root, rel)
+    # The auth subkey must have signed this version: its public key is public,
+    # so listing it proves nothing.
+    sig = vouch.read_capped(root, rel + ".sig")
+    current = [k for k in person.keys if k.retired is None and k.did not in revoked]
+    for sub in key.auth:
+        ssh = pgp.ssh_key(sub)
+        if any(k.ssh == ssh and _signed_by(rel, data, sig, k) for k in current):
+            return f"auth subkey {sub}"
+    if not (root / f"{rel}.asc").exists():
+        raise VouchError(
+            f"no {rel}.asc, and no signature by an auth subkey of {key.fpr}"
+        )
+    try:
+        signer = pgp.detached_signer(vouch.read_capped(root, rel + ".asc"), data)
+    except VouchError as e:
+        raise VouchError(f"{rel}.asc: {e}") from e
+    if signer != key.fpr:
+        raise VouchError(f"{rel}.asc: signed by {signer}, not {key.fpr}")
+    return ".asc"
+
+
+def verify_continuity(
+    pgp: Pgpkeys, root: Path, handles: Collection[str] = ()
+) -> Continuity:
+    """Verify the continuity proof of each ported person file in the registry at ``root``.
+
+    The person file must be validly signed by git-vouch's own rules, and
+    its ``migratedFrom`` key in pgpkeys at C not revoked (an expired key is
+    accepted, D9), with every email in the file on an unrevoked user ID of
+    that key. The proof is a signature on the file by a live ed25519 or
+    P-256 authentication subkey of that key, or ``people/<handle>.json.asc``,
+    a detached signature by the key over the file's exact bytes. A
+    fingerprint claimed by two or more handles proves none of them (D3).
+
+    Args:
+        pgp: The pgpkeys keyring at C.
+        root: The registry checkout.
+        handles: Whose claims to verify; every ported person file if empty.
+
+    Raises:
+        VouchError: ssh-keygen or gpg cannot be run, or the registry's
+            history cannot be read.
+    """
+    result = vouch.check_registry(root)
+    claims: dict[str, str] = {}
+    failed: dict[str, str] = {}
+    for handle in sorted(result.people):
+        obj = json.loads(vouch.read_capped(root, f"people/{handle}.json"))
+        if "migratedFrom" not in obj:
+            continue
+        m = MIGRATED_RE.fullmatch(str(obj["migratedFrom"]))
+        if m is None:
+            failed[handle] = (
+                "migratedFrom: must be openpgp4fpr: and a 40-hex fingerprint"
+            )
+        else:
+            claims[handle] = m.group(1).upper()
+    by_fpr: dict[str, list[str]] = {}
+    for handle, fpr in claims.items():
+        by_fpr.setdefault(fpr, []).append(handle)
+    duplicates = {f: hs for f, hs in sorted(by_fpr.items()) if len(hs) > 1}
+    keys = {k.fpr: k for k in pgp.keys()}
+    proven: dict[str, Proof] = {}
+    for handle, fpr in claims.items():
+        if handles and handle not in handles:
+            continue
+        if fpr in duplicates:
+            others = ", ".join(h for h in duplicates[fpr] if h != handle)
+            failed[handle] = f"{fpr} is also claimed by {others}"
+        elif fpr not in keys:
+            failed[handle] = f"{fpr} is not in pgpkeys at C"
+        else:
+            try:
+                how = _prove(
+                    pgp, root, result.people[handle], keys[fpr], result.revoked
+                )
+            except VouchError as e:
+                failed[handle] = str(e)
+            else:
+                proven[handle] = Proof(fpr, how)
+    if handles:
+        failed = {h: why for h, why in failed.items() if h in handles}
+        for handle in handles:
+            if handle not in result.people:
+                failed[handle] = "no validly signed person file"
+            elif handle not in claims and handle not in failed:
+                failed[handle] = "no migratedFrom"
+    return Continuity(proven, failed, duplicates)
+
+
+def _open_pgpkeys(args: argparse.Namespace, home: Path) -> Pgpkeys:
+    """Return the pgpkeys keyring at ``args.commit``, after checking C's signature."""
+    pgp = Pgpkeys(Path(args.pgpkeys), args.commit, home)
+    pgp.check_signature(args.signer)
+    print(f"pgpkeys at {pgp.commit}, signed by {args.signer}")
+    return pgp
+
+
+def _check_signer(args: argparse.Namespace) -> None:
+    args.signer = args.signer.upper()
+    if not FPR_RE.fullmatch(args.signer):
+        raise VouchError("--signer: must be a 40-hex fingerprint")
+
+
 def cmd_port(args: argparse.Namespace) -> int:
     """Check C's signature, then write the person-file drafts."""
-    signer = args.signer.upper()
-    if not FPR_RE.fullmatch(signer):
-        raise VouchError("--signer: must be a 40-hex fingerprint")
+    _check_signer(args)
     out = Path(args.out)
     if out.exists():
         raise VouchError(
             f"{out}: already exists; drafts are only written to a new directory"
         )
     with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
-        pgp = Pgpkeys(Path(args.pgpkeys), args.commit, Path(home))
-        pgp.check_signature(signer)
-        print(f"pgpkeys at {pgp.commit}, signed by {signer}")
-        port(pgp, out)
+        port(_open_pgpkeys(args, Path(home)), out)
     return 0
+
+
+def cmd_verify_continuity(args: argparse.Namespace) -> int:
+    """Check C's signature, then report each continuity claim; 1 if any is not proven."""
+    _check_signer(args)
+    for handle in args.handles:
+        vouch.validate_handle(handle)
+    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
+        pgp = _open_pgpkeys(args, Path(home))
+        found = verify_continuity(pgp, Path(args.registry), args.handles)
+    for fpr, handles in found.duplicates.items():
+        print(f"duplicate {fpr}: {', '.join(handles)}")
+    for handle in sorted({*found.proven, *found.failed}):
+        if handle in found.proven:
+            proof = found.proven[handle]
+            print(f"ok {handle}: openpgp4fpr:{proof.fpr} by {proof.how}")
+        else:
+            print(f"fail {handle}: {found.failed[handle]}")
+    return 1 if found.failed else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -466,6 +678,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--out", required=True, help="new directory for the drafts")
     p.set_defaults(func=cmd_port)
+    p = sub.add_parser(
+        "verify-continuity",
+        help="verify ported person files' GPG continuity proofs against pgpkeys at C",
+        description=(
+            "Check C's signature, then, for each validly signed person file in "
+            "the registry with migratedFrom (or each HANDLE given), verify its "
+            "continuity proof against the keys in pgpkeys.git at C: the GPG key "
+            "must not be revoked at C (expired is accepted), every email in the "
+            "file must be on an unrevoked user ID of it, and either an ed25519 or "
+            "P-256 authentication subkey of it signed the person file, or "
+            "people/<handle>.json.asc is its detached signature over the file's "
+            "exact bytes. A fingerprint claimed by two handles proves neither. "
+            "Prints 'ok' or 'fail' per handle, and exits 1 if any fails."
+        ),
+    )
+    p.add_argument("pgpkeys", help="a pgpkeys.git clone")
+    p.add_argument("registry", help="the registry checkout")
+    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument(
+        "--signer", required=True, help="primary fingerprint expected to sign C"
+    )
+    p.add_argument(
+        "handles", nargs="*", metavar="HANDLE", help="whose claims to verify"
+    )
+    p.set_defaults(func=cmd_verify_continuity)
     return parser
 
 
