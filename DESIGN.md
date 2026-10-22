@@ -531,6 +531,12 @@ small and in upstream style so it could be offered upstream. The rules
   `git vouch sync` keeps current, through `git vouch keys`. b4 uses the
   fork when it is installed in place of patatt. Stock patatt still works
   with its existing keyrings, but does not see the registry.
+- **GPG fallback for the flag day:** the fork's recommended config lists
+  `vouch:` first and the legacy GPG keyring second, and patatt tries
+  sources in order. A patch that verifies through anything other than
+  `vouch:` gets a warning that the legacy keyring stops after the late
+  cutoff. The fallback applies to everyone, registered or not. After the
+  late cutoff people delete the legacy line; no code changes.
 
 ## Flag day
 
@@ -712,7 +718,9 @@ Decided 2026-10-22:
   endorsed emails are exported.
 - **Patch signing:** a patatt fork with a `vouch:` keyring source asks
   `git vouch keys <email>`; endorsed emails and current keys, any tier,
-  bots included; selectors derived from the key; no generated keyring.
+  bots included; selectors derived from the key; no generated keyring;
+  the legacy GPG keyring stays as a warned fallback for everyone until
+  the late cutoff.
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.
