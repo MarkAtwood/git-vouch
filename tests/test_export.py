@@ -69,7 +69,16 @@ def export(reg: Registry, tmp_path: Path, *options: str) -> Exported:
 def git(repo: Path, *args: str, date: str = BEFORE) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_DATE": date}
     return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.org",
+            *args,
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -120,7 +129,17 @@ def sign_file(tmp_path: Path, key: Key, namespace: str) -> tuple[Path, Path]:
     data = tmp_path / f"release-{key.private.name}.tar"
     data.write_bytes(b"release contents\n")
     subprocess.run(
-        ["ssh-keygen", "-q", "-Y", "sign", "-f", str(key.private), "-n", namespace, str(data)],
+        [
+            "ssh-keygen",
+            "-q",
+            "-Y",
+            "sign",
+            "-f",
+            str(key.private),
+            "-n",
+            namespace,
+            str(data),
+        ],
         check=True,
         capture_output=True,
     )
@@ -137,7 +156,10 @@ def ssh_verify(
 
 
 def test_min_tier_maintainer(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path, "--min-tier", "maintainer")
     assert verifies(repo, tag(repo, "v1", keys("gregkh")), out)
@@ -147,7 +169,10 @@ def test_min_tier_maintainer(
 
 
 def test_min_tier_anchor(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path, "--min-tier", "anchor")
     assert verifies(repo, tag(repo, "v1", keys("torvalds")), out)
@@ -155,7 +180,10 @@ def test_min_tier_anchor(
 
 
 def test_default_is_contributor(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path)
     assert verifies(repo, tag(repo, "c1", keys("alice")), out)
@@ -165,7 +193,10 @@ def test_default_is_contributor(
 
 
 def test_automation_signs_files_only(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path, "--include-automation")
     assert not verifies(repo, tag(repo, "b1", keys("bot")), out)
@@ -176,7 +207,9 @@ def test_automation_signs_files_only(
 
 
 def test_automation_left_out_by_default(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path)
     data, sig = sign_file(tmp_path, keys("bot"), "file")
@@ -184,7 +217,9 @@ def test_automation_left_out_by_default(
 
 
 def test_humans_sign_files(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path)
     data, sig = sign_file(tmp_path, keys("gregkh"), "file")
@@ -192,7 +227,10 @@ def test_humans_sign_files(
 
 
 def test_revoked_key_fails(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path)
     assert not verifies(repo, tag(repo, "c1", keys("alice2")), out)
@@ -200,7 +238,9 @@ def test_revoked_key_fails(
 
 
 def test_revocation_file_revokes(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     """The revocation file works on its own, against a hand-written allowed-signers line."""
     out = export(reg, tmp_path)
@@ -216,7 +256,10 @@ def test_revocation_file_revokes(
 
 
 def test_retired_key_keeps_earlier_signatures(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     out = export(reg, tmp_path, "--min-tier", "maintainer")
     old = keys("gregkh-old")
@@ -227,7 +270,9 @@ def test_retired_key_keeps_earlier_signatures(
 
 
 def test_refuses_to_export_on_problem(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     reg.tier("dave", "maintainer", "dave", keys("dave"))  # self-promotion
     signers = tmp_path / "allowed_signers"
@@ -267,7 +312,9 @@ def test_no_output_path(reg: Registry) -> None:
 
 
 def test_only_endorsed_emails_are_principals(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     """DESIGN.md, Person file: principals are the handle, then the endorsed emails."""
     reg.person("dave", keys("dave"), emails=("dave@kernel.org", "Dave@Work.example"))
@@ -286,7 +333,10 @@ def test_only_endorsed_emails_are_principals(
 
 
 def test_handle_is_a_principal_without_endorsements(
-    reg: Registry, tmp_path: Path, repo: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    repo: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     """An anchor nobody has endorsed still verifies, under its handle."""
     reg.endorse("torvalds", keys("torvalds"), "gregkh", keys("gregkh"), emails=())
@@ -298,7 +348,9 @@ def test_handle_is_a_principal_without_endorsements(
 
 
 def test_refuses_shared_email(
-    reg: Registry, tmp_path: Path, keys: Callable[[str], Key]  # noqa: F811
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     """ssh-keygen matches principals case-sensitively, but an email is not case-sensitive."""
     reg.person("alice", keys("alice"), keys("alice2"), emails=("Gregkh@example.org",))

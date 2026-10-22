@@ -3,7 +3,9 @@
 **Status:** revised design, 2026-10-22. Replaces the signing format, git
 patch series and multi-project federation in the March 2026 documents
 (`kernel-did.md`, `git-did-design.md`, `lf-did-architecture.md`), which
-are kept for history. Not implemented.
+are kept for history. `git-vouch`, `git-vouch-migrate` and
+`git-vouch-attest` are implemented; `git vouch keys`, `git vouch query`,
+the patatt fork and `git-vouch-trqp` are not yet.
 
 ## Summary
 
@@ -429,6 +431,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
+| `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown (used by `git-vouch-trqp`) |
 | `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
@@ -605,7 +608,7 @@ SSH key. After it, nothing new needs `gpg`.
    date. After it, people register as newcomers.
 
 **Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at C, after
-verifying C's signature. For each live person key it writes an unsigned
+verifying C's signature. For each unrevoked person key it writes an unsigned
 draft person file: a proposed handle, the name, emails from unrevoked
 UIDs, and `migratedFrom`. The holder adds an SSH key, signs the draft
 with `git vouch register --from` and submits it. The tool never writes a signed
@@ -653,9 +656,11 @@ maintainers have no GPG key and register fresh.
 **Old signatures.** GPG-signed tags stay valid in history. Verifying
 them uses `gpg` with the archived pgpkeys at C. There is no manifest.
 
-**Out of scope.** Encryption keys (the remail and security lists) and
-b4/patatt. kernel.org keeps a small encryption-only GPG keyring; b4 can
-later read an OpenSSH keyring exported from the registry.
+**Out of scope.** Encryption keys (the remail and security lists).
+kernel.org keeps a small encryption-only GPG keyring. Patch signing is
+covered separately (see Patch signing): the patatt fork reads the
+registry, with the frozen GPG keyring as a warned fallback until the late
+cutoff.
 
 **Kernel-team calls, not design:** the anchor list, the freeze date, the
 window length and the late cutoff.
@@ -787,8 +792,8 @@ Decided 2026-10-22:
   duplicate fingerprints block drafts for both; continuity proof (`.asc`
   or reused auth subkey, expired keys accepted) only unlocks drafts and
   grants no tier; drafts generated locally by each certifier; old tags
-  verified with `gpg` and pgpkeys at C, no manifest; encryption keys and
-  b4 out of scope.
+  verified with `gpg` and pgpkeys at C, no manifest; encryption keys
+  out of scope; patch signing via the patatt fork.
 - **CLI details:** `git vouch did` takes a `.pub` path or key text;
   `register --from` completes a draft; no
   man page; `setup`/`sync` remember `--min-tier` and

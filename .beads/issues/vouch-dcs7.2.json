@@ -4,15 +4,17 @@
   "description": "Flag day: register and merge first with anchors.json, approve the first maintainers, switch gpg.ssh.allowedSignersFile to the --min-tier maintainer export, release tooling to --min-tier anchor, sign the first SSH release tag. Day to day: approving and demoting maintainers, revoking a compromised key, reading check warnings in registry merges, sync. Rotation, endorsing, lost key.",
   "acceptance_criteria": "All commands run successfully in a throwaway registry (doc test); links to vouching.md.",
   "notes": "Done: all 5 reviewer findings fixed (guide wording for anchors.json/deletions, merge block split into merge+check then push with a review stop, demotion negative verify-tag step, subject-key revocation void marked as current behaviour + QUESTION recorded). Doc test 9/9 and core 701 pass on 3.12 and 3.9; ruff clean. Committed 415680e. Remains: bd close refused because vouch-dcs7.2 depends on open epic vouch-omzm; close when omzm closes or owner forces. Open questions: TZ/DST verify-time, same-second retire, subject-key revocation voiding endorsements.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "issue_type": "task",
   "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T17:25:57.783920475Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T22:20:30.857193791Z",
+  "updated_at": "2026-10-22T23:21:21.559928403Z",
   "started_at": "2026-10-22T21:47:10.076634607Z",
+  "closed_at": "2026-10-22T23:21:21.559928403Z",
+  "close_reason": "Closed",
   "dependencies": [
     {
       "issue_id": "vouch-dcs7.2",
@@ -43,14 +45,6 @@
       "depends_on_id": "vouch-ey47.8",
       "type": "blocks",
       "created_at": "2026-10-22T17:25:58.116694713Z",
-      "created_by": "agent",
-      "metadata": "{}"
-    },
-    {
-      "issue_id": "vouch-dcs7.2",
-      "depends_on_id": "vouch-omzm",
-      "type": "blocks",
-      "created_at": "2026-10-22T17:25:58.495431829Z",
       "created_by": "agent",
       "metadata": "{}"
     },
