@@ -55,7 +55,10 @@ VouchError = vouch.VouchError
 FPR_RE = re.compile(r"[0-9A-F]{40}")
 # Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts.
 REUSABLE_CURVES = ("ed25519", "nistp256")
+# gpg validity letters for keys not live at C. A primary key is skipped only
+# if revoked or invalid: an expired one is still continuity proof (D9).
 NOT_LIVE = {"e": "expired at C", "r": "revoked", "i": "invalid at C"}
+SKIPPED = {"r": "revoked", "i": "invalid at C"}
 UID_RE = re.compile(r"(.*?)\s*(?:\([^()]*\))?\s*<([^<>]*)>")
 # kernel.org remail and security lists: "Flippant Fireant <flippant-fireant@kernel.org>".
 ROLE_RE = re.compile(r"([A-Za-z]+) ([A-Za-z]+) <([a-z]+)-([a-z]+)@kernel\.org>")
@@ -345,17 +348,17 @@ def port(pgp: Pgpkeys, out: Path) -> int:
         The number of drafts written.
     """
     keys = pgp.keys()
-    live = []
+    usable = []
     for key in keys:
-        if key.validity in NOT_LIVE:
-            print(f"skip {key.fpr}: {NOT_LIVE[key.validity]}")
+        if key.validity in SKIPPED:
+            print(f"skip {key.fpr}: {SKIPPED[key.validity]}")
         elif is_role_key(key):
             print(f"skip {key.fpr}: not a person: {key.uids[0]}")
         else:
-            live.append(key)
+            usable.append(key)
     people: list[tuple[GpgKey, list[str]]] = []
     names = {}
-    for group in group_people(live):
+    for group in group_people(usable):
         # UID emails are the holders' own claims: keys that share one but not
         # the primary name may be one holder borrowing another's email, so
         # none of them is drafted and an anchor settles it (as for D3).
@@ -368,9 +371,10 @@ def port(pgp: Pgpkeys, out: Path) -> int:
                     f"conflict {key.fpr}: shares an email with a differently named key"
                 )
             continue
-        # ponytail: one draft per person, from their newest key; the holder may
-        # edit migratedFrom to another of their keys before signing.
-        chosen = max(group, key=lambda k: (k.created, k.fpr))
+        # ponytail: one draft per person, from their newest unexpired key, else
+        # their newest key; the holder may edit migratedFrom to another of
+        # their keys before signing.
+        chosen = max(group, key=lambda k: (k.validity != "e", k.created, k.fpr))
         for other in group:
             if other is not chosen:
                 print(f"merge {other.fpr}: same person as {chosen.fpr}, which is used")
@@ -408,6 +412,7 @@ def port(pgp: Pgpkeys, out: Path) -> int:
     roles = [k for k in keys if is_role_key(k)]
     print(
         f"keys {len(keys)}, live {len(keys) - sum(k.validity in NOT_LIVE for k in keys)}, "
+        f"expired {sum(k.validity == 'e' for k in keys)}, "
         f"kernel.org list keys {len(roles)} "
         f"({len(roles) - sum(k.validity in NOT_LIVE for k in roles)} live), "
         f"people {len(people)}, drafts {len(drafts)}, live keys with a reusable "
@@ -446,8 +451,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Import keys/*.asc from pgpkeys.git at commit C into a temporary keyring, "
             "check C's signature, and write one unsigned draft people/<handle>.json "
             "per person to a new directory. Keys are judged at C's committer date: "
-            "expired or revoked keys and kernel.org list keys are skipped; keys "
-            "sharing an email are one person, drafted from the newest key, if "
+            "revoked keys and kernel.org list keys are skipped, expired keys are "
+            "not; keys sharing an email are one person, drafted from the newest "
+            "unexpired key (else the newest key), if "
             "their primary names match, and otherwise none is drafted. Emails "
             "come from unrevoked user IDs. An ed25519 or P-256 authentication "
             "subkey is pre-filled as the SSH key."

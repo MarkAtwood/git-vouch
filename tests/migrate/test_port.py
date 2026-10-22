@@ -108,11 +108,11 @@ def test_handles_from_awkward_local_parts(migrate: ModuleType) -> None:
 def test_port_report_counts(ported: Ported) -> None:
     summary = ported.stdout.splitlines()[-1]
     assert summary == (
-        "keys 13, live 11, kernel.org list keys 1 (1 live), people 7, drafts 7, "
+        "keys 17, live 12, expired 4, kernel.org list keys 1 (1 live), people 10, "
+        "drafts 10, "
         "live keys with a reusable auth subkey 2 (2 in drafts)"
     )
     fprs = ported.pgp.fprs
-    assert f"skip {fprs['eve']}: expired at C" in ported.stdout
     assert f"skip {fprs['frank']}: revoked" in ported.stdout
     assert f"skip {fprs['fireant']}: not a person" in ported.stdout
     assert (
@@ -123,7 +123,8 @@ def test_port_report_counts(ported: Ported) -> None:
 def test_port_writes_one_draft_per_person(ported: Ported) -> None:
     fprs = ported.pgp.fprs
     got = drafts(ported)
-    want = {"signer", "alice", "bob", "carol", "dave_new", "sam1", "sam2"}
+    want = {"signer", "alice", "bob", "carol", "dave_new", "eve", "gina_old"}
+    want |= {"sam1", "sam2", "hank_new"}
     assert set(got) == {fprs[k] for k in want}
     assert got[fprs["dave_new"]]["handle"] == "dave"
     assert set(got[fprs["dave_new"]]["emails"]) == {
@@ -132,6 +133,35 @@ def test_port_writes_one_draft_per_person(ported: Ported) -> None:
     }
     low, high = sorted([fprs["sam1"], fprs["sam2"]])
     assert (got[low]["handle"], got[high]["handle"]) == ("sam", "sam-2")
+
+
+def test_port_drafts_expired_but_not_revoked_key(ported: Ported) -> None:
+    fprs = ported.pgp.fprs
+    eve = drafts(ported)[fprs["eve"]]
+    assert eve["migratedFrom"] == "openpgp4fpr:" + fprs["eve"]
+    assert (eve["handle"], eve["emails"]) == ("eve", ["eve@example.org"])
+    assert eve["keys"] == []  # its auth subkey expired with the primary
+    assert f"skip {fprs['eve']}" not in ported.stdout
+    assert fprs["frank"] not in drafts(ported)
+    assert not any("frank@example.org" in d["emails"] for d in drafts(ported).values())
+
+
+def test_port_prefers_unexpired_key_of_one_person(ported: Ported) -> None:
+    fprs = ported.pgp.fprs
+    assert fprs["gina_new"] not in drafts(ported)
+    assert drafts(ported)[fprs["gina_old"]]["handle"] == "gina"
+    assert (
+        f"merge {fprs['gina_new']}: same person as {fprs['gina_old']}" in ported.stdout
+    )
+
+
+def test_port_uses_newest_key_when_all_expired(ported: Ported) -> None:
+    fprs = ported.pgp.fprs
+    assert fprs["hank_old"] not in drafts(ported)
+    assert drafts(ported)[fprs["hank_new"]]["handle"] == "hank"
+    assert (
+        f"merge {fprs['hank_old']}: same person as {fprs['hank_new']}" in ported.stdout
+    )
 
 
 def test_port_drafts_neither_key_when_names_differ(ported: Ported) -> None:

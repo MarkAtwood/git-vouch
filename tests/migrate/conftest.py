@@ -166,6 +166,18 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
                 "Eve Expired <eve@example.org>", expire="1d", at="20190101T000000"
             ),
             "frank": gpg.new_key("Frank Revoked <frank@example.org>"),
+            # One person: an older live key and a newer key expired at C.
+            "gina_old": gpg.new_key("Gina Green <gina@example.org>"),
+            "gina_new": gpg.new_key(
+                "Gina Green <gina@example.org>", expire="1d", at="20200201T000000"
+            ),
+            # One person whose keys both expired before C: the newer one is used.
+            "hank_old": gpg.new_key(
+                "Hank Hill <hank@example.org>", expire="1d", at="20190101T000000"
+            ),
+            "hank_new": gpg.new_key(
+                "Hank Hill <hank@example.org>", expire="1d", at="20190201T000000"
+            ),
             "fireant": gpg.new_key("Flippant Fireant <flippant-fireant@kernel.org>"),
             "sam1": gpg.new_key("Sam One <sam@example.com>"),
             "sam2": gpg.new_key("Sam Two <sam@example.org>"),
@@ -210,6 +222,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         # Reusable-curve auth subkeys that are not live at C: revoked, and expired.
         gpg.revoke_subkey(fprs["sam1"], gpg.add_key(fprs["sam1"], "ed25519", "auth"))
         gpg.add_key(fprs["sam2"], "ed25519", "auth", "1d")
+        # A non-expiring auth subkey under a primary that expired before C.
+        gpg.add_key(fprs["eve"], "ed25519", "auth", at="20190101T000000")
         gpg.revoke_key(fprs["frank"])
 
         repo = base / "pgpkeys.git"
