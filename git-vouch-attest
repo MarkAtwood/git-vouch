@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""git-vouch-attest: verify a FIDO key's attestation against a vendor root you supply.
+
+Reads the ssh-sk-attest-v01 blob written by ``ssh-keygen -O challenge=FILE
+-O write-attestation=FILE`` and checks it the way OpenSSH's
+regress/misc/ssh-verify-attestation does, then also checks the
+attestation certificate's chain to --ca. Every signature and X.509 check
+is done by the openssl CLI; no roots are bundled. Packed format only.
+See DESIGN.md, Keys.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import hashlib
+import json
+import struct
+import subprocess
+import sys
+import tempfile
+from collections.abc import Sequence
+from pathlib import Path
+from typing import NamedTuple, Union
+
+ATTEST_MAGIC = b"ssh-sk-attest-v01"
+MAX_FILE_SIZE = 64 * 1024
+MAX_CBOR_DEPTH = 8
+FLAG_UP = 0x01  # user present
+FLAG_AT = 0x40  # attested credential data included
+FLAG_ED = 0x80  # extension data included
+SK_ED25519 = "sk-ssh-ed25519@openssh.com"
+SK_ECDSA = "sk-ecdsa-sha2-nistp256@openssh.com"
+AAGUID_OID = bytes.fromhex("2b0601040182e51c010104")  # 1.3.6.1.4.1.45724.1.1.4
+
+CborValue = Union[int, bytes, list, dict]
+
+
+class AttestError(Exception):
+    """An attestation, key or input that does not verify."""
+
+
+class SkKey(NamedTuple):
+    """The parts of an sk- SSH public key that an attestation must match."""
+
+    key_type: str
+    public: bytes  # ed25519: 32 bytes; ecdsa: uncompressed point, 65 bytes
+    application: str
+
+
+class Blob(NamedTuple):
+    """The fields of an ssh-sk-attest-v01 blob."""
+
+    cert: bytes
+    sig: bytes
+    authdata: bytes  # raw authenticator data, CBOR wrapper removed
+
+
+def take_string(buf: bytes, pos: int) -> tuple[bytes, int]:
+    """Read one SSH wire string at pos and return it with the next offset."""
+    if pos + 4 > len(buf):
+        raise AttestError("truncated SSH string")
+    (length,) = struct.unpack(">I", buf[pos : pos + 4])
+    end = pos + 4 + length
+    if end > len(buf):
+        raise AttestError("truncated SSH string")
+    return buf[pos + 4 : end], end
+
+
+def take_cbor(buf: bytes, pos: int, depth: int = 0) -> tuple[CborValue, int]:
+    """Read one definite-length CBOR item (ints, strings, arrays, maps).
+
+    Text strings come back as bytes; nothing here needs them decoded.
+    """
+    if depth > MAX_CBOR_DEPTH or pos >= len(buf):
+        raise AttestError("malformed CBOR")
+    major, info = buf[pos] >> 5, buf[pos] & 0x1F
+    pos += 1
+    if info < 24:
+        arg = info
+    elif info <= 27:
+        size = 1 << (info - 24)
+        if pos + size > len(buf):
+            raise AttestError("malformed CBOR")
+        arg = int.from_bytes(buf[pos : pos + size], "big")
+        pos += size
+    else:
+        raise AttestError("unsupported CBOR item")
+    if major == 0:
+        return arg, pos
+    if major == 1:
+        return -1 - arg, pos
+    if major in (2, 3):
+        if pos + arg > len(buf):
+            raise AttestError("malformed CBOR")
+        return buf[pos : pos + arg], pos + arg
+    if major == 4:
+        items = []
+        for _ in range(arg):
+            item, pos = take_cbor(buf, pos, depth + 1)
+            items.append(item)
+        return items, pos
+    if major == 5:
+        mapping: dict = {}
+        for _ in range(arg):
+            key, pos = take_cbor(buf, pos, depth + 1)
+            if not isinstance(key, (int, bytes)):
+                raise AttestError("unsupported CBOR map key")
+            mapping[key], pos = take_cbor(buf, pos, depth + 1)
+        return mapping, pos
+    raise AttestError("unsupported CBOR item")
+
+
+def parse_blob(blob: bytes) -> Blob:
+    """Split an ssh-sk-attest-v01 blob into certificate, signature and authData."""
+    magic, pos = take_string(blob, 0)
+    if magic != ATTEST_MAGIC:
+        raise AttestError("not an ssh-sk-attest-v01 blob")
+    cert, pos = take_string(blob, pos)
+    sig, pos = take_string(blob, pos)
+    wrapped, pos = take_string(blob, pos)
+    if pos + 4 > len(blob):
+        raise AttestError("truncated blob")
+    _, pos = take_string(blob, pos + 4)  # reserved flags, then reserved string
+    if pos != len(blob):
+        raise AttestError("trailing data after blob")
+    authdata, end = take_cbor(wrapped, 0)
+    if not isinstance(authdata, bytes) or end != len(wrapped):
+        raise AttestError("authenticator data is not a CBOR byte string")
+    if not cert:
+        # Self attestation is signed by the credential key itself, so it
+        # says nothing about the device.
+        raise AttestError("no attestation certificate (self attestation)")
+    return Blob(cert, sig, authdata)
+
+
+def parse_sk_key(text: str) -> SkKey:
+    """Parse an sk- SSH public key line ("type base64 [comment]")."""
+    fields = text.split()
+    if len(fields) < 2 or fields[0] not in (SK_ED25519, SK_ECDSA):
+        raise AttestError("not an sk-ssh-ed25519 or sk-ecdsa-sha2-nistp256 key")
+    try:
+        wire = base64.b64decode(fields[1], validate=True)
+    except binascii.Error as exc:
+        raise AttestError("SSH key is not valid base64") from exc
+    parts = []
+    pos = 0
+    while pos < len(wire):
+        part, pos = take_string(wire, pos)
+        parts.append(part)
+    if fields[0] == SK_ED25519 and len(parts) == 3 and len(parts[1]) == 32:
+        public = parts[1]
+    elif fields[0] == SK_ECDSA and len(parts) == 4 and parts[1] == b"nistp256":
+        public = parts[2]
+    else:
+        raise AttestError("malformed SSH key")
+    if parts[0].decode("ascii", "replace") != fields[0]:
+        raise AttestError("SSH key type does not match its encoding")
+    return SkKey(fields[0], public, parts[-1].decode("utf-8", "replace"))
+
+
+def check_authdata(authdata: bytes, key: SkKey) -> bytes:
+    """Check authData against the SSH key, as libfido2 does; return the AAGUID."""
+    if len(authdata) < 55:
+        raise AttestError("authenticator data too short")
+    if authdata[:32] != hashlib.sha256(key.application.encode()).digest():
+        raise AttestError("authenticator data is for another application")
+    flags = authdata[32]
+    if not flags & FLAG_UP:
+        raise AttestError("user-present flag not set")
+    if not flags & FLAG_AT:
+        raise AttestError("no attested credential data")
+    aaguid = authdata[37:53]
+    (id_len,) = struct.unpack(">H", authdata[53:55])
+    cose, pos = take_cbor(authdata, 55 + id_len)
+    if flags & FLAG_ED:
+        _, pos = take_cbor(authdata, pos)
+    if pos != len(authdata):
+        raise AttestError("trailing data after authenticator data")
+    if not isinstance(cose, dict):
+        raise AttestError("credential public key is not a COSE key")
+    if key.key_type == SK_ED25519:
+        is_match = (cose.get(1), cose.get(3), cose.get(-1)) == (1, -8, 6) and cose.get(
+            -2
+        ) == key.public
+    else:
+        x, y = cose.get(-2), cose.get(-3)
+        is_match = (
+            (cose.get(1), cose.get(3), cose.get(-1)) == (2, -7, 1)
+            and isinstance(x, bytes)
+            and isinstance(y, bytes)
+            and b"\x04" + x + y == key.public
+        )
+    if not is_match:
+        raise AttestError("attested credential does not match the SSH key")
+    return aaguid
+
+
+def take_der(buf: bytes, pos: int) -> tuple[int, bytes, int]:
+    """Read one DER TLV at pos; return its tag byte, value and the next offset."""
+    if pos + 2 > len(buf):
+        raise AttestError("attestation certificate does not parse")
+    tag, length = buf[pos], buf[pos + 1]
+    pos += 2
+    if length & 0x80:
+        size = length & 0x7F
+        if not 1 <= size <= 4 or pos + size > len(buf):
+            raise AttestError("attestation certificate does not parse")
+        length = int.from_bytes(buf[pos : pos + size], "big")
+        pos += size
+    if pos + length > len(buf):
+        raise AttestError("attestation certificate does not parse")
+    return tag, buf[pos : pos + length], pos + length
+
+
+def cert_aaguid(der: bytes) -> bytes | None:
+    """Return the certificate's id-fido-gen-ce-aaguid extension value, if any.
+
+    The extension is OBJECT, optional critical BOOLEAN, then an OCTET STRING
+    that wraps a 16-byte OCTET STRING (WebAuthn 8.2.1).
+    """
+    _, cert, _ = take_der(der, 0)
+    _, tbs, _ = take_der(cert, 0)
+    pos, extensions = 0, b""
+    while pos < len(tbs):
+        tag, value, pos = take_der(tbs, pos)
+        if tag == 0xA3:  # [3] EXPLICIT Extensions
+            _, extensions, _ = take_der(value, 0)
+    pos = 0
+    while pos < len(extensions):
+        _, extension, pos = take_der(extensions, pos)
+        _, oid, at = take_der(extension, 0)
+        if oid != AAGUID_OID:
+            continue
+        tag, value, at = take_der(extension, at)
+        if tag == 0x01:
+            tag, value, at = take_der(extension, at)
+        inner_tag, inner, end = take_der(value, 0) if tag == 0x04 else (0, b"", 0)
+        if inner_tag != 0x04 or len(inner) != 16 or end != len(value):
+            raise AttestError("malformed AAGUID extension in attestation certificate")
+        return inner
+    return None
+
+
+def openssl(args: Sequence[str]) -> subprocess.CompletedProcess:
+    """Run the openssl CLI with an argument list and capture its output."""
+    try:
+        return subprocess.run(
+            ["openssl", *args], capture_output=True, text=True, errors="replace"
+        )
+    except FileNotFoundError as exc:
+        raise AttestError("openssl not found") from exc
+
+
+def verify(key_text: str, challenge: bytes, blob: bytes, ca: Path) -> str:
+    """Verify one attestation and return a one-line description of the device.
+
+    Args:
+        key_text: the sk- SSH public key the attestation should be for.
+        challenge: the exact challenge bytes given to ssh-keygen.
+        blob: the ssh-sk-attest-v01 blob ssh-keygen wrote.
+        ca: PEM file of trusted vendor certificates (root, plus any intermediates).
+
+    Raises:
+        AttestError: if any check fails.
+    """
+    key = parse_sk_key(key_text)
+    parts = parse_blob(blob)
+    aaguid = check_authdata(parts.authdata, key)
+    hexed = aaguid.hex()
+    with tempfile.TemporaryDirectory() as tmp:
+        cert_pem = Path(tmp, "cert.pem")
+        pub_pem = Path(tmp, "pub.pem")
+        signed = Path(tmp, "signed")
+        sig = Path(tmp, "sig")
+        cert_pem.write_text(
+            "-----BEGIN CERTIFICATE-----\n"
+            + base64.encodebytes(parts.cert).decode()
+            + "-----END CERTIFICATE-----\n"
+        )
+        signed.write_bytes(parts.authdata + hashlib.sha256(challenge).digest())
+        sig.write_bytes(parts.sig)
+        result = openssl(["x509", "-in", str(cert_pem), "-noout", "-pubkey"])
+        if result.returncode != 0:
+            raise AttestError("attestation certificate does not parse")
+        pub_pem.write_text(result.stdout)
+        # ponytail: dgst -sha256 covers ES256 and RS256 certificates, which
+        # is what authenticators ship; an Ed25519 certificate fails here as
+        # a bad signature. Upgrade path: pkeyutl -rawin for that key type.
+        result = openssl(
+            [
+                "dgst",
+                "-sha256",
+                "-verify",
+                str(pub_pem),
+                "-signature",
+                str(sig),
+                str(signed),
+            ]
+        )
+        if result.returncode != 0:
+            raise AttestError("attestation signature does not verify")
+        # -no-CApath -no-CAstore: trust --ca only, never the system store.
+        result = openssl(
+            [
+                "verify",
+                "-no-CApath",
+                "-no-CAstore",
+                "-CAfile",
+                str(ca.resolve()),
+                str(cert_pem),
+            ]
+        )
+        if result.returncode != 0:
+            reasons = [
+                line.partition("lookup: ")[2]
+                for line in (result.stdout + result.stderr).splitlines()
+                if "lookup: " in line
+            ]
+            raise AttestError(
+                "attestation certificate does not chain to --ca: "
+                + (reasons[0] if reasons else "openssl verify failed")
+            )
+        if cert_aaguid(parts.cert) not in (None, aaguid):
+            raise AttestError("AAGUID differs from the attestation certificate's")
+        result = openssl(["x509", "-in", str(cert_pem), "-noout", "-subject"])
+        if result.returncode != 0:
+            raise AttestError("attestation certificate does not parse")
+        subject = result.stdout.strip()
+    return (
+        f"verified packed attestation, aaguid {hexed[:8]}-{hexed[8:12]}-"
+        f"{hexed[12:16]}-{hexed[16:20]}-{hexed[20:]}, {subject}"
+    )
+
+
+def read_capped(path: Path) -> bytes:
+    """Read a file, refusing anything over the size cap."""
+    with path.open("rb") as f:
+        data = f.read(MAX_FILE_SIZE + 1)
+    if len(data) > MAX_FILE_SIZE:
+        raise AttestError(f"{path}: larger than {MAX_FILE_SIZE} bytes")
+    return data
+
+
+def person_attestations(path: Path) -> list[tuple[str, str, bytes, bytes]]:
+    """Return (label, key, challenge, blob) for each attested key in a person file."""
+    try:
+        person = json.loads(read_capped(path))
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        raise AttestError(f"{path}: not JSON") from exc
+    keys = person.get("keys") if isinstance(person, dict) else None
+    if not isinstance(keys, list):
+        raise AttestError(f"{path}: no keys list")
+    found = []
+    for index, entry in enumerate(keys):
+        label = f"{path}: keys[{index}]"
+        attestation = entry.get("attestation") if isinstance(entry, dict) else None
+        if attestation is None:
+            continue
+        ssh = entry.get("ssh")
+        if not isinstance(attestation, dict) or not isinstance(ssh, str):
+            raise AttestError(f"{label}: malformed key or attestation")
+        try:
+            blob = base64.b64decode(attestation.get("blob", ""), validate=True)
+            challenge = base64.b64decode(
+                attestation.get("challenge", ""), validate=True
+            )
+        except (binascii.Error, TypeError, ValueError) as exc:
+            raise AttestError(f"{label}: attestation is not base64") from exc
+        found.append((label, ssh, challenge, blob))
+    if not found:
+        raise AttestError(f"{path}: no key carries an attestation")
+    return found
+
+
+def main(argv: Sequence[str]) -> int:
+    """Run the command line; return the exit status."""
+    parser = argparse.ArgumentParser(
+        prog="git-vouch-attest",
+        description="Verify FIDO key attestations against a vendor root you supply. "
+        "Give either a person file (every key with an attestation is checked) "
+        "or PUBKEY CHALLENGE ATTESTATION files as written by ssh-keygen.",
+    )
+    parser.add_argument(
+        "--ca", required=True, type=Path, help="trusted vendor certificates, PEM"
+    )
+    parser.add_argument(
+        "files", nargs="+", type=Path, help="PERSON.json | PUBKEY CHALLENGE BLOB"
+    )
+    args = parser.parse_args(argv)
+    if len(args.files) not in (1, 3):
+        parser.error("give one person file, or PUBKEY CHALLENGE ATTESTATION")
+    status = 0
+    try:
+        if len(args.files) == 1:
+            items = person_attestations(args.files[0])
+        else:
+            pub, challenge, blob = args.files
+            items = [
+                (
+                    str(pub),
+                    read_capped(pub).decode("ascii", "replace"),
+                    read_capped(challenge),
+                    read_capped(blob),
+                )
+            ]
+        for label, key, challenge_bytes, blob_bytes in items:
+            try:
+                print(f"{label}: {verify(key, challenge_bytes, blob_bytes, args.ca)}")
+            except AttestError as exc:
+                print(f"git-vouch-attest: {label}: {exc}", file=sys.stderr)
+                status = 1
+    except (AttestError, OSError) as exc:
+        print(f"git-vouch-attest: {exc}", file=sys.stderr)
+        return 1
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
