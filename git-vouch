@@ -33,6 +33,8 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 # DID Core syntax: did:<method>:<method-specific-id>
 DID_RE = re.compile(r"did:[a-z0-9]+:(?:[A-Za-z0-9._%-]*:)*[A-Za-z0-9._%-]+")
 SEQ_RE = re.compile(r"(.+)-([1-9][0-9]*)")  # "<handle>-<n>" file stems
+# A flag-day person file's pgpkeys.git v4 key fingerprint (DESIGN.md, Flag day).
+MIGRATED_RE = re.compile(r"openpgp4fpr:([0-9A-Fa-f]{40})")
 # ponytail: placeholder; the kernel.org administrators choose the real path.
 DEFAULT_REGISTRY = "https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git"
 FETCHED_REF = "refs/vouch/registry"
@@ -469,6 +471,7 @@ class Person(NamedTuple):
     emails: tuple[str, ...]
     keys: tuple[PersonKey, ...]
     accountable: Optional[str]
+    migrated_from: Optional[str] = None  # the uppercase fingerprint in ``migratedFrom``
 
 
 class Tier(NamedTuple):
@@ -657,7 +660,12 @@ def _person(obj: Mapping[str, object], stem: str) -> Person:
         and all(isinstance(d, str) and DID_RE.fullmatch(d) for d in aka)
     ):
         raise VouchError("alsoKnownAs: must be a list of DIDs")
-    return Person(handle, name, emails, keys, accountable)
+    migrated = obj.get("migratedFrom")
+    match = MIGRATED_RE.fullmatch(migrated) if isinstance(migrated, str) else None
+    if migrated is not None and match is None:
+        raise VouchError("migratedFrom: must be openpgp4fpr: and a 40-hex fingerprint")
+    fpr = match.group(1).upper() if match else None
+    return Person(handle, name, emails, keys, accountable, fpr)
 
 
 def _tier(obj: Mapping[str, object], stem: str) -> Tier:
@@ -1239,7 +1247,9 @@ def check_registry(root: Path) -> CheckResult:
     listed in only one person file, ignoring case; it is endorsed if a
     valid endorsement lists it in ``subjectEmails``, and an unendorsed
     email is a warning. So is every version of a person file that no
-    unrevoked key current in its previous version signed. Void records and
+    unrevoked key current in its previous version signed, and every person
+    file whose ``migratedFrom`` fingerprint another one also claims
+    (ignoring case), whichever merged first. Void records and
     warnings do not fail the check, so a revocation never blocks the export
     that spreads it.
 
@@ -1771,6 +1781,18 @@ def check_registry(root: Path) -> CheckResult:
                 warnings.append(
                     f"people/{handle}.json: {email} is not endorsed, so not exported"
                 )
+
+    claims: dict[str, list[str]] = {}
+    for handle, person in sorted(people.items()):
+        if person.migrated_from is not None:
+            claims.setdefault(person.migrated_from, []).append(handle)
+    for fpr, handles in claims.items():
+        for handle in handles if len(handles) > 1 else []:
+            others = ", ".join(h for h in handles if h != handle)
+            warnings.append(
+                f"people/{handle}.json: migratedFrom openpgp4fpr:{fpr}"
+                f" is also claimed by {others}"
+            )
 
     return CheckResult(people, tiers, revoked, emails, problems, voids, warnings, ended)
 

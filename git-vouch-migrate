@@ -582,6 +582,11 @@ def verify_continuity(
             )
         else:
             claims[handle] = m.group(1).upper()
+    # git-vouch itself rejects a malformed one, leaving the file out of people.
+    for problem in result.problems:
+        m = re.fullmatch(r"people/(.+)\.json: (migratedFrom: .*)", problem)
+        if m:
+            failed[m.group(1)] = m.group(2)
     by_fpr: dict[str, list[str]] = {}
     for handle, fpr in claims.items():
         by_fpr.setdefault(fpr, []).append(handle)
@@ -609,7 +614,7 @@ def verify_continuity(
         failed = {h: why for h, why in failed.items() if h in handles}
         for handle in handles:
             if handle not in result.people:
-                failed[handle] = "no validly signed person file"
+                failed.setdefault(handle, "no validly signed person file")
             elif handle not in claims and handle not in failed:
                 failed[handle] = "no migratedFrom"
     return Continuity(proven, failed, duplicates, result)
