@@ -1,0 +1,13 @@
+{
+  "id": "vouch-mzkw",
+  "title": "git-vouch-patatt: registry-backed keyring for patch signing (b4/patatt)",
+  "description": "Kernel patch emails are signed with patatt (built into b4): X-Developer-Signature header, checked by 'b4 am'. patatt already supports openssh keys: signs with 'ssh-keygen -Y sign -n patatt' (~/GIT/patatt src/patatt/__init__.py:488), verifies with a one-line allowed-signers restricted to namespace patatt (:519-558), looks keys up by email at openssh/\u003cdomain\u003e/\u003clocal\u003e/\u003cselector\u003e (:1180, also by-hash/), and can read the keyring straight from a git ref (ref:repo:refspec:subpath, :1257). patatt has no notion of tiers, revocation or validity windows: presence in the keyring is trust. Today the kernel's b4 keyring is pgpkeys.git .keyring/openpgp (1709 symlinks); after flag day it is frozen (D7). This epic adds a small single-purpose tool (METARULE 2) that writes a patatt openssh keyring from the registry, so patch attestation follows the registry's endorsements and revocations.",
+  "design": "Shape: git-vouch-patatt reads the registry via git-vouch's own check (import, never reimplement) and writes openssh/\u003cdomain\u003e/\u003clocal\u003e/\u003cselector\u003e files: one per endorsed email (D2) x eligible key. Output is a plain directory, optionally committed to a git ref so b4 users set patatt.keyringsrc=ref:... (METARULE 1: distribution by git). Revocations are honoured by omission, since patatt cannot express them.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "epic",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:46:44.678827895Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:46:44.678827895Z"
+}

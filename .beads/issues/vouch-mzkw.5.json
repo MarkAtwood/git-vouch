@@ -1,0 +1,47 @@
+{
+  "id": "vouch-mzkw.5",
+  "title": "Docs: signing patches with your registry key",
+  "description": "Add a 'Signing patches' section to the captains and regulars guides (patatt/b4 config: openssh signing key, keyringsrc pointing at the published keyring) and a note for kernel.org on publishing the keyring after flag day.",
+  "acceptance_criteria": "Commands in the docs run successfully in a throwaway setup with real patatt.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:46:45.293004259Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:46:45.293004259Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-mzkw",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:46:45.314462776Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-mzkw.4",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:46:45.679816701Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-dcs7.3",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:46:45.861842633Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-dcs7.4",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:46:45.965318242Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

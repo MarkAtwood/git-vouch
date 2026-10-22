@@ -1,0 +1,39 @@
+{
+  "id": "vouch-mzkw.3",
+  "title": "git-vouch-patatt: write the openssh keyring from the registry",
+  "description": "Separate executable, Python 3.9+ stdlib only, imports git-vouch's check result. Writes the keyring tree to a directory (atomic replace, stale entries removed, paths built like patatt's make_pkey_path with urlencoding), per the decision bead. Optional --commit-ref REF writes it as a commit on a git ref with plain git plumbing. Never prompts; untrusted registry values never reach a shell.",
+  "acceptance_criteria": "Tests: tree layout matches patatt's make_pkey_path for sample identities; revoked and unendorsed entries absent; rerun is idempotent; --commit-ref produces a ref readable via git show.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-22T18:46:45.039600376Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-22T18:46:45.039600376Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-mzkw.3",
+      "depends_on_id": "vouch-mzkw",
+      "type": "parent-child",
+      "created_at": "2026-10-22T18:46:45.058764742Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.3",
+      "depends_on_id": "vouch-mzkw.2",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:46:45.501382952Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.3",
+      "depends_on_id": "vouch-ey47.6",
+      "type": "blocks",
+      "created_at": "2026-10-22T18:46:45.767064522Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
