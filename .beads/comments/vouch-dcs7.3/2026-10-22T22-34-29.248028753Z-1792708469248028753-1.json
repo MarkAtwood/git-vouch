@@ -1,0 +1,7 @@
+{
+  "id": "1792708469248028753-1",
+  "issue_id": "vouch-dcs7.3",
+  "author": "agent",
+  "text": "Implemented: docs/guide-captains.md; doc test tests/migrate/test_guide_captains.py (in tests/migrate because the flag-day steps run gpg and git-vouch-migrate against a synthetic pgpkeys at signed C; reuses tests/migrate/conftest.py helpers without editing it). Anchor registration and bob's .asc registration run as a test PRELUDE, not on the page. Lost key without a backup is prose linking guide-anchors.md, which runs that path. 10 passed on 3.12 and 3.9; ruff clean.",
+  "created_at": "2026-10-22T22:34:29.248028753Z"
+}
