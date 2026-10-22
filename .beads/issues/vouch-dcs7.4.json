@@ -3,13 +3,14 @@
   "title": "docs/guide-regulars.md: for contributors",
   "description": "Flag day: create an SSH key (hardware recommended; FIDO ed25519-sk), register, optional continuity proof, get endorsed, get approved as contributor, git vouch setup. Day to day: signing commits and tags, git vouch sync/status. Rotation, endorsing others, lost key. Shortest of the three.",
   "acceptance_criteria": "All commands run successfully in a throwaway registry (doc test); links to vouching.md.",
+  "notes": "Patch signing (patatt/b4) sections are added later by vouch-mzkw.5 once the patatt fork exists; do not write patatt instructions in this bead (they could not be doc-tested yet).",
   "status": "open",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T17:25:57.940922527Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T17:25:57.940922527Z",
+  "updated_at": "2026-10-22T19:25:22.495396831Z",
   "dependencies": [
     {
       "issue_id": "vouch-dcs7.4",

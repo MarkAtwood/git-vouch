@@ -1,15 +1,15 @@
 {
   "id": "vouch-mzkw.5",
-  "title": "Docs: signing patches with your registry key",
-  "description": "Add a 'Signing patches' section to the captains and regulars guides (patatt/b4 config: openssh signing key, keyringsrc pointing at the published keyring) and a note for kernel.org on publishing the keyring after flag day.",
-  "acceptance_criteria": "Commands in the docs run successfully in a throwaway setup with real patatt.",
+  "title": "Docs: patch signing with patatt/b4 across all guides and the runbook",
+  "description": "Add patatt/b4 everywhere it belongs, once the fork (mzkw.7) and b4 check (mzkw.8) exist so every command can be run:\n- guide-regulars: install the patatt fork (pip install from github.com/MarkAtwood/patatt branch git-vouch, or the b4 that bundles it); configure signing with your registry SSH key (patatt.signingkey, patatt.selector = the selector 'git vouch status' prints); b4 send / git send-email hook signs; what recipients see.\n- guide-captains: the same, plus checking incoming patches with b4 am (pass / warned legacy-GPG pass / fail / no key), and what to tell a contributor whose patch is unverified.\n- guide-anchors: the same, plus kernel-wide config guidance and the decision to drop the GPG fallback at the late cutoff.\n- All three, 'Flag day': keyringsrc = vouch: first, legacy GPG keyring second (warned fallback for everyone until the late cutoff). 'Rotating your key': the selector changes with the key, so update patatt.selector. 'If you lose a key': revoked keys stop verifying patches immediately after sync.\n- docs/flag-day.md: the patatt timeline (install fork before flag day; remove the legacy keyringsrc line after the late cutoff).\n- docs/vouching.md: one line that an endorsed email is what makes your patches verify.",
+  "acceptance_criteria": "Every patatt/b4 command shown is run in a throwaway setup with the real fork and real b4 (doc test); behaviour matches DESIGN.md 'Patch signing'.",
   "status": "open",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T18:46:45.293004259Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T18:46:45.293004259Z",
+  "updated_at": "2026-10-22T19:25:21.881413893Z",
   "dependencies": [
     {
       "issue_id": "vouch-mzkw.5",
@@ -40,6 +40,30 @@
       "depends_on_id": "vouch-dcs7.4",
       "type": "blocks",
       "created_at": "2026-10-22T18:46:45.965318242Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-mzkw.8",
+      "type": "blocks",
+      "created_at": "2026-10-22T19:25:21.992689786Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-omzm.6",
+      "type": "blocks",
+      "created_at": "2026-10-22T19:25:22.084616928Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-mzkw.5",
+      "depends_on_id": "vouch-dcs7.2",
+      "type": "blocks",
+      "created_at": "2026-10-22T19:25:22.187707104Z",
       "created_by": "agent",
       "metadata": "{}"
     }
