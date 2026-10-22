@@ -1,0 +1,1359 @@
+#!/usr/bin/env python3
+"""git-vouch: check a kernel identity registry and export git's allowed-signers files.
+
+All signing and verification is done by ssh-keygen and git; this file
+contains no cryptography. See DESIGN.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import NamedTuple, Optional, Union
+
+HANDLE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,38}")
+MAX_FILE_SIZE = 64 * 1024
+TIERS = ("anchor", "maintainer", "contributor", "automation")
+CONTEXT = "https://w3id.org/git-vouch/v1"
+DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+# Emails become allowed-signers principals, which are comma-separated
+# patterns; this keeps out ',', whitespace and the wildcards '*', '?', '!'.
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
+# DID Core syntax: did:<method>:<method-specific-id>
+DID_RE = re.compile(r"did:[a-z0-9]+:(?:[A-Za-z0-9._%-]*:)*[A-Za-z0-9._%-]+")
+SEQ_RE = re.compile(r"(.+)-([1-9][0-9]*)")  # "<handle>-<n>" file stems
+
+B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+ED25519_CODEC = b"\xed\x01"  # multicodec ed25519-pub (0xed) as a varint
+P256_CODEC = b"\x80\x24"  # multicodec p256-pub (0x1200) as a varint
+P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
+P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+# Number of SSH wire strings in each accepted key blob; sk- keys add an application.
+SSH_KEY_FIELDS = {
+    "ssh-ed25519": 2,
+    "sk-ssh-ed25519@openssh.com": 3,
+    "ecdsa-sha2-nistp256": 3,
+    "sk-ecdsa-sha2-nistp256@openssh.com": 4,
+}
+MAX_DID_LEN = 64  # a P-256 did:key is 57 characters; longer input is never decoded
+NAMESPACES = {
+    "people": "git-vouch-register",
+    "tiers": "git-vouch-tier",
+    "endorsements": "git-vouch-endorse",
+    "revocations": "git-vouch-revoke",
+}
+# One armored "ssh-keygen -Y sign" block; a .sig file is one or more of them.
+SIG_RE = re.compile(
+    rb"-----BEGIN SSH SIGNATURE-----\n[A-Za-z0-9+/=\n]+-----END SSH SIGNATURE-----\n"
+)
+SIGS_RE = re.compile(b"(?:" + SIG_RE.pattern + b")+")
+
+
+class VouchError(Exception):
+    """A failure reported to the user as an error message and non-zero exit."""
+
+
+def run(
+    argv: Sequence[str],
+    *,
+    values: Sequence[str] = (),
+    stdin: Optional[bytes] = None,
+    cwd: Optional[Path] = None,
+) -> bytes:
+    """Run a program without a shell and return its stdout.
+
+    Args:
+        argv: Program and options; must not contain registry values.
+        values: Untrusted values, passed as separate arguments after ``--``.
+        stdin: Bytes fed to the program's standard input.
+        cwd: Working directory for the program.
+
+    Raises:
+        VouchError: The program could not be started or exited non-zero.
+    """
+    cmd = [*argv, "--", *values] if values else list(argv)
+    try:
+        proc = subprocess.run(
+            cmd, input=stdin, cwd=cwd, capture_output=True, check=False
+        )
+    except OSError as e:
+        raise VouchError(f"cannot run {cmd[0]}: {e}") from e
+    if proc.returncode != 0:
+        err = proc.stderr.decode(errors="replace").strip()
+        raise VouchError(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''} failed: {err}")
+    return proc.stdout
+
+
+def validate_handle(name: object) -> str:
+    """Return ``name`` if it is a valid handle or record file stem.
+
+    Raises:
+        VouchError: ``name`` is not a str matching ``^[a-z0-9][a-z0-9_-]{0,38}$``.
+    """
+    if not isinstance(name, str) or not HANDLE_RE.fullmatch(name):
+        raise VouchError(f"invalid handle or file name: {name!r}")
+    return name
+
+
+def _open_below(root: Path, rel: str, last_flags: int) -> int:
+    """Open ``rel`` below ``root`` one component at a time with O_NOFOLLOW; return the fd.
+
+    Raises:
+        VouchError: ``rel`` is not a plain relative path.
+        OSError: A component is missing, a symlink, or cannot be opened.
+    """
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise VouchError(f"{rel!r}: not a plain path below the registry")
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for i, part in enumerate(parts):
+            last = i == len(parts) - 1
+            flags = os.O_NOFOLLOW | (last_flags if last else os.O_DIRECTORY)
+            parent = fd
+            fd = os.open(part, flags, dir_fd=parent)
+            os.close(parent)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def read_capped(root: Path, rel: str) -> bytes:
+    """Return the bytes of the regular file ``rel`` under ``root``, at most MAX_FILE_SIZE.
+
+    Each component below ``root`` is opened relative to its parent with
+    O_NOFOLLOW, so no symlink in ``rel`` is followed and nothing can be
+    swapped in between a check and the open.
+
+    Args:
+        root: Registry checkout; symlinks above it are allowed.
+        rel: Slash-separated path below ``root``.
+
+    Raises:
+        VouchError: ``rel`` escapes ``root``, crosses a symlink, does not
+            name a regular file, or the file is too large.
+    """
+    try:
+        fd = _open_below(root, rel, os.O_NONBLOCK)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise VouchError(f"{rel}: not a regular file")
+            with os.fdopen(fd, "rb", closefd=False) as f:
+                data = f.read(MAX_FILE_SIZE + 1)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        raise VouchError(f"{rel}: cannot read: {e.strerror}") from e
+    if len(data) > MAX_FILE_SIZE:
+        raise VouchError(f"{rel}: larger than {MAX_FILE_SIZE} bytes")
+    return data
+
+
+def list_dir(root: Path, rel: str) -> list[str]:
+    """Return the sorted entry names of directory ``rel`` under ``root``; [] if it is missing.
+
+    Like ``read_capped``, no symlink below ``root`` is followed.
+
+    Raises:
+        VouchError: ``rel`` crosses a symlink or is not a directory.
+    """
+    try:
+        fd = _open_below(root, rel, os.O_DIRECTORY)
+        try:
+            return sorted(os.listdir(fd))
+        finally:
+            os.close(fd)
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        raise VouchError(f"{rel}: cannot list: {e.strerror}") from e
+
+
+class Version(NamedTuple):
+    """One commit that changed a registry path, from ``file_history``."""
+
+    commit: str
+    date: datetime  # committer date, UTC
+    parents: tuple[str, ...]  # empty for a root commit; more than one for a merge
+    data: Optional[bytes]  # content at ``commit``; None if it deleted the path
+
+
+# Neither the user's config nor replace refs may change what is read.
+GIT = ["git", "--no-replace-objects"]
+GIT_LOG = [
+    *GIT,
+    "--literal-pathspecs",
+    "-c",
+    "log.follow=false",
+    "-c",
+    "log.showSignature=false",
+]
+FILE_MODES = ("100644", "100755")
+
+
+def file_history(root: Path, rel: str) -> list[Version]:
+    """Return every version of ``rel`` in the registry repository at ``root``, oldest first.
+
+    A version is a commit whose ``rel`` differs from that of its parent, or,
+    for a merge, from that of every parent. History is not simplified, so
+    every side-branch commit is listed, even when a merge kept the other
+    side's content. A merge that kept one parent's content is not listed.
+    The order is topological, and on a branched history the entry before a
+    version need not be its predecessor: the previous content of a version
+    is ``rel`` at each of its ``parents``.
+
+    Args:
+        root: Top of the registry's git work tree.
+        rel: Slash-separated path below ``root``.
+
+    Raises:
+        VouchError: ``rel`` is not a plain path, the repository is a shallow
+            clone, git fails, or a version is not a regular file (a
+            directory, symlink or submodule) or is too large.
+    """
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts) or not rel.isprintable():
+        raise VouchError(f"{rel!r}: not a plain path below the registry")
+    if run([*GIT, "rev-parse", "--is-shallow-repository"], cwd=root).strip() == b"true":
+        raise VouchError(f"{root}: shallow clone; the registry needs its full history")
+    # -c prints a merge's raw line only when it differs from every parent;
+    # --root and --no-renames pin what log.showRoot and diff.renames would change.
+    log = run(
+        [
+            *GIT_LOG,
+            "log",
+            "--topo-order",
+            "--reverse",
+            "--full-history",
+            "-c",
+            "--raw",
+            "--root",
+            "--no-renames",
+            "--no-abbrev",
+            "-z",
+            "--format=%H %ct %P",
+        ],
+        values=[rel],
+        cwd=root,
+    )
+    found = []  # (commit, committer time, parents, result mode, result blob)
+    tokens = iter(log.split(b"\0"))
+    for token in tokens:
+        token = token.lstrip(b"\n")
+        if not token:
+            continue
+        if not token.startswith(b":"):
+            commit, ctime, *parents = token.decode().split()
+            continue
+        path = next(tokens, b"")
+        n = len(token) - len(token.lstrip(b":"))
+        fields = token[n:].decode().split()
+        mode, blob = fields[n], fields[2 * n + 1]
+        if path != rel.encode() or mode not in ("000000", *FILE_MODES):
+            raise VouchError(f"{rel} at {commit}: not a regular file")
+        found.append((commit, ctime, tuple(parents), mode, blob))
+    blobs = [f[4] for f in found if f[3] != "000000"]
+    if blobs:
+        # ponytail: two cat-file processes for the whole history; sizes are checked
+        # first so no oversized blob is ever read.
+        checks = run(
+            [*GIT, "cat-file", "--batch-check"],
+            stdin="".join(f"{b}\n" for b in blobs).encode(),
+            cwd=root,
+        ).splitlines()
+        sizes = [c.split()[2] if c.split()[1:2] == [b"blob"] else b"" for c in checks]
+        if len(sizes) != len(blobs) or not all(
+            s.isdigit() and int(s) <= MAX_FILE_SIZE for s in sizes
+        ):
+            raise VouchError(
+                f"{rel}: a version is not a blob of at most {MAX_FILE_SIZE} bytes"
+            )
+    out = run(
+        [*GIT, "cat-file", "--batch"],
+        stdin="".join(f"{b}\n" for b in blobs).encode(),
+        cwd=root,
+    )
+    contents = {}
+    for blob in blobs:
+        header, out = out.split(b"\n", 1)
+        size = int(header.split()[2])
+        contents[blob], out = out[:size], out[size + 1 :]
+    return [
+        Version(
+            commit,
+            datetime.fromtimestamp(int(ctime), timezone.utc),
+            parents,
+            None if mode == "000000" else contents[blob],
+        )
+        for commit, ctime, parents, mode, blob in found
+    ]
+
+
+def b58encode(data: bytes) -> str:
+    """Return ``data`` in base58btc (the Bitcoin alphabet), one '1' per leading zero byte."""
+    n = int.from_bytes(data, "big")
+    out = ""
+    while n:
+        n, r = divmod(n, 58)
+        out = B58_ALPHABET[r] + out
+    return "1" * (len(data) - len(data.lstrip(b"\0"))) + out
+
+
+def b58decode(text: str) -> bytes:
+    """Return the bytes encoded by base58btc ``text``.
+
+    Raises:
+        VouchError: ``text`` contains a character outside the alphabet.
+    """
+    n = 0
+    for c in text:
+        i = B58_ALPHABET.find(c)
+        if i < 0:
+            raise VouchError(f"invalid base58 character {c!r}")
+        n = n * 58 + i
+    zeros = len(text) - len(text.lstrip("1"))
+    return b"\0" * zeros + n.to_bytes((n.bit_length() + 7) // 8, "big")
+
+
+def _p256_y(x: int, is_odd: bool) -> int:
+    """Return the y coordinate of the P-256 point with ``x`` and the given parity.
+
+    Raises:
+        VouchError: ``x`` is not the x coordinate of a point on the curve.
+    """
+    if x >= P256_P:
+        raise VouchError("P-256 coordinate out of range")
+    rhs = (x * x * x - 3 * x + P256_B) % P256_P
+    y = pow(rhs, (P256_P + 1) // 4, P256_P)  # square root, since p = 3 (mod 4)
+    if y * y % P256_P != rhs:
+        raise VouchError("not a point on P-256")
+    return P256_P - y if (y & 1) != is_odd else y
+
+
+def _ssh_strings(blob: bytes) -> list[bytes]:
+    """Split an SSH wire-format blob into its length-prefixed strings.
+
+    Raises:
+        VouchError: The blob is truncated.
+    """
+    out: list[bytes] = []
+    while blob:
+        n = int.from_bytes(blob[:4], "big")
+        if len(blob) < 4 + n:
+            raise VouchError("truncated SSH public key")
+        out.append(blob[4 : 4 + n])
+        blob = blob[4 + n :]
+    return out
+
+
+def ssh_to_did(pubkey: str) -> str:
+    """Return the did:key for an OpenSSH public key line ("type base64 [comment]").
+
+    ed25519 keys use multicodec ed25519-pub; ecdsa-sha2-nistp256 keys use
+    p256-pub with the compressed point. The sk- (FIDO) variants map to the
+    same did:key as their plain type.
+
+    Raises:
+        VouchError: The key is malformed or of an unsupported type (RSA, DSA, ...).
+    """
+    fields = pubkey.split()
+    if len(fields) < 2:
+        raise VouchError("not an SSH public key line")
+    key_type = fields[0]
+    count = SSH_KEY_FIELDS.get(key_type)
+    if count is None:
+        raise VouchError(
+            f"unsupported key type {key_type!r}: only ed25519 and"
+            " ecdsa-sha2-nistp256 keys (and their sk- variants) are accepted"
+        )
+    try:
+        parts = _ssh_strings(base64.b64decode(fields[1], validate=True))
+    except ValueError as e:
+        raise VouchError(f"invalid base64 in SSH public key: {e}") from e
+    if len(parts) != count or parts[0] != key_type.encode():
+        raise VouchError(f"malformed {key_type} public key")
+    if "ed25519" in key_type:
+        if len(parts[1]) != 32:
+            raise VouchError("ed25519 public key is not 32 bytes")
+        return "did:key:z" + b58encode(ED25519_CODEC + parts[1])
+    point = parts[2]
+    if parts[1] != b"nistp256" or len(point) != 65 or point[0] != 4:
+        raise VouchError("malformed P-256 public key")
+    x = int.from_bytes(point[1:33], "big")
+    y = int.from_bytes(point[33:], "big")
+    if _p256_y(x, bool(y & 1)) != y:
+        raise VouchError("not a point on P-256")
+    return "did:key:z" + b58encode(P256_CODEC + bytes([2 + (y & 1)]) + point[1:33])
+
+
+def did_to_ssh(did: str) -> str:
+    """Return the OpenSSH public key line ("type base64") for an ed25519 or P-256 did:key.
+
+    A did:key does not record whether the key was a FIDO (sk-) key, so the
+    plain SSH type is returned.
+
+    Raises:
+        VouchError: ``did`` is not a did:key for an ed25519 or P-256 key.
+    """
+    unsupported = VouchError(f"not an ed25519 or P-256 did:key: {did[:MAX_DID_LEN]!r}")
+    if not did.startswith("did:key:z") or len(did) > MAX_DID_LEN:
+        raise unsupported
+    raw = b58decode(did[len("did:key:z") :])
+    codec, key = raw[:2], raw[2:]
+    if codec == ED25519_CODEC and len(key) == 32:
+        parts = [b"ssh-ed25519", key]
+    elif codec == P256_CODEC and len(key) == 33 and key[0] in (2, 3):
+        y = _p256_y(int.from_bytes(key[1:], "big"), key[0] == 3)
+        parts = [
+            b"ecdsa-sha2-nistp256",
+            b"nistp256",
+            b"\x04" + key[1:] + y.to_bytes(32, "big"),
+        ]
+    else:
+        raise unsupported
+    blob = b"".join(len(p).to_bytes(4, "big") + p for p in parts)
+    return f"{parts[0].decode()} {base64.b64encode(blob).decode()}"
+
+
+class PersonKey(NamedTuple):
+    """One entry of a person file's ``keys``; ``ssh`` is "type base64" with any comment dropped."""
+
+    ssh: str
+    did: str
+    added: datetime
+    retired: Optional[datetime]
+    attestation: Optional[str] = None
+
+
+class Person(NamedTuple):
+    """A parsed ``people/<handle>.json``."""
+
+    handle: str
+    name: str
+    emails: tuple[str, ...]
+    keys: tuple[PersonKey, ...]
+    accountable: Optional[str]
+
+
+class Tier(NamedTuple):
+    """A parsed ``tiers/<subject>.json``."""
+
+    subject: str
+    tier: str
+    approver: str
+    approver_key: str
+    date: datetime
+
+
+class Endorsement(NamedTuple):
+    """A parsed ``endorsements/<subject>/<endorser>-<n>.json``."""
+
+    endorser: str
+    endorser_key: str
+    subject: str
+    subject_key: str
+    subject_name: str
+    note: Optional[str]
+    date: datetime
+
+
+class Revocation(NamedTuple):
+    """A parsed ``revocations/<subject>-<n>.json``."""
+
+    subject: str
+    key: str
+    reason: str
+    date: datetime
+
+
+Record = Union[Person, Tier, Endorsement, Revocation]
+
+
+def _reject_constant(name: str) -> object:
+    raise ValueError(f"{name} is not allowed")
+
+
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    obj: dict[str, object] = {}
+    for key, value in pairs:
+        if key in obj:
+            # Parsers disagree on which duplicate wins; refuse rather than pick.
+            raise VouchError(f"duplicate key {key!r:.60}")
+        obj[key] = value
+    return obj
+
+
+def _load_json(data: bytes) -> object:
+    """Return the JSON value in UTF-8 ``data``, refusing duplicate keys and NaN/Infinity."""
+    try:
+        return json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique_keys,
+            parse_constant=_reject_constant,
+        )
+    except (ValueError, RecursionError) as e:
+        raise VouchError(f"not valid JSON: {e}") from e
+
+
+def _required(obj: Mapping[str, object], key: str) -> object:
+    value = obj.get(key)
+    if value is None:
+        raise VouchError(f"{key}: required")
+    return value
+
+
+def _handle(obj: Mapping[str, object], key: str) -> str:
+    value = _required(obj, key)
+    if not isinstance(value, str) or not HANDLE_RE.fullmatch(value):
+        raise VouchError(f"{key}: invalid handle {value!r:.60}")
+    return value
+
+
+def _matching_handle(obj: Mapping[str, object], key: str, expected: str) -> str:
+    value = _handle(obj, key)
+    if value != expected:
+        raise VouchError(
+            f"{key}: {value!r} does not match the file name ({expected!r})"
+        )
+    return value
+
+
+def _text(obj: Mapping[str, object], key: str) -> str:
+    value = _required(obj, key)
+    if not isinstance(value, str) or not value or not value.isprintable():
+        raise VouchError(f"{key}: must be a non-empty string of printable characters")
+    return value
+
+
+def _did_key(obj: Mapping[str, object], key: str) -> str:
+    value = _required(obj, key)
+    if not isinstance(value, str):
+        raise VouchError(f"{key}: must be a did:key string")
+    try:
+        did_to_ssh(value)
+    except VouchError as e:
+        raise VouchError(f"{key}: {e}") from e
+    return value
+
+
+def _date(obj: Mapping[str, object], key: str) -> datetime:
+    value = _required(obj, key)
+    if isinstance(value, str) and DATE_RE.fullmatch(value):
+        try:
+            return datetime.strptime(value, DATE_FORMAT).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    raise VouchError(
+        f"{key}: must be a UTC time like 2026-11-05T00:00:00Z, not {value!r:.60}"
+    )
+
+
+def _list(obj: Mapping[str, object], key: str) -> list[object]:
+    value = _required(obj, key)
+    if not isinstance(value, list) or not value:
+        raise VouchError(f"{key}: must be a non-empty list")
+    return value
+
+
+def _person_key(obj: object, where: str) -> PersonKey:
+    if not isinstance(obj, dict):
+        raise VouchError(f"{where}: must be an object")
+    try:
+        ssh = _required(obj, "ssh")
+        if not isinstance(ssh, str):
+            raise VouchError("ssh: must be an SSH public key line")
+        try:
+            did = ssh_to_did(ssh)
+        except VouchError as e:
+            raise VouchError(f"ssh: {e}") from e
+        retired = None if obj.get("retired") is None else _date(obj, "retired")
+        attestation = obj.get("attestation")
+        if attestation is not None:
+            try:
+                if not isinstance(attestation, str) or not attestation:
+                    raise ValueError
+                raw = base64.b64decode(attestation, validate=True)
+                if base64.b64encode(raw).decode() != attestation:  # stray padding
+                    raise ValueError
+            except ValueError as e:
+                raise VouchError(
+                    "attestation: must be a non-empty base64 string"
+                ) from e
+        ssh = " ".join(ssh.split()[:2])
+        return PersonKey(ssh, did, _date(obj, "added"), retired, attestation)
+    except VouchError as e:
+        raise VouchError(f"{where}.{e}") from e
+
+
+def _person(obj: Mapping[str, object], stem: str) -> Person:
+    handle = _matching_handle(obj, "handle", stem)
+    name = _text(obj, "name")
+    emails = []
+    for email in _list(obj, "emails"):
+        if not isinstance(email, str) or not EMAIL_RE.fullmatch(email):
+            raise VouchError(f"emails: invalid address {email!r:.60}")
+        emails.append(email)
+    keys = tuple(_person_key(k, f"keys[{i}]") for i, k in enumerate(_list(obj, "keys")))
+    if len({k.did for k in keys}) != len(keys):
+        raise VouchError("keys: the same key is listed twice")
+    accountable = (
+        None if obj.get("accountable") is None else _handle(obj, "accountable")
+    )
+    aka = obj.get("alsoKnownAs")
+    if aka is not None and not (
+        isinstance(aka, list)
+        and all(isinstance(d, str) and DID_RE.fullmatch(d) for d in aka)
+    ):
+        raise VouchError("alsoKnownAs: must be a list of DIDs")
+    return Person(handle, name, tuple(emails), keys, accountable)
+
+
+def _tier(obj: Mapping[str, object], stem: str) -> Tier:
+    subject = _matching_handle(obj, "subject", stem)
+    tier = _required(obj, "tier")
+    if (
+        not isinstance(tier, str) or tier not in TIERS[1:]
+    ):  # anchors come only from anchors.json
+        raise VouchError(
+            f"tier: must be one of {', '.join(TIERS[1:])}, not {tier!r:.60}"
+        )
+    return Tier(
+        subject,
+        tier,
+        _handle(obj, "approver"),
+        _did_key(obj, "approverKey"),
+        _date(obj, "date"),
+    )
+
+
+def _endorsement(obj: Mapping[str, object], subject: str, endorser: str) -> Endorsement:
+    note = obj.get("note")
+    if note is not None and not isinstance(note, str):
+        raise VouchError("note: must be a string")
+    return Endorsement(
+        _matching_handle(obj, "endorser", endorser),
+        _did_key(obj, "endorserKey"),
+        _matching_handle(obj, "subject", subject),
+        _did_key(obj, "subjectKey"),
+        _text(obj, "subjectName"),
+        note,
+        _date(obj, "date"),
+    )
+
+
+def _revocation(obj: Mapping[str, object], subject: str) -> Revocation:
+    return Revocation(
+        _matching_handle(obj, "subject", subject),
+        _did_key(obj, "key"),
+        _text(obj, "reason"),
+        _date(obj, "date"),
+    )
+
+
+def _file_handle(name: str) -> str:
+    if not HANDLE_RE.fullmatch(name):
+        raise VouchError(f"invalid file name {name!r:.60}")
+    return name
+
+
+def _seq_handle(stem: str) -> str:
+    """Return the handle in a "<handle>-<n>" file stem, n a decimal from 1 with no leading zero."""
+    m = SEQ_RE.fullmatch(stem)
+    if not m:
+        raise VouchError(f"file name {stem!r:.60} is not <handle>-<n>")
+    return _file_handle(m.group(1))
+
+
+def _parse_record(parts: Sequence[str], data: bytes) -> Record:
+    kind, name = parts[0], parts[-1]
+    if (kind, len(parts)) not in (
+        ("people", 2),
+        ("tiers", 2),
+        ("revocations", 2),
+        ("endorsements", 3),
+    ) or not name.endswith(".json"):
+        raise VouchError("not a registry record path")
+    stem = name[: -len(".json")]
+    obj = _load_json(data)
+    if not isinstance(obj, dict):
+        raise VouchError("must be a JSON object")
+    context = obj.get("@context")
+    if not isinstance(context, list) or not context or context[0] != CONTEXT:
+        raise VouchError(f"@context: must be a list starting with {CONTEXT!r}")
+    if kind == "people":
+        return _person(obj, _file_handle(stem))
+    if kind == "tiers":
+        return _tier(obj, _file_handle(stem))
+    if kind == "revocations":
+        return _revocation(obj, _seq_handle(stem))
+    return _endorsement(obj, _file_handle(parts[1]), _seq_handle(stem))
+
+
+def parse_record(rel: str, data: bytes) -> Record:
+    """Parse and strictly validate the registry record ``data`` found at ``rel``.
+
+    The path decides the kind: ``people/<handle>.json``,
+    ``tiers/<handle>.json``, ``endorsements/<subject>/<endorser>-<n>.json``
+    or ``revocations/<handle>-<n>.json``. The handles in the path must
+    match the record's own. git-vouch's terms are checked for type and
+    format; any other term is ignored. Signatures are not checked here.
+
+    Args:
+        rel: Slash-separated path of the record below the registry root.
+        data: The file's bytes, as returned by ``read_capped``.
+
+    Raises:
+        VouchError: The path or the record is invalid; the message starts with ``rel``.
+    """
+    try:
+        return _parse_record(rel.split("/"), data)
+    except VouchError as e:
+        raise VouchError(f"{rel}: {e}") from e
+
+
+def parse_anchors(data: bytes) -> tuple[str, ...]:
+    """Return the anchor handles in ``anchors.json``: a non-empty JSON list of distinct handles.
+
+    Raises:
+        VouchError: The file is not such a list.
+    """
+    try:
+        value = _load_json(data)
+    except VouchError as e:
+        raise VouchError(f"anchors.json: {e}") from e
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(h, str) and HANDLE_RE.fullmatch(h) for h in value)
+        or len(set(value)) != len(value)
+    ):
+        raise VouchError("anchors.json: must be a non-empty list of distinct handles")
+    return tuple(value)
+
+
+def require_accountable(person: Person) -> None:
+    """Check that an automation identity's person file names its accountable maintainer.
+
+    The tier is not in the person file, so the caller decides when this applies.
+
+    Raises:
+        VouchError: ``person`` has no ``accountable``.
+    """
+    if person.accountable is None:
+        raise VouchError(
+            f"people/{person.handle}.json: accountable: required for automation"
+        )
+
+
+def split_signatures(sig: bytes) -> list[bytes]:
+    """Return the armored SSH signatures that make up a ``.sig`` file, in order.
+
+    The file must be nothing but one or more ``ssh-keygen -Y sign`` blocks,
+    each ending in a newline.
+
+    Raises:
+        VouchError: The file is empty or holds anything else.
+    """
+    if not SIGS_RE.fullmatch(sig):
+        raise VouchError("not a sequence of armored SSH signatures")
+    return SIG_RE.findall(sig)
+
+
+def _verifies(data: bytes, sig: bytes, namespace: str, key: PersonKey) -> bool:
+    """Return whether ssh-keygen accepts ``sig`` over ``data`` by ``key`` in ``namespace``.
+
+    Raises:
+        VouchError: ssh-keygen cannot be run.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        allowed = Path(tmp, "allowed_signers")
+        allowed.write_text(f"signer {key.ssh}\n")
+        sig_file = Path(tmp, "sig")
+        sig_file.write_bytes(sig)
+        cmd = ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", "signer"]
+        cmd += ["-n", namespace, "-s", str(sig_file)]
+        try:
+            proc = subprocess.run(cmd, input=data, capture_output=True, check=False)
+        except OSError as e:
+            raise VouchError(f"cannot run ssh-keygen: {e}") from e
+    return proc.returncode == 0
+
+
+def _signer(
+    data: bytes, sig: bytes, namespace: str, keys: Sequence[PersonKey]
+) -> Optional[PersonKey]:
+    # ponytail: one ssh-keygen run per candidate; fine for a handful of keys.
+    return next((k for k in keys if _verifies(data, sig, namespace, k)), None)
+
+
+def signer_of(
+    rel: str, data: bytes, sig: bytes, keys: Sequence[PersonKey]
+) -> PersonKey:
+    """Return the key in ``keys`` whose signature ``sig`` (one block) is over ``data``.
+
+    The namespace comes from the record's directory (see NAMESPACES), so a
+    signature made for one kind of record never verifies as another.
+
+    Args:
+        rel: The record's path below the registry root, as for ``parse_record``.
+        data: The record file's exact bytes.
+        sig: The bytes of ``rel + ".sig"``.
+        keys: The keys allowed to have signed it.
+
+    Raises:
+        VouchError: ``sig`` is not exactly one signature, or none of ``keys``
+            made it over these bytes in this namespace.
+    """
+    blocks = split_signatures(sig)
+    if len(blocks) != 1:
+        raise VouchError(f"{rel}.sig: must hold exactly one signature")
+    key = _signer(data, blocks[0], NAMESPACES[rel.split("/")[0]], keys)
+    if key is None:
+        raise VouchError(f"{rel}.sig: no valid signature by an allowed key")
+    return key
+
+
+def verify_person(person: Person, data: bytes, sig: bytes) -> None:
+    """Check that ``sig`` holds exactly one valid signature per current key of ``person``.
+
+    A current key is one with no ``retired`` time. A signature by any other
+    key, or a second one by the same key, is an error.
+
+    This checks one snapshot only. It does not prove that a key added or
+    un-retired was approved by a key current before the change, nor does it
+    know about revocations; the caller must judge both.
+
+    Args:
+        person: The record parsed from ``data``.
+        data: The exact bytes of ``people/<handle>.json``.
+        sig: The bytes of its ``.sig`` file.
+
+    Raises:
+        VouchError: A signature is missing, invalid or extra, or no key is current.
+    """
+    rel = f"people/{person.handle}.json"
+    unsigned = [k for k in person.keys if k.retired is None]
+    if not unsigned:
+        raise VouchError(f"{rel}: no current key to sign it")
+    try:
+        blocks = split_signatures(sig)
+    except VouchError as e:
+        raise VouchError(f"{rel}.sig: {e}") from e
+    for block in blocks:
+        key = _signer(data, block, NAMESPACES["people"], unsigned)
+        if key is None:
+            raise VouchError(
+                f"{rel}.sig: a signature is invalid, by a non-current key, or repeated"
+            )
+        unsigned.remove(key)
+    if unsigned:
+        raise VouchError(f"{rel}.sig: no signature by current key {unsigned[0].did}")
+
+
+def verify_approval(
+    rel: str, record: Union[Tier, Endorsement], data: bytes, sig: bytes, signer: Person
+) -> PersonKey:
+    """Check that a tier record or endorsement is signed by the key it names.
+
+    Args:
+        rel: The record's path below the registry root.
+        record: The record parsed from ``data``.
+        data: The record file's exact bytes.
+        sig: The bytes of its ``.sig`` file.
+        signer: The person file of the record's approver or endorser.
+
+    Returns:
+        The signer's key that made the signature; retirement and revocation
+        are for the caller to judge.
+
+    Raises:
+        VouchError: ``signer`` is not the person named, the named did:key is
+            not one of their keys, or the signature is not valid by that key.
+    """
+    if isinstance(record, Tier):
+        handle, did = record.approver, record.approver_key
+    else:
+        handle, did = record.endorser, record.endorser_key
+    if signer.handle != handle:
+        raise VouchError(f"{rel}: signed by {handle}, not {signer.handle}")
+    keys = [k for k in signer.keys if k.did == did]
+    if not keys:
+        raise VouchError(f"{rel}: {did} is not a key of {handle}")
+    return signer_of(rel, data, sig, keys)
+
+
+class Void(Exception):
+    """A record that is well formed but has no effect, e.g. signed by a key since revoked."""
+
+
+class CheckResult(NamedTuple):
+    """What ``check_registry`` found."""
+
+    people: dict[str, Person]  # person files whose signatures are valid
+    tiers: dict[str, str]  # handle -> tier, for people with a valid tier
+    revoked: dict[str, str]  # did:key -> "type base64" as listed in the person file
+    problems: list[str]  # each makes check fail
+    voids: list[str]  # records without effect; reported, not failures
+
+
+# A lower rank sits above a higher one; an approver must have a strictly lower rank.
+RANK = {"anchor": 0, "maintainer": 1, "contributor": 2, "automation": 2}
+
+
+def _record_paths(root: Path, problems: list[str]) -> list[str]:
+    """Return the path of every record file, adding a problem for every unexpected entry."""
+
+    def printable(d: str, names: list[str]) -> list[str]:
+        # Names are untrusted and end up on the merger's terminal.
+        for name in names:
+            if not name.isprintable():
+                problems.append(f"{d}/{name!r}: unexpected file")
+        return [n for n in names if n.isprintable()]
+
+    dirs = ["people", "tiers", "revocations"]
+    try:
+        subjects = printable("endorsements", list_dir(root, "endorsements"))
+        dirs += [f"endorsements/{s}" for s in subjects]
+    except VouchError as e:
+        problems.append(str(e))
+    paths = []
+    for d in dirs:
+        try:
+            names = printable(d, list_dir(root, d))
+        except VouchError as e:
+            problems.append(str(e))
+            continue
+        for name in names:
+            if name.endswith(".json"):
+                paths.append(f"{d}/{name}")
+            elif not (
+                name.endswith(
+                    (".json.sig", ".json.asc") if d == "people" else ".json.sig"
+                )
+                and name[:-4] in names
+            ):
+                problems.append(f"{d}/{name}: unexpected file")
+    return paths
+
+
+def _in_validity(rel: str, key: PersonKey, date: datetime) -> None:
+    if date < key.added or (key.retired is not None and date >= key.retired):
+        raise VouchError(f"{rel}: dated outside the validity of {key.did}")
+
+
+def check_registry(root: Path) -> CheckResult:
+    """Validate every record in the registry checkout at ``root`` and compute every tier.
+
+    A problem is a record that is malformed, wrongly signed, or made by
+    someone without the authority to make it. A void record is valid in
+    itself but has no effect: it was signed by a key since revoked, or it
+    depends on a record that is void or has a problem. Void records do not
+    fail the check, so a revocation never blocks the export that spreads it.
+
+    Raises:
+        VouchError: ssh-keygen cannot be run.
+    """
+    problems: list[str] = []
+    voids: list[str] = []
+    try:
+        anchors = parse_anchors(read_capped(root, "anchors.json"))
+    except VouchError as e:
+        problems.append(str(e))
+        anchors = ()
+
+    parsed: dict[str, tuple[Person, bytes, bytes]] = {}
+    tier_records: list[tuple[str, Tier, bytes, bytes]] = []
+    endorsements: list[tuple[str, Endorsement, bytes, bytes]] = []
+    revocations: list[tuple[str, Revocation, bytes, bytes]] = []
+    for rel in _record_paths(root, problems):
+        try:
+            data = read_capped(root, rel)
+            record = parse_record(rel, data)
+            sig = read_capped(root, rel + ".sig")
+        except VouchError as e:
+            problems.append(str(e))
+            continue
+        if isinstance(record, Person):
+            parsed[record.handle] = (record, data, sig)
+        elif isinstance(record, Tier):
+            tier_records.append((rel, record, data, sig))
+        elif isinstance(record, Endorsement):
+            endorsements.append((rel, record, data, sig))
+        else:
+            revocations.append((rel, record, data, sig))
+
+    people: dict[str, Person] = {}
+    for handle, (person, data, sig) in parsed.items():
+        try:
+            verify_person(person, data, sig)
+            people[handle] = person
+        except VouchError as e:
+            problems.append(str(e))
+
+    # A key belongs to one person, or export would credit their signatures to
+    # another. Only a current key is proven by the file's signature, so it
+    # decides ownership; listing someone else's current key drops the lister.
+    # ponytail: a key only ever retired in two files is reported but evicts
+    # nobody; deciding its owner needs the rotation history in git.
+    holders: dict[str, list[tuple[str, bool]]] = {}
+    for handle, person in people.items():
+        for key in person.keys:
+            holders.setdefault(key.did, []).append((handle, key.retired is None))
+    claimants: set[str] = set()
+    for did, listed in holders.items():
+        owners = {h for h, is_current in listed if is_current}
+        for handle, _ in listed if len(listed) > 1 else []:
+            others = sorted(owners - {handle})
+            if others:
+                claimants.add(handle)
+                problems.append(
+                    f"people/{handle}.json: {did} is a current key of {others[0]}"
+                )
+            elif not owners:
+                other = next(h for h, _ in listed if h != handle)
+                problems.append(
+                    f"people/{handle}.json: {did} is also listed by {other}"
+                )
+    for handle in claimants:
+        del people[handle]
+
+    def current(handle: str) -> list[PersonKey]:
+        return (
+            [k for k in people[handle].keys if k.retired is None]
+            if handle in people
+            else []
+        )
+
+    # ponytail: revocations count at face value, even if signed by a key that is
+    # itself revoked; a revocation only removes trust, and merges are reviewed.
+    anchor_keys = [k for a in anchors for k in current(a)]
+    revoked: dict[str, str] = {}
+    for rel, rev, data, sig in revocations:
+        try:
+            if rev.subject not in parsed:
+                raise VouchError(f"{rel}: no person file for {rev.subject}")
+            key = next(
+                (k for k in parsed[rev.subject][0].keys if k.did == rev.key), None
+            )
+            if key is None:
+                raise VouchError(f"{rel}: {rev.key} is not a key of {rev.subject}")
+            signer_of(rel, data, sig, [key, *current(rev.subject), *anchor_keys])
+            revoked[key.did] = key.ssh
+        except VouchError as e:
+            problems.append(str(e))
+
+    claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
+    claimed.update((a, "anchor") for a in anchors)
+    tiers: dict[str, str] = {}
+    for a in anchors:
+        if a not in parsed:
+            problems.append(f"anchors.json: no person file for {a}")
+        elif a in people:
+            tiers[a] = "anchor"
+
+    def check_signer(
+        rel: str, record: Union[Tier, Endorsement], data: bytes, sig: bytes, signer: str
+    ) -> None:
+        if signer not in parsed:
+            raise VouchError(f"{rel}: no person file for {signer}")
+        if signer not in people:
+            raise Void(f"{rel}: void: the person file of {signer} is invalid")
+        key = verify_approval(rel, record, data, sig, people[signer])
+        _in_validity(rel, key, record.date)
+        if key.did in revoked:
+            raise Void(f"{rel}: void: {key.did} of {signer} is revoked")
+
+    # Maintainers first, so every approver's own tier is settled before it is needed.
+    for rel, t, data, sig in sorted(tier_records, key=lambda r: RANK[r[1].tier]):
+        try:
+            if t.subject in anchors:
+                raise VouchError(f"{rel}: {t.subject} is an anchor")
+            if t.subject not in parsed:
+                raise VouchError(f"{rel}: no person file for {t.subject}")
+            if t.approver == t.subject:
+                raise VouchError(f"{rel}: {t.subject} cannot approve themselves")
+            approver_tier = claimed.get(t.approver)
+            if approver_tier is None or RANK[approver_tier] >= RANK[t.tier]:
+                raise VouchError(
+                    f"{rel}: {t.approver} ({approver_tier or 'no tier'})"
+                    f" may not grant {t.tier}"
+                )
+            if t.tier == "automation":
+                person = parsed[t.subject][0]
+                require_accountable(person)
+                if claimed.get(person.accountable or "") not in (
+                    "anchor",
+                    "maintainer",
+                ):
+                    raise VouchError(
+                        f"people/{t.subject}.json: accountable: {person.accountable}"
+                        " is not a maintainer or anchor"
+                    )
+            check_signer(rel, t, data, sig, t.approver)
+            if t.approver not in tiers:
+                raise Void(f"{rel}: void: {t.approver} has no valid tier")
+            if t.subject not in people:
+                raise Void(f"{rel}: void: the person file of {t.subject} is invalid")
+            accountable = people[t.subject].accountable or ""
+            if t.tier == "automation" and tiers.get(accountable) not in (
+                "anchor",
+                "maintainer",
+            ):
+                raise Void(f"{rel}: void: {accountable} has no valid tier")
+            tiers[t.subject] = t.tier
+        except VouchError as e:
+            problems.append(str(e))
+        except Void as e:
+            voids.append(str(e))
+
+    automation = {h for h, tier in claimed.items() if tier == "automation"}
+    automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
+    for rel, e, data, sig in endorsements:
+        try:
+            if e.subject not in parsed:
+                raise VouchError(f"{rel}: no person file for {e.subject}")
+            if e.endorser in automation:
+                raise VouchError(
+                    f"{rel}: {e.endorser} is automation and cannot endorse"
+                )
+            subject = parsed[e.subject][0]
+            if e.subject_key not in {k.did for k in subject.keys}:
+                raise VouchError(f"{rel}: {e.subject_key} is not a key of {e.subject}")
+            check_signer(rel, e, data, sig, e.endorser)
+            if e.subject_key in revoked:
+                raise Void(f"{rel}: void: {e.subject_key} of {e.subject} is revoked")
+            if e.subject_name != subject.name:
+                raise Void(f"{rel}: void: endorses the name {e.subject_name!r:.60}")
+        except VouchError as err:
+            problems.append(str(err))
+        except Void as err:
+            voids.append(str(err))
+
+    return CheckResult(people, tiers, revoked, problems, voids)
+
+
+def _report(result: CheckResult) -> None:
+    for message in result.voids:
+        print(f"git-vouch: warning: {message}", file=sys.stderr)
+    for message in result.problems:
+        print(f"git-vouch: error: {message}", file=sys.stderr)
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Print every valid person's tier; report every void record and problem."""
+    result = check_registry(Path(args.registry))
+    for handle in sorted(result.people):
+        print(handle, result.tiers.get(handle, "none"))
+    _report(result)
+    return 1 if result.problems else 0
+
+
+def _ssh_time(when: datetime) -> str:
+    return when.strftime("%Y%m%d%H%M%SZ")  # the trailing Z makes OpenSSH read it as UTC
+
+
+def allowed_signers(
+    result: CheckResult, min_tier: str = "contributor", include_automation: bool = False
+) -> str:
+    """Return git's allowed-signers file for everyone at or above ``min_tier``.
+
+    Each key gets one line: the person's emails as principals,
+    ``namespaces="git,file"`` (``"file"`` for automation, which appears only
+    with ``include_automation``), ``valid-after`` from ``added`` and
+    ``valid-before`` from ``retired``. Revoked keys are left out; they also
+    go in the revocation file.
+
+    Args:
+        result: A check result with no problems.
+        min_tier: ``anchor``, ``maintainer`` or ``contributor``.
+        include_automation: Also list automation keys, for file signatures only.
+
+    Raises:
+        VouchError: Two exported people list the same email, ignoring case;
+            either could then sign as the other.
+    """
+    lines = []
+    claimed: dict[str, str] = {}
+    for handle in sorted(result.tiers):
+        tier = result.tiers[handle]
+        if tier == "automation":
+            if not include_automation:
+                continue
+            namespaces = "file"
+        elif RANK[tier] > RANK[min_tier]:
+            continue
+        else:
+            namespaces = "git,file"
+        person = result.people[handle]
+        for email in person.emails:
+            other = claimed.setdefault(email.casefold(), handle)
+            if other != handle:
+                raise VouchError(f"{other} and {handle} both list the email {email}")
+        for key in person.keys:
+            if key.did in result.revoked:
+                continue
+            options = f'namespaces="{namespaces}",valid-after="{_ssh_time(key.added)}"'
+            if key.retired is not None:
+                options += f',valid-before="{_ssh_time(key.retired)}"'
+            lines.append(f"{','.join(person.emails)} {options} {key.ssh}\n")
+    return "".join(lines)
+
+
+def revocation_list(result: CheckResult) -> str:
+    """Return the revocation file for ``gpg.ssh.revocationFile``: one revoked key per line."""
+    return "".join(f"{ssh}\n" for ssh in sorted(result.revoked.values()))
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    # git may verify while we write; it must see the old file or the new, never half.
+    f = tempfile.NamedTemporaryFile(
+        "w", dir=path.parent, prefix=f".{path.name}.", delete=False
+    )
+    try:
+        with f:
+            f.write(text)
+        os.replace(f.name, path)
+    except BaseException:
+        os.unlink(f.name)
+        raise
+
+
+def _output_path(given: Optional[str], option: str, config: str) -> Path:
+    if given:
+        return Path(given)
+    try:
+        value = run(["git", "config", "--get", "--type=path", config]).decode().strip()
+    except VouchError as e:
+        raise VouchError(f"no output file: pass {option} or set {config}") from e
+    return Path(value)
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """Check the registry, then write the allowed-signers file and the revocation file.
+
+    Nothing is written if the check finds a problem.
+    """
+    signers = _output_path(
+        args.allowed_signers, "--allowed-signers", "gpg.ssh.allowedSignersFile"
+    )
+    revocations = _output_path(
+        args.revocation_file, "--revocation-file", "gpg.ssh.revocationFile"
+    )
+    result = check_registry(Path(args.registry))
+    _report(result)
+    if result.problems:
+        raise VouchError("the registry check failed; nothing exported")
+    signer_lines = allowed_signers(result, args.min_tier, args.include_automation)
+    # Revocations first, so no moment has new signers without their revocations.
+    try:
+        _write_atomic(revocations, revocation_list(result))
+        _write_atomic(signers, signer_lines)
+    except OSError as e:
+        raise VouchError(f"cannot write the exported files: {e}") from e
+    return 0
+
+
+def cmd_did(args: argparse.Namespace) -> int:
+    """Print the did:key for an SSH public key line, or the key line for a did:key."""
+    key: str = args.key
+    print(did_to_ssh(key) if key.startswith("did:") else ssh_to_did(key))
+    return 0
+
+
+def _not_implemented(args: argparse.Namespace) -> int:
+    raise VouchError(f"'{args.command}' is not implemented yet")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser with one subcommand per DESIGN.md command."""
+    parser = argparse.ArgumentParser(prog="git vouch", description=__doc__)
+    sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
+
+    def add(name: str, help_text: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help_text, description=help_text)
+        p.set_defaults(func=_not_implemented)
+        return p
+
+    p = add("setup", "record the registry URL, configure git for SSH signing, and sync")
+    p.add_argument("--registry", metavar="URL", help="registry repository URL")
+    add("sync", "fetch the registry without allowing a rewind, check it, and re-export")
+    add("status", "show the registry commit, its fetch age, and your own tier")
+    add("register", "write your person file from an SSH public key and sign it")
+    add("add-key", "add a key to your person file and re-sign it")
+    add("retire-key", "retire a key in your person file and re-sign it")
+    p = add("endorse", "write and sign an endorsement")
+    p.add_argument("handle")
+    p = add("approve", "write and sign a tier record")
+    p.add_argument("handle")
+    p.add_argument("tier", choices=TIERS[1:])  # anchors come from anchors.json
+    add("revoke", "write and sign a revocation")
+    p = add("check", "validate every signature and compute every tier")
+    p.add_argument(
+        "registry",
+        nargs="?",
+        default=".",
+        metavar="DIR",
+        help="registry checkout (default: the current directory)",
+    )
+    p.set_defaults(func=cmd_check)
+    p = add("export", "write the allowed-signers file and the revocation file")
+    p.add_argument(
+        "registry",
+        nargs="?",
+        default=".",
+        metavar="DIR",
+        help="registry checkout (default: the current directory)",
+    )
+    p.add_argument(
+        "--min-tier",
+        choices=TIERS[:3],
+        default="contributor",
+        help="lowest tier exported (default: contributor)",
+    )
+    p.add_argument(
+        "--include-automation",
+        action="store_true",
+        help='also export automation keys, with namespaces="file"',
+    )
+    p.add_argument(
+        "--allowed-signers",
+        metavar="FILE",
+        help="output file (default: git config gpg.ssh.allowedSignersFile)",
+    )
+    p.add_argument(
+        "--revocation-file",
+        metavar="FILE",
+        help="output file (default: git config gpg.ssh.revocationFile)",
+    )
+    p.set_defaults(func=cmd_export)
+    p = add("did", "print the did:key for an SSH public key, or the reverse")
+    p.add_argument("key", metavar="<ssh-pubkey | did:key>")
+    p.set_defaults(func=cmd_did)
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the command line and return the process exit status."""
+    args = build_parser().parse_args(argv)
+    try:
+        status: int = args.func(args)
+        return status
+    except VouchError as e:
+        print(f"git-vouch: error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
