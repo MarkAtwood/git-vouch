@@ -15,8 +15,12 @@ already have:
 - **`git vouch`** checks the registry's rules and writes the
   `allowed_signers` and revocation files that git reads.
 
-There is no service to run, no agent, and no new place to keep keys. Your
+Using it needs no service, no agent, and no new place to keep keys. Your
 SSH key, YubiKey or gpg-agent works as it is.
+
+There will also be an agent daemon that bridges this to an OpenVTC
+instance, so OpenVTC's verifiers can check signers in the registry. It is
+optional: nobody using git-vouch at the shell depends on it.
 
 ## Tools
 
@@ -30,8 +34,7 @@ one job.
 | `git-vouch-attest` | Verifies a FIDO key's hardware attestation |
 
 Planned: patch-email signing through a [patatt fork](https://github.com/MarkAtwood/patatt)
-that reads the registry, and an optional bridge so OpenVTC's
-`verify-trust` can check registry signers.
+that reads the registry, and `git-vouch-trqp`, the OpenVTC bridge daemon.
 
 ## Status
 
