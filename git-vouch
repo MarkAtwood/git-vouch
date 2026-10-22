@@ -1907,6 +1907,426 @@ def cmd_did(args: argparse.Namespace) -> int:
     return 0
 
 
+class SigningKey(NamedTuple):
+    """The key a signing command signs with."""
+
+    path: Optional[str]  # for ssh-keygen -f; None signs through the agent by ``ssh``
+    ssh: str  # "type base64"
+    did: str
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime(DATE_FORMAT)
+
+
+def _read_local(path: str, what: str) -> bytes:
+    """Return the bytes of the user's own file ``path``, at most MAX_FILE_SIZE.
+
+    Raises:
+        VouchError: The file cannot be read or is too large.
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read(MAX_FILE_SIZE + 1)
+    except OSError as e:
+        raise VouchError(f"{what} {path}: cannot read: {e.strerror}") from e
+    if len(data) > MAX_FILE_SIZE:
+        raise VouchError(f"{what} {path}: larger than {MAX_FILE_SIZE} bytes")
+    return data
+
+
+def _pubkey_file(path: str) -> str:
+    """Return the public key line in the file ``path`` as "type base64", comment dropped.
+
+    Raises:
+        VouchError: The file cannot be read or holds no supported public key.
+    """
+    line = " ".join(
+        _read_local(path, "public key").decode(errors="replace").split()[:2]
+    )
+    try:
+        ssh_to_did(line)
+    except VouchError as e:
+        raise VouchError(f"public key {path}: {e}") from e
+    return line
+
+
+def _key_did(arg: str) -> str:
+    """Return the did:key named by ``arg``: a did:key, a public key file, or a key line.
+
+    Raises:
+        VouchError: ``arg`` names no supported key.
+    """
+    if arg.startswith("did:"):
+        return ssh_to_did(did_to_ssh(arg))  # canonical form, as check compares
+    if Path(arg).is_file():
+        return ssh_to_did(_pubkey_file(arg))
+    return ssh_to_did(arg)
+
+
+def _signing_key(spec: Optional[str]) -> SigningKey:
+    """Return the key ``spec`` names, or git's ``user.signingKey`` if ``spec`` is None.
+
+    A private key file's public half is read from FILE.pub, as ssh-keygen
+    does. A .pub file, or git's "key::" or bare "ssh-" form, signs through
+    the SSH agent.
+
+    Raises:
+        VouchError: No key is named, or its public key cannot be read.
+    """
+    if spec is None:
+        try:
+            config = run(["git", "config", "--get", "--type=path", "user.signingKey"])
+            spec = config.decode().strip()
+        except VouchError as e:
+            raise VouchError(
+                "no signing key: pass --sign-with or set git config user.signingKey"
+            ) from e
+    if spec.startswith(("key::", "ssh-")):
+        # git reads a bare "ssh-..." value as "key::ssh-..." for compatibility.
+        ssh = " ".join(spec.removeprefix("key::").split()[:2])
+        return SigningKey(None, ssh, ssh_to_did(ssh))
+    ssh = _pubkey_file(spec if spec.endswith(".pub") else spec + ".pub")
+    return SigningKey(spec, ssh, ssh_to_did(ssh))
+
+
+def _sign(key: SigningKey, namespace: str, data: bytes) -> bytes:
+    """Return an ``ssh-keygen -Y sign`` signature by ``key`` over ``data``.
+
+    ssh-keygen runs with no terminal, no stdin and no askpass, so a key that
+    needs a passphrase fails instead of prompting.
+
+    Raises:
+        VouchError: ssh-keygen fails, or the signature is not by ``key``.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        msg = Path(tmp, "msg")
+        msg.write_bytes(data)
+        path = key.path
+        if path is None:
+            path = str(Path(tmp, "key.pub"))
+            Path(path).write_text(key.ssh + "\n")
+        cmd = ["ssh-keygen", "-q", "-Y", "sign", "-f", path, "-n", namespace, str(msg)]
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+                start_new_session=True,
+                env={**os.environ, "SSH_ASKPASS_REQUIRE": "never"},
+            )
+        except OSError as e:
+            raise VouchError(f"cannot run ssh-keygen: {e}") from e
+        if proc.returncode != 0:
+            err = proc.stderr.decode(errors="replace").strip()
+            raise VouchError(f"ssh-keygen could not sign with {path}: {err}")
+        sig = Path(tmp, "msg.sig").read_bytes()
+    signer = PersonKey(key.ssh, key.did, datetime.now(timezone.utc), None)
+    if not _verifies(data, sig, namespace, signer):
+        raise VouchError(f"{key.path}: the signature is not by {key.did}")
+    return sig
+
+
+def _record_bytes(rel: str, obj: Mapping[str, object]) -> tuple[bytes, Record]:
+    """Return a record's file bytes and its parsed form, checked as ``check`` would.
+
+    Raises:
+        VouchError: The record is invalid or too large.
+    """
+    data = (json.dumps(obj, indent=2, ensure_ascii=False) + "\n").encode()
+    if len(data) > MAX_FILE_SIZE:
+        raise VouchError(f"{rel}: larger than {MAX_FILE_SIZE} bytes")
+    return data, parse_record(rel, data)
+
+
+def _write_signed(rel: str, data: bytes, key: SigningKey) -> None:
+    """Sign ``data`` in its kind's namespace and write ``rel`` and ``rel.sig``.
+
+    Raises:
+        VouchError: Signing or writing fails.
+    """
+    sig = _sign(key, NAMESPACES[rel.split("/")[0]], data)
+    # The checkout is untrusted: like read_capped, follow no symlink in it.
+    *dirs, name = rel.split("/")
+    try:
+        fd = os.open(".", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for part in dirs:
+                try:
+                    os.mkdir(part, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                parent = fd
+                fd = os.open(
+                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
+                )
+                os.close(parent)
+            _replace_at(fd, name, data)
+            _replace_at(fd, name + ".sig", sig)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        raise VouchError(f"cannot write {rel}: {e}") from e
+    print(rel)
+    print(rel + ".sig")
+
+
+def _replace_at(dir_fd: int, name: str, data: bytes) -> None:
+    # rename replaces a symlink at ``name`` instead of writing through it.
+    tmp = f".{name}.{os.urandom(6).hex()}"
+    fd = os.open(
+        tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=dir_fd
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        os.unlink(tmp, dir_fd=dir_fd)
+        raise
+
+
+def _people_listing(root: Path, did: str, current: bool) -> list[tuple[Person, bytes]]:
+    """Return every valid person file listing ``did``, only as a current key if ``current``."""
+    found = []
+    for name in list_dir(root, "people"):
+        if not name.endswith(".json"):
+            continue
+        rel = f"people/{name}"
+        try:
+            data = read_capped(root, rel)
+            person = parse_record(rel, data)
+        except VouchError:
+            continue  # check reports it
+        if isinstance(person, Person) and any(
+            k.did == did and (k.retired is None or not current) for k in person.keys
+        ):
+            found.append((person, data))
+    return found
+
+
+def _signer_file(root: Path, key: SigningKey) -> tuple[Person, bytes]:
+    """Return the person file that lists ``key`` as a current key, and its bytes.
+
+    Raises:
+        VouchError: No person file, or more than one, lists it as current.
+    """
+    found = _people_listing(root, key.did, current=True)
+    if len(found) != 1:
+        which = ", ".join(p.handle for p, _ in found) or "no person file"
+        raise VouchError(f"{key.did} is a current key of {which}; need exactly one")
+    return found[0]
+
+
+def _load_person(root: Path, handle: str) -> Person:
+    rel = f"people/{validate_handle(handle)}.json"
+    person = parse_record(rel, read_capped(root, rel))
+    assert isinstance(person, Person)  # the path decides the kind
+    return person
+
+
+def _next_seq(root: Path, directory: str, prefix: str) -> int:
+    """Return the next free n for ``<directory>/<prefix>-<n>.json``."""
+    taken = [0]
+    for name in list_dir(root, directory):
+        m = SEQ_RE.fullmatch(name[: -len(".json")])
+        if name.endswith(".json") and m and m.group(1) == prefix:
+            taken.append(int(m.group(2)))
+    return max(taken) + 1
+
+
+def _new_key(
+    pub: str, attestation: Optional[str], challenge: Optional[str]
+) -> dict[str, object]:
+    """Return a person file ``keys`` entry for the public key file ``pub``, added now.
+
+    Raises:
+        VouchError: A file cannot be read, or only one of ``attestation``
+            and ``challenge`` is given.
+    """
+    if (attestation is None) != (challenge is None):
+        raise VouchError("--attestation and --challenge go together")
+    entry: dict[str, object] = {
+        "ssh": _pubkey_file(pub),
+        "added": _now(),
+        "retired": None,
+    }
+    if attestation is not None and challenge is not None:
+        entry["attestation"] = {
+            "blob": base64.b64encode(_read_local(attestation, "attestation")).decode(),
+            "challenge": base64.b64encode(_read_local(challenge, "challenge")).decode(),
+        }
+    return entry
+
+
+def cmd_register(args: argparse.Namespace) -> int:
+    """Write and sign a new person file, from options or by completing a draft.
+
+    The first version must be signed by one of its own keys: by default the
+    key being registered.
+    """
+    if args.from_file:
+        if args.handle or args.name or args.email or args.accountable:
+            raise VouchError(
+                "--handle, --name, --email and --accountable come from the draft"
+            )
+        obj = _load_json(_read_local(args.from_file, "draft"))
+        if not isinstance(obj, dict) or not isinstance(
+            obj.setdefault("keys", []), list
+        ):
+            raise VouchError(f"{args.from_file}: not a person file draft")
+    elif args.handle and args.name and args.email:
+        obj = {
+            "@context": [CONTEXT],
+            "handle": args.handle,
+            "name": args.name,
+            "emails": args.email,
+            "keys": [],
+            "accountable": args.accountable,
+        }
+    else:
+        raise VouchError("pass --handle, --name and --email, or --from a draft")
+    if args.pubkey:
+        obj["keys"].append(_new_key(args.pubkey, args.attestation, args.challenge))
+    elif args.attestation or args.challenge:
+        raise VouchError("--attestation and --challenge need the key they belong to")
+    rel = f"people/{validate_handle(obj.get('handle'))}.json"
+    is_in_place = (
+        args.from_file and Path(args.from_file).resolve() == Path(rel).resolve()
+    )
+    if os.path.lexists(rel) and not is_in_place:
+        raise VouchError(f"{rel} already exists; use add-key to change it")
+    data, person = _record_bytes(rel, obj)
+    key = _signing_key(args.sign_with or args.pubkey)
+    assert isinstance(person, Person)
+    if not any(k.did == key.did and k.retired is None for k in person.keys):
+        raise VouchError(f"{rel}: {key.did} is not one of its current keys")
+    _write_signed(rel, data, key)
+    return 0
+
+
+def _edit_own(
+    args: argparse.Namespace,
+) -> tuple[str, dict[str, object], Person, SigningKey]:
+    """Return the signer's person file path, its JSON, its parsed form, and the key."""
+    key = _signing_key(args.sign_with)
+    person, data = _signer_file(Path("."), key)
+    obj = _load_json(data)
+    assert isinstance(obj, dict)  # parse_record accepted it
+    return f"people/{person.handle}.json", obj, person, key
+
+
+def cmd_add_key(args: argparse.Namespace) -> int:
+    """Add a key to the signer's person file and re-sign it with the signer's current key."""
+    rel, obj, person, key = _edit_own(args)
+    entry = _new_key(args.pubkey, args.attestation, args.challenge)
+    if ssh_to_did(str(entry["ssh"])) in {k.did for k in person.keys}:
+        raise VouchError(f"{rel}: already lists {args.pubkey}")
+    keys = obj["keys"]
+    assert isinstance(keys, list)  # parse_record accepted it
+    keys.append(entry)
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
+def cmd_retire_key(args: argparse.Namespace) -> int:
+    """Set ``retired`` to now on one of the signer's keys and re-sign the person file."""
+    rel, obj, person, key = _edit_own(args)
+    did = _key_did(args.key)
+    entries = obj["keys"]
+    assert isinstance(entries, list)  # parse_record accepted it
+    for entry, listed in zip(entries, person.keys):
+        if listed.did == did:
+            if listed.retired is not None:
+                raise VouchError(f"{rel}: {did} is already retired")
+            entry["retired"] = _now()
+            break
+    else:
+        raise VouchError(f"{rel}: {did} is not one of its keys")
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
+def cmd_endorse(args: argparse.Namespace) -> int:
+    """Write and sign an endorsement of ``handle``'s name, first current key and emails."""
+    root = Path(".")
+    subject = _load_person(root, args.handle)
+    key = _signing_key(args.sign_with)
+    endorser = _signer_file(root, key)[0].handle
+    if endorser == subject.handle:
+        raise VouchError("nobody can endorse themselves")
+    current = [k for k in subject.keys if k.retired is None]
+    if not current:
+        raise VouchError(f"people/{subject.handle}.json: no current key")
+    emails = args.email or list(subject.emails)
+    listed = {m.lower() for m in subject.emails}
+    for email in emails:
+        if email.lower() not in listed:
+            raise VouchError(f"people/{subject.handle}.json does not list {email}")
+    d = f"endorsements/{subject.handle}"
+    rel = f"{d}/{endorser}-{_next_seq(root, d, endorser)}.json"
+    obj: dict[str, object] = {
+        "@context": [CONTEXT],
+        "endorser": endorser,
+        "endorserKey": key.did,
+        "subject": subject.handle,
+        "subjectKey": current[0].did,
+        "subjectName": subject.name,
+        "subjectEmails": emails,
+    }
+    if args.note is not None:
+        obj["note"] = args.note
+    obj["date"] = _now()
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    """Write and sign ``handle``'s tier record, replacing any earlier one."""
+    root = Path(".")
+    subject = _load_person(root, args.handle)
+    key = _signing_key(args.sign_with)
+    approver = _signer_file(root, key)[0].handle
+    if approver == subject.handle:
+        raise VouchError("nobody can approve themselves")
+    rel = f"tiers/{subject.handle}.json"
+    obj = {
+        "@context": [CONTEXT],
+        "subject": subject.handle,
+        "tier": args.tier,
+        "approver": approver,
+        "approverKey": key.did,
+        "date": _now(),
+    }
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
+def cmd_revoke(args: argparse.Namespace) -> int:
+    """Write and sign a revocation of a key; check judges whether the signer may revoke it."""
+    root = Path(".")
+    did = _key_did(args.key)
+    found = [p for p, _ in _people_listing(root, did, current=False)]
+    if args.subject:
+        found = [p for p in found if p.handle == args.subject]
+    if len(found) != 1:
+        which = ", ".join(p.handle for p in found) or "no person file"
+        raise VouchError(f"{did} is listed by {which}; name one with --subject")
+    subject = found[0].handle
+    key = _signing_key(args.sign_with)
+    rel = f"revocations/{subject}-{_next_seq(root, 'revocations', subject)}.json"
+    obj = {
+        "@context": [CONTEXT],
+        "subject": subject,
+        "key": did,
+        "reason": args.reason,
+        "date": _now(),
+    }
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
 def _not_implemented(args: argparse.Namespace) -> int:
     raise VouchError(f"'{args.command}' is not implemented yet")
 
@@ -1925,15 +2345,65 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--registry", metavar="URL", help="registry repository URL")
     add("sync", "fetch the registry without allowing a rewind, check it, and re-export")
     add("status", "show the registry commit, its fetch age, and your own tier")
-    add("register", "write your person file from an SSH public key and sign it")
-    add("add-key", "add a key to your person file and re-sign it")
-    add("retire-key", "retire a key in your person file and re-sign it")
-    p = add("endorse", "write and sign an endorsement")
+
+    def signing(name: str, help_text: str) -> argparse.ArgumentParser:
+        p = add(name, help_text + " in the registry checkout in the current directory")
+        p.add_argument(
+            "--sign-with",
+            metavar="FILE",
+            help="private key file, or .pub to sign through the agent"
+            " (default: git config user.signingKey)",
+        )
+        return p
+
+    def attestation(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--attestation",
+            metavar="FILE",
+            help="ssh-keygen -O write-attestation output",
+        )
+        p.add_argument(
+            "--challenge", metavar="FILE", help="the -O challenge file it was made with"
+        )
+
+    p = signing("register", "write your person file and sign it")
+    p.add_argument("pubkey", nargs="?", metavar="PUBKEY", help="your .pub file")
+    p.add_argument(
+        "--from", dest="from_file", metavar="FILE", help="complete this draft"
+    )
+    p.add_argument("--handle")
+    p.add_argument("--name")
+    p.add_argument("--email", action="append", help="repeat for more addresses")
+    p.add_argument(
+        "--accountable", metavar="HANDLE", help="automation: your maintainer"
+    )
+    attestation(p)
+    p.set_defaults(func=cmd_register)
+    p = signing("add-key", "add a key to your person file and re-sign it")
+    p.add_argument("pubkey", metavar="PUBKEY", help="the new key's .pub file")
+    attestation(p)
+    p.set_defaults(func=cmd_add_key)
+    p = signing("retire-key", "retire a key in your person file and re-sign it")
+    p.add_argument("key", metavar="KEY", help=".pub file, key text or did:key")
+    p.set_defaults(func=cmd_retire_key)
+    p = signing("endorse", "write and sign an endorsement")
     p.add_argument("handle")
-    p = add("approve", "write and sign a tier record")
+    p.add_argument(
+        "--email", action="append", help="endorse only this address (repeatable)"
+    )
+    p.add_argument("--note", help="how you know them")
+    p.set_defaults(func=cmd_endorse)
+    p = signing("approve", "write and sign a tier record")
     p.add_argument("handle")
     p.add_argument("tier", choices=TIERS[1:])  # anchors come from anchors.json
-    add("revoke", "write and sign a revocation")
+    p.set_defaults(func=cmd_approve)
+    p = signing("revoke", "write and sign a revocation")
+    p.add_argument("key", metavar="KEY", help=".pub file, key text or did:key")
+    p.add_argument(
+        "--subject", metavar="HANDLE", help="whose key, if two files list it"
+    )
+    p.add_argument("--reason", default="compromise", help="default: compromise")
+    p.set_defaults(func=cmd_revoke)
     p = add("check", "validate every signature and compute every tier")
     p.add_argument(
         "registry",
