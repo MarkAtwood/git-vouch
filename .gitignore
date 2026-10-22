@@ -4,3 +4,6 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Python bytecode from the test suite
+__pycache__/
