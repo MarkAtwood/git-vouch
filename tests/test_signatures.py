@@ -205,14 +205,52 @@ def test_person_signed_by_every_current_key(
     vouch.verify_person(person, data, b"".join(sigs))
 
 
-def test_person_missing_current_key_signature_rejected(
-    vouch: ModuleType, ed25519_key: Key, third_key: Key, tmp_path: Path
+@pytest.mark.parametrize("signer", ["first", "second"])
+def test_person_signed_by_any_one_current_key(
+    vouch: ModuleType, ed25519_key: Key, third_key: Key, tmp_path: Path, signer: str
 ) -> None:
+    # DESIGN.md, Person file: one signature is enough, so backup keys stay in a drawer.
     data = person_bytes(ed25519_key, third_key)
+    by = ed25519_key if signer == "first" else third_key
+    sig = sign(by, "git-vouch-register", data, tmp_path)
+    person = vouch.parse_record("people/alice.json", data)
+    assert vouch.verify_person(person, data, sig) is True
+
+
+def test_person_rotation_signed_by_previous_key_only(
+    vouch: ModuleType, ed25519_key: Key, second_key: Key, tmp_path: Path
+) -> None:
+    # second_key retires, ed25519_key is added; only the outgoing key signs.
+    data = person_bytes(ed25519_key, retired=second_key)
+    sig = sign(second_key, "git-vouch-register", data, tmp_path)
+    person = vouch.parse_record("people/alice.json", data)
+    previous = [person_key(vouch, second_key)]
+    assert vouch.verify_person(person, data, sig, previous) is True
+    with pytest.raises(vouch.VouchError, match="by a non-current key"):
+        vouch.verify_person(person, data, sig)  # as a first version
+
+
+def test_person_change_signed_only_by_new_key_is_not_chained(
+    vouch: ModuleType, ed25519_key: Key, second_key: Key, tmp_path: Path
+) -> None:
+    data = person_bytes(ed25519_key)
     sig = sign(ed25519_key, "git-vouch-register", data, tmp_path)
     person = vouch.parse_record("people/alice.json", data)
-    with pytest.raises(vouch.VouchError, match="no signature by current key"):
-        vouch.verify_person(person, data, sig)
+    previous = [person_key(vouch, second_key)]
+    assert vouch.verify_person(person, data, sig, previous) is False
+    assert vouch.verify_person(person, data, sig, []) is False  # a frozen file
+
+
+def test_person_signed_by_revoked_previous_key_is_not_chained(
+    vouch: ModuleType, ed25519_key: Key, second_key: Key, tmp_path: Path
+) -> None:
+    # DESIGN.md: a revoked key's signatures are invalid, past or future, but
+    # a revocation never fails check, so the signature chains nothing.
+    data = person_bytes(ed25519_key, retired=second_key)
+    sig = sign(second_key, "git-vouch-register", data, tmp_path)
+    person = vouch.parse_record("people/alice.json", data)
+    previous = [person_key(vouch, second_key)]
+    assert vouch.verify_person(person, data, sig, previous, {previous[0].did}) is False
 
 
 def test_person_retired_key_needs_no_signature(

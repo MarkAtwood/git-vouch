@@ -18,7 +18,7 @@ from types import ModuleType
 import pytest
 
 from conftest import Key, run_script
-from test_check import Registry, did, has, keys  # noqa: F401 (keys is a fixture)
+from test_check import ADDED, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
 
 
 class GitRegistry(Registry):
@@ -423,3 +423,288 @@ def test_revocation_of_a_key_listed_first_by_another_is_ignored(
         "alice": "contributor",
     }
     assert has(result.warnings, rel, f"{did(key('torvalds'))} is not a key of dave")
+
+
+def person_signed_by(
+    reg: Registry,
+    handle: str,
+    *current: Key,
+    retired: tuple[Key, ...] = (),
+    by: tuple[Key, ...],
+) -> None:
+    """Write a person file like Registry.person, but signed only by ``by``."""
+    entries = [
+        {"ssh": k.pubkey, "added": ADDED, "retired": RETIRED} for k in retired
+    ] + [{"ssh": k.pubkey, "added": ADDED, "retired": None} for k in current]
+    record = {
+        "handle": handle,
+        "name": handle.title(),
+        "emails": [f"{handle}@example.org"],
+        "keys": entries,
+        "accountable": None,
+    }
+    reg.write(f"people/{handle}.json", record, *by, ns="git-vouch-register")
+
+
+def head(reg: GitRegistry) -> str:
+    """Return the checkout's HEAD commit id, as git reports it."""
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=reg.root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip()
+
+
+def key_change_warnings(result: object) -> list[str]:
+    """Return the unsigned-key-change warnings in a check result."""
+    return [w for w in result.warnings if "WARNING" in w]  # type: ignore[attr-defined]
+
+
+def test_rotation_signed_by_old_key_does_not_warn(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # dave retires his key and adds dave2; only the outgoing key signs.
+    person_signed_by(
+        reg, "dave", key("dave2"), retired=(key("dave"),), by=(key("dave"),)
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and key_change_warnings(result) == []
+    assert [k.did for k in result.people["dave"].keys] == [
+        did(key("dave")),
+        did(key("dave2")),
+    ]
+    cli = run_script("check", str(reg.root))
+    assert cli.returncode == 0, cli.stderr
+    assert "WARNING" not in cli.stderr
+
+
+def test_change_signed_by_any_one_previous_key(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # alice adds alice3 signed by alice2 alone; alice stays in the drawer.
+    person_signed_by(
+        reg, "alice", key("alice"), key("alice2"), key("alice3"), by=(key("alice2"),)
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and key_change_warnings(result) == []
+    assert result.tiers["alice"] == "contributor"
+
+
+@pytest.mark.parametrize("committed", [True, False])
+def test_key_swap_signed_only_by_new_key_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], committed: bool
+) -> None:
+    person_signed_by(reg, "alice", key("mallory"), by=(key("mallory"),))
+    where = "the working tree"
+    if committed:
+        reg.commit()
+        where = head(reg)
+        # A later, properly signed change does not hide the swap.
+        person_signed_by(
+            reg, "alice", key("mallory"), key("mallory2"), by=(key("mallory"),)
+        )
+        reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert (
+        result.tiers["alice"] == "contributor"
+    )  # review let it through; tier carries over
+    warned = key_change_warnings(result)
+    assert len(warned) == 1
+    assert has(
+        warned,
+        "people/alice.json",
+        where,
+        did(key("alice")),
+        did(key("alice2")),
+        did(key("mallory")),
+    )
+    cli = run_script("check", str(reg.root))
+    assert cli.returncode == 0, cli.stderr
+    assert "WARNING" in cli.stderr and where in cli.stderr
+    assert did(key("alice")) in cli.stderr and did(key("mallory")) in cli.stderr
+
+
+def test_recreated_person_file_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.delete("people/dave.json")
+    reg.commit()
+    reg.person("dave", key("mallory"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(
+        key_change_warnings(result),
+        "people/dave.json",
+        head(reg),
+        did(key("dave")),
+        did(key("mallory")),
+    )
+
+
+def test_change_to_frozen_person_file_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    person_signed_by(reg, "dave", retired=(key("dave"),), by=(key("dave"),))
+    reg.commit()
+    assert key_change_warnings(vouch.check_registry(reg.root)) == []
+    person_signed_by(
+        reg, "dave", key("dave2"), retired=(key("dave"),), by=(key("dave2"),)
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(
+        key_change_warnings(result),
+        "people/dave.json",
+        head(reg),
+        did(key("dave")),
+        did(key("dave2")),
+    )
+
+
+def test_change_without_sig_then_signed_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # mallory commits the swap with no .sig, then adds one by his own key: the
+    # unsigned version still counts as a change, so it cannot launder the swap.
+    person_signed_by(reg, "alice", key("mallory"), by=(key("mallory"),))
+    (reg.root / "people/alice.json.sig").unlink()
+    reg.commit()
+    unsigned = head(reg)
+    person_signed_by(reg, "alice", key("mallory"), by=(key("mallory"),))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    warned = key_change_warnings(result)
+    assert len(warned) == 1
+    assert has(warned, unsigned, did(key("alice")), did(key("mallory")))
+
+
+def test_unrelated_branch_cannot_start_a_person_file_afresh(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # An orphan branch creates its own people/alice.json, self-signed by
+    # mallory, and a merge keeps it: alice existed, so it is no first version.
+    reg.git("checkout", "-q", "--orphan", "evil")
+    reg.git("rm", "-q", "-r", "--cached", ".")
+    shutil.rmtree(reg.root / "people")
+    shutil.rmtree(reg.root / "tiers")
+    (reg.root / "anchors.json").unlink()
+    person_signed_by(reg, "alice", key("mallory"), by=(key("mallory"),))
+    reg.commit()
+    evil = head(reg)
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--allow-unrelated-histories", "-X", "theirs", "evil")
+    result = vouch.check_registry(reg.root)
+    assert [k.did for k in result.people["alice"].keys] == [did(key("mallory"))]
+    assert result.problems == []
+    assert has(
+        key_change_warnings(result),
+        "people/alice.json",
+        evil,
+        did(key("alice")),
+        did(key("mallory")),
+    )
+
+
+@pytest.mark.parametrize("revoked_first", [True, False])
+def test_change_signed_by_revoked_key_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], revoked_first: bool
+) -> None:
+    # DESIGN.md, Retiring a key versus revoking it: every signature by a
+    # revoked key, past or future, is invalid, so it chains nothing.
+    if revoked_first:
+        reg.revoke("alice", key("alice"), key("alice"))
+        reg.commit()
+    person_signed_by(
+        reg, "alice", key("mallory"), retired=(key("alice"),), by=(key("alice"),)
+    )
+    reg.commit()
+    swap = head(reg)
+    if not revoked_first:
+        reg.revoke("alice", key("alice"), key("torvalds"))  # an anchor
+        reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert did(key("alice")) in result.revoked
+    assert has(
+        key_change_warnings(result), "people/alice.json", swap, did(key("mallory"))
+    )
+
+
+@pytest.mark.parametrize("signer", ["alice3", "alice4"])
+def test_merge_change_needs_a_key_current_at_any_parent(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], signer: str
+) -> None:
+    # side adds alice3; main drops alice2. The merge resolves to a file that
+    # differs from both, signed by alice3 (current at side only) or alice4
+    # (current at neither).
+    reg.git("checkout", "-q", "-b", "side")
+    person_signed_by(reg, "alice", key("alice2"), key("alice3"), by=(key("alice2"),))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    person_signed_by(reg, "alice", key("alice"), by=(key("alice"),))
+    reg.commit()
+    reg.git("merge", "-q", "-s", "ours", "--no-commit", "side")
+    person_signed_by(reg, "alice", key(signer), by=(key(signer),))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    warned = key_change_warnings(result)
+    if signer == "alice3":
+        assert warned == []
+    else:
+        assert len(warned) == 1
+        assert has(warned, head(reg), did(key("alice")), did(key("alice4")))
+
+
+def test_older_version_signed_by_an_outside_key_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # A version whose .sig is by a key in neither it nor its parent is let
+    # through by review, like any unchained change; it fails nothing.
+    person_signed_by(reg, "alice", key("alice"), key("alice2"), by=(key("mallory"),))
+    reg.commit()
+    outside = head(reg)
+    person_signed_by(
+        reg, "alice", key("alice"), key("alice2"), key("alice3"), by=(key("alice"),)
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    warned = key_change_warnings(result)
+    assert len(warned) == 1 and outside in warned[0]
+    cli = run_script("check", str(reg.root))
+    assert cli.returncode == 0, cli.stderr
+    assert outside in cli.stderr
+
+
+def test_reverted_person_file_is_judged_at_its_latest_version(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # Version A lists dave2, signed by dave3, which dave's first version does
+    # not list. Version B lists dave3, signed by dave2. Restoring A's exact
+    # bytes is then signed by a key current in B, its previous version.
+    person_signed_by(reg, "dave", key("dave2"), by=(key("dave3"),))
+    reg.commit()
+    first_a = head(reg)
+    pair = [
+        (reg.root / f).read_bytes()
+        for f in ("people/dave.json", "people/dave.json.sig")
+    ]
+    person_signed_by(reg, "dave", key("dave3"), by=(key("dave2"),))
+    reg.commit()
+    for f, data in zip(("people/dave.json", "people/dave.json.sig"), pair):
+        (reg.root / f).write_bytes(data)
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert [k.did for k in result.people["dave"].keys] == [did(key("dave2"))]
+    warned = key_change_warnings(result)
+    assert len(warned) == 1 and first_a in warned[0]

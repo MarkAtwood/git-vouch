@@ -16,7 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional, Union
@@ -844,41 +844,59 @@ def signer_of(
     return key
 
 
-def verify_person(person: Person, data: bytes, sig: bytes) -> None:
-    """Check that ``sig`` holds exactly one valid signature per current key of ``person``.
+def verify_person(
+    person: Person,
+    data: bytes,
+    sig: bytes,
+    previous: Optional[Sequence[PersonKey]] = None,
+    revoked: Collection[str] = (),
+) -> bool:
+    """Check the signatures on one version of a person file.
 
-    A current key is one with no ``retired`` time. A signature by any other
-    key, or a second one by the same key, is an error.
-
-    This checks one snapshot only. It does not prove that a key added or
-    un-retired was approved by a key current before the change, nor does it
-    know about revocations; the caller must judge both.
+    Each signature in ``sig`` must be valid and by a different key that is
+    current (has no ``retired`` time) in ``previous`` or in ``person``. One
+    signature is enough, so backup keys can stay in a drawer. A signature
+    by a revoked key is accepted, as revoking never fails the check, but it
+    proves nothing, past or future.
 
     Args:
         person: The record parsed from ``data``.
         data: The exact bytes of ``people/<handle>.json``.
         sig: The bytes of its ``.sig`` file.
+        previous: The keys current in the previous version, or None if this
+            is the file's first version.
+        revoked: The did:keys of every revoked key.
+
+    Returns:
+        Whether an unrevoked key in ``previous`` signed it, or, for a first
+        version, one of its own. False means only registry review let the change
+        through, which the caller warns about.
 
     Raises:
-        VouchError: A signature is missing, invalid or extra, or no key is current.
+        VouchError: A signature is invalid, repeated or by any other key, or
+            no key may sign it.
     """
     rel = f"people/{person.handle}.json"
-    unsigned = [k for k in person.keys if k.retired is None]
-    if not unsigned:
+    old = {k.ssh for k in previous or ()}
+    own = [k for k in person.keys if k.retired is None]
+    allowed = list({k.ssh: k for k in [*(previous or ()), *own]}.values())
+    if not allowed:
         raise VouchError(f"{rel}: no current key to sign it")
     try:
         blocks = split_signatures(sig)
     except VouchError as e:
         raise VouchError(f"{rel}.sig: {e}") from e
+    is_chained = False
     for block in blocks:
-        key = _signer(data, block, NAMESPACES["people"], unsigned)
+        key = _signer(data, block, NAMESPACES["people"], allowed)
         if key is None:
             raise VouchError(
                 f"{rel}.sig: a signature is invalid, by a non-current key, or repeated"
             )
-        unsigned.remove(key)
-    if unsigned:
-        raise VouchError(f"{rel}.sig: no signature by current key {unsigned[0].did}")
+        allowed.remove(key)
+        if key.did not in revoked and (previous is None or key.ssh in old):
+            is_chained = True
+    return is_chained
 
 
 def verify_approval(
@@ -1172,7 +1190,8 @@ def check_registry(root: Path) -> CheckResult:
     record committed before its subject's person file. An email may be
     listed in only one person file, ignoring case; it is endorsed if a
     valid endorsement lists it in ``subjectEmails``, and an unendorsed
-    email is a warning. Void records and
+    email is a warning. So is every version of a person file that no
+    unrevoked key current in its previous version signed. Void records and
     warnings do not fail the check, so a revocation never blocks the export
     that spreads it.
 
@@ -1217,14 +1236,6 @@ def check_registry(root: Path) -> CheckResult:
                     f"people/{handle}.json: {other} and {handle} both list the email {email}"
                 )
 
-    people: dict[str, Person] = {}
-    for handle, (person, data, sig) in parsed.items():
-        try:
-            verify_person(person, data, sig)
-            people[handle] = person
-        except VouchError as e:
-            problems.append(str(e))
-
     history = registry_history(root, paths)
     final = history.final
 
@@ -1245,6 +1256,69 @@ def check_registry(root: Path) -> CheckResult:
             return () if data is None else parse_anchors(data)
         except VouchError:
             return ()
+
+    def pair_at(rel: str, i: int) -> tuple[Optional[bytes], Optional[bytes]]:
+        return history.at(rel, i), history.at(rel + ".sig", i)
+
+    # Every version of a person file needs a signature by a key current at
+    # one of its parents. One without, or with no .sig at all, is let
+    # through by review, never an error, but warned about loudly once
+    # revocations are known. The working tree's file is judged at the latest
+    # version that gave it its content, not against itself.
+    people: dict[str, Person] = {}
+    # (handle, position, previous keys or None, keys to name as old)
+    person_versions: list[
+        tuple[str, int, Optional[list[PersonKey]], list[PersonKey]]
+    ] = []
+    for rel in sorted(history.versions):
+        if not (rel.startswith("people/") and rel.endswith(".json")):
+            continue
+        handle = rel[len("people/") : -len(".json")]
+        changes = [
+            i
+            for i in sorted(
+                {
+                    i
+                    for i, _ in history.versions[rel]
+                    + history.versions.get(rel + ".sig", [])
+                }
+            )
+            if pair_at(rel, i)[0] is not None
+            and pair_at(rel, i) not in [pair_at(rel, p) for p in history.parents[i]]
+        ]
+        now = parsed.get(handle)
+        origins = [j for j in changes if now and pair_at(rel, j) == now[1:]]
+        origin = max(
+            (j for j in origins if not any(history.before(j, k) for k in origins)),
+            default=None,
+        )
+        for i in changes:
+            version = person_at(handle, i)
+            body, signature = pair_at(rel, i)
+            if version is None or body is None:
+                continue  # the working tree's version is already reported
+            was = [person_at(handle, p) for p in history.parents[i]]
+            old = [k for v in was if v for k in v.keys if k.retired is None]
+            # Only a version no other one precedes or runs concurrently with
+            # is a first version, so a branch that never saw the file cannot
+            # start it afresh.
+            prior = [
+                v
+                for j, d in history.versions[rel]
+                if d is not None and j != i and not history.before(i, j)
+                for v in [person_at(handle, j)]
+                if v
+            ]
+            previous = old if prior else None
+            if i == origin and signature is not None:
+                try:
+                    verify_person(version, body, signature, previous)
+                except VouchError as e:
+                    problems.append(str(e))
+                    continue
+                people[handle] = version
+            gone = old or [k for v in prior for k in v.keys]
+            person_versions.append((handle, i, previous, gone))
 
     # A key belongs to one person, or export would credit their signatures to
     # another: the one whose person file, in any version, listed it first.
@@ -1366,6 +1440,28 @@ def check_registry(root: Path) -> CheckResult:
         except Void as e:
             if is_current:
                 voids.append(str(e))
+
+    for handle, i, previous, gone in person_versions:
+        rel = f"people/{handle}.json"
+        version, (body, signature) = person_at(handle, i), pair_at(rel, i)
+        if version is None or body is None:
+            continue  # not in person_versions; narrows the types
+        try:
+            is_chained = signature is not None and verify_person(
+                version, body, signature, previous, revoked
+            )
+        except VouchError:
+            is_chained = False  # a bad signature chains nothing
+        if not is_chained:
+            old_dids = ", ".join(dict.fromkeys(k.did for k in gone)) or "none"
+            new_dids = (
+                ", ".join(k.did for k in version.keys if k.retired is None) or "none"
+            )
+            warnings.append(
+                f"{rel}: WARNING: changed at {history.name(i)} without a signature"
+                " by any unrevoked key current in the previous version; only registry"
+                f" review let it through (old keys: {old_dids}; new keys: {new_dids})"
+            )
 
     def check_signer(
         rel: str, record: Union[Tier, Endorsement], data: bytes, sig: bytes, signer: str
