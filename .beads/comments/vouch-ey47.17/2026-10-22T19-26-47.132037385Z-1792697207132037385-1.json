@@ -1,0 +1,7 @@
+{
+  "id": "1792697207132037385-1",
+  "issue_id": "vouch-ey47.17",
+  "author": "agent",
+  "text": "QUESTION for Mark: a bot's automation grant made concurrently with a commit that demotes its accountable maintainer is still a VouchError (check fails; test_automation_grant_concurrent_with_accountable_removal_fails), while a grant concurrent with its approver's demotion is now Void. DESIGN.md:126-128 ('Like any approval') and :701-703 put the accountable next to the approver, which suggests void here too; the decision text names only the approver. Should it be void with a warning? If yes: move that concurrent check after check_signer as a Void and update the .16 test. Left unchanged pending your call.",
+  "created_at": "2026-10-22T19:26:47.132037385Z"
+}

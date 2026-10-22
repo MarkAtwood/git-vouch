@@ -1187,7 +1187,8 @@ def check_registry(root: Path) -> CheckResult:
     someone without the authority to make it. A void record is valid in
     itself but has no effect: it was signed by a key since revoked, it
     depends on a record that is void or has a problem, or it is a tier
-    record committed before its subject's person file. An email may be
+    record committed before its subject's person file or concurrently with
+    a commit that took its approver's authority. An email may be
     listed in only one person file, ignoring case; it is endorsed if a
     valid endorsement lists it in ``subjectEmails``, and an unendorsed
     email is a warning. So is every version of a person file that no
@@ -1527,19 +1528,12 @@ def check_registry(root: Path) -> CheckResult:
             raise VouchError(f"{rel}: no person file for {t.subject}")
         if t.approver == t.subject:
             raise VouchError(f"{rel}: {t.subject} cannot approve themselves")
-        # The approver must have held the authority where the record was added
-        # and must not have lost it on a branch merged in alongside.
-        concurrent = lowered(t.approver, t.tier, added)
-        for j in [*added, *concurrent]:
-            if not may_grant(t.approver, j, t.tier):
-                where = (
-                    f" in concurrent commit {history.name(j)}"
-                    if j in concurrent
-                    else ""
-                )
+        # The approver must have held the authority where the record was added.
+        for a in added:
+            if not may_grant(t.approver, a, t.tier):
                 raise VouchError(
-                    f"{rel}: {t.approver} ({claimed_at(t.approver, j) or 'no tier'})"
-                    f" may not grant {t.tier}{where}"
+                    f"{rel}: {t.approver} ({claimed_at(t.approver, a) or 'no tier'})"
+                    f" may not grant {t.tier}"
                 )
         if any(history.at(f"people/{t.subject}.json", a) is None for a in added):
             raise Void(f"{rel}: void: committed before people/{t.subject}.json existed")
@@ -1563,6 +1557,15 @@ def check_registry(root: Path) -> CheckResult:
                         )
                 accountables.append((accountable, a))
         check_signer(rel, t, data, sig, t.approver)
+        # Authority lost on a branch merged in alongside may have been lost
+        # first, which git does not record: void until re-approved.
+        concurrent = lowered(t.approver, t.tier, added)
+        if concurrent:
+            raise Void(
+                f"{rel}: void: {t.approver} lost the authority to grant {t.tier}"
+                f" in concurrent commit {history.name(concurrent[0])};"
+                " needs a new approval"
+            )
         if any(tier_at(t.approver, a) is None for a in added):
             raise Void(f"{rel}: void: {t.approver} has no valid tier")
         if t.subject not in people:

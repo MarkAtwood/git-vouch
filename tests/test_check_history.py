@@ -436,7 +436,7 @@ def test_merging_an_old_branch_keeps_grants(
 
 
 @pytest.mark.parametrize("fast_forward", [True, False])
-def test_demoted_approver_cannot_grant_from_an_old_branch(
+def test_grant_concurrent_with_approver_demotion_is_void(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], fast_forward: bool
 ) -> None:
     reg.git("branch", "side")
@@ -454,9 +454,75 @@ def test_demoted_approver_cannot_grant_from_an_old_branch(
         reg.git("checkout", "-q", "main")
         reg.git("merge", "-q", "--no-edit", "side")
     result = vouch.check_registry(reg.root)
-    assert has(result.problems, "tiers/carol.json", "gregkh (no tier) may not grant")
+    assert result.problems == []
+    assert has(result.voids, "tiers/carol.json", "gregkh", "concurrent commit")
     assert "carol" not in result.tiers
     assert result.tiers["alice"] == "contributor"
+    assert run_script("check", str(reg.root)).returncode == 0
+    reg.git("checkout", "-q", "main")
+    reg.tier("carol", "contributor", "torvalds", key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert result.tiers["carol"] == "contributor"
+
+
+def test_bad_signature_on_grant_concurrent_with_demotion_fails(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # The signature is judged before the concurrent demotion, so a forged
+    # grant is an error, never a warning.
+    reg.git("branch", "side")
+    reg.delete("tiers/gregkh.json")
+    reg.commit()
+    reg.git("checkout", "-q", "side")
+    reg.person("carol", key("carol"))
+    reg.tier("carol", "contributor", "gregkh", key("gregkh"))
+    path = reg.root / "tiers/carol.json"
+    path.write_bytes(path.read_bytes() + b"\n")
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "tiers/carol.json", "no valid signature")
+    assert not has(result.voids, "tiers/carol.json")
+    assert "carol" not in result.tiers
+    assert run_script("check", str(reg.root)).returncode != 0
+
+
+def test_grant_by_demoted_approver_after_merge_fails(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.git("branch", "side")
+    reg.delete("tiers/gregkh.json")
+    reg.commit()
+    reg.git("checkout", "-q", "side")
+    reg.person("carol", key("carol"))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-edit", "side")
+    reg.tier("carol", "contributor", "gregkh", key("gregkh"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "tiers/carol.json", "gregkh (no tier) may not grant")
+    assert "carol" not in result.tiers
+
+
+def test_mutual_revocations_on_concurrent_branches_both_count(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.git("branch", "side")
+    reg.revoke("alice", key("alice2"), key("alice"), n=1)
+    reg.commit()
+    reg.git("checkout", "-q", "side")
+    reg.revoke("alice", key("alice"), key("alice2"), n=2)
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert set(result.revoked) == {did(key("alice")), did(key("alice2"))}
+    assert run_script("check", str(reg.root)).returncode == 0
 
 
 def test_key_listed_on_a_concurrent_branch_is_tied(
