@@ -75,6 +75,7 @@ short enough to read in a sitting.
 | `git-vouch` | The core: registry rules, records, export | `git`, `ssh-keygen` |
 | `git-vouch-migrate` | Flag day only: drafts person files and endorsements from the frozen `pgpkeys.git` | `gpg`, `git-vouch` |
 | `git-vouch-attest` | Verifies a FIDO key's attestation against a vendor root the user supplies | `openssl` |
+| `git-vouch-patatt` | Writes the patch-signing keyring that patatt and b4 read, from the registry | `git`, `git-vouch` |
 | `git-vouch-trqp` | Optional TRQP bridge so OpenVTC's `verify-trust` can ask whether a DID may sign for the kernel; a thin shim over `git-vouch` | `git-vouch` |
 
 `git-vouch-migrate` is the only tool that runs `gpg`, and it is retired
@@ -118,8 +119,9 @@ an attacker would have to infiltrate two social graphs, not one.
 Nobody can endorse themselves: a self-endorsement is reported as void
 and counts for nothing, but never fails `check`.
 
-**Automation identities** can sign only files (the `file` namespace:
-tarballs, checksums), never git tags or commits. They cannot endorse or
+**Automation identities** can sign files (the `file` namespace:
+tarballs, checksums) and patches (see Patch signing), never git tags or
+commits. They cannot endorse or
 approve anyone. Their person file must name the accountable maintainer,
 who must hold the maintainer or anchor tier at the commit that adds the
 bot's tier record. Like any approval, that is judged once: if the
@@ -494,6 +496,38 @@ verify` does not enforce the FIDO user-presence or user-verification
 flags, and `allowed_signers` has no option to require them, so a
 verified signature does not prove anyone touched the token.
 
+## Patch signing
+
+Kernel patch emails are signed with patatt, which is built into b4: an
+`X-Developer-Signature` header that `b4 am` checks. patatt already
+signs and verifies with `ssh-keygen -Y` in the `patatt` namespace and
+looks keys up by email at `openssh/<domain>/<local>/<selector>`, from a
+directory or straight from a git ref. It has no notion of tiers,
+revocation or validity dates: a key in its keyring is trusted. Today
+the kernel's b4 keyring is `pgpkeys.git`'s `.keyring/`, which the flag
+day freezes.
+
+`git-vouch-patatt` writes that keyring from the registry:
+
+- **Who:** any registered person with at least one endorsed email,
+  whatever their tier, including automation identities whose email is
+  endorsed (normally by their accountable maintainer). Only endorsed
+  emails become identities.
+- **Which keys:** current keys only. patatt cannot say "valid until", so
+  a retired key would verify new forgeries; it drops out at the next
+  run, and patch emails it signed stop verifying, which matters little
+  once a patch is merged. Revoked keys are never written.
+- **Selector:** derived from the key itself (`k-` plus a short
+  fingerprint), one rule for every key, so a person's main and backup
+  tokens never collide. `git vouch status` prints the selector to set as
+  `patatt.selector`.
+- **Where:** a branch in the registry repository, regenerated after each
+  merge, which `git vouch sync` fetches and patatt reads with
+  `patatt.keyringsrc = ref:...`. The branch is derived entirely from the
+  registry, so `git-vouch-patatt --check` regenerates it locally and
+  reports any difference; whoever runs the regeneration cannot slip in
+  a key unnoticed.
+
 ## Flag day
 
 GPG and `pgpkeys.git` are retired for the kernel on one date, the flag
@@ -672,6 +706,10 @@ Decided 2026-10-22:
   optional free-text note, no minimum count; they bind
   name, key and `subjectEmails`, carry over to later keys, and only
   endorsed emails are exported.
+- **Patch signing:** `git-vouch-patatt` writes patatt's keyring to a
+  branch in the registry from endorsed emails and current keys, any tier,
+  bots included; selectors derived from the key; `--check` audits the
+  branch against a local regeneration.
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.
