@@ -1,0 +1,7 @@
+{
+  "id": "1792699767641670788-1",
+  "issue_id": "vouch-omzm.3",
+  "author": "agent",
+  "text": "QUESTION (owner): drafts --as refuses unless the certifier's own continuity proof holds. DESIGN.md says the proof is needed only to RECEIVE ported drafts, so this gives it a second role (unlocking draft generation). No security need: each draft is signed by the endorser's SSH key, and its note is free text. Options: (a) keep the requirement and amend DESIGN.md; (b) let an unproven certifier name their GPG key, from migratedFrom in their person file or with --gpg-key FPR. Interim: the requirement stays, and the drafts help text says it is provisional. Review fixes: uat (photo ID) signatures are no longer credited to the preceding user ID; tests added for photo-only certification, an unverified (corrupted) certification, a certification on a revoked UID, and a revocation at the same second as the certification; each one kills its mutant.",
+  "created_at": "2026-10-22T20:09:27.641670788Z"
+}

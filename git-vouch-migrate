@@ -4,8 +4,9 @@
 Flag day only, and the only git-vouch tool that runs gpg. It reads
 pgpkeys.git at one signed commit C, after checking C's signature, and
 writes unsigned drafts that holders complete with
-``git vouch register --from``, and verifies registered people's
-continuity proofs against C. Person-file checks are git-vouch's own,
+``git vouch register --from``, verifies registered people's
+continuity proofs against C, and writes each certifier's unsigned
+endorsement drafts from their GPG certifications. Person-file checks are git-vouch's own,
 imported from the git-vouch script. See DESIGN.md, Flag day.
 """
 
@@ -97,6 +98,14 @@ class Continuity(NamedTuple):
     proven: dict[str, Proof]  # handle -> proof
     failed: dict[str, str]  # handle -> why its claim is not proven
     duplicates: dict[str, list[str]]  # fingerprint -> every handle claiming it
+    check: vouch.CheckResult  # git-vouch's own check of the registry
+
+
+class Certification(NamedTuple):
+    """One user ID certification, as gpg verified it at C."""
+
+    uid: str
+    time: int
 
 
 class Draft(NamedTuple):
@@ -603,7 +612,170 @@ def verify_continuity(
                 failed[handle] = "no validly signed person file"
             elif handle not in claims and handle not in failed:
                 failed[handle] = "no migratedFrom"
-    return Continuity(proven, failed, duplicates)
+    return Continuity(proven, failed, duplicates, result)
+
+
+def parse_certifications(
+    colons: bytes, certifier: str
+) -> dict[str, list[Certification]]:
+    """Return each key's live certifications by ``certifier``, from ``--check-sigs`` output.
+
+    For every unrevoked user ID, the latest good certification (class 0x10
+    to 0x13) by the primary key ``certifier`` counts unless a good
+    certification revocation (class 0x30) by it is as new or newer. Only
+    signatures gpg verified ('!') are read.
+
+    Args:
+        colons: ``gpg --with-colons --fixed-list-mode --check-sigs`` output.
+        certifier: The certifier's primary fingerprint.
+
+    Returns:
+        Primary fingerprint -> its certified user IDs, in listing order.
+    """
+    found: dict[str, list[Certification]] = {}
+    fpr = ""
+    uid: Optional[str] = None  # the unrevoked user ID whose signatures come next
+    times: dict[str, list[int]] = {}  # user ID -> [latest cert, latest revocation]
+
+    def flush() -> None:
+        for u, (cert, rev) in times.items():
+            if cert > rev:
+                found.setdefault(fpr, []).append(Certification(u, cert))
+
+    for line in colons.splitlines():
+        f = line.split(b":")
+        if f[0] == b"pub":
+            flush()
+            fpr, uid, times = "", None, {}
+        elif f[0] == b"fpr" and not fpr:
+            fpr = f[9].decode()
+        elif f[0] in (b"sub", b"uat"):  # a photo ID's signatures certify no user ID
+            uid = None
+        elif f[0] == b"uid":
+            uid = None if f[1] == b"r" else _unescape(f[9])
+        elif f[0] in (b"sig", b"rev") and uid is not None and len(f) > 12:
+            by_certifier = f[4].decode() == certifier[-16:] and f[12].decode() in (
+                "",
+                certifier,
+            )
+            kind = f[10][:2].decode()
+            if f[1] != b"!" or not by_certifier:
+                continue
+            slot = times.setdefault(uid, [0, 0])
+            if f[0] == b"sig" and kind in ("10", "11", "12", "13"):
+                slot[0] = max(slot[0], int(f[5]))
+            elif f[0] == b"rev" and kind == "30":
+                slot[1] = max(slot[1], int(f[5]))
+    flush()
+    return found
+
+
+def _current_key(person: vouch.Person, revoked: Collection[str]) -> vouch.PersonKey:
+    """Return the person's first key that is neither retired nor revoked.
+
+    Raises:
+        VouchError: They have none.
+    """
+    for key in person.keys:
+        if key.retired is None and key.did not in revoked:
+            return key
+    raise VouchError(f"people/{person.handle}.json: no current key")
+
+
+def _next_seq(root: Path, subject: str, endorser: str) -> int:
+    """Return the next free n for endorsements/<subject>/<endorser>-<n>.json in the registry."""
+    taken = [0]
+    for name in vouch.list_dir(root, f"endorsements/{subject}"):
+        m = vouch.SEQ_RE.fullmatch(name[: -len(".json")])
+        if name.endswith(".json") and m is not None and m.group(1) == endorser:
+            taken.append(int(m.group(2)))
+    return max(taken) + 1
+
+
+def _utc(when: int) -> str:
+    return datetime.fromtimestamp(when, timezone.utc).strftime("%Y-%m-%d")
+
+
+def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
+    """Write the certifier's unsigned endorsement drafts to ``out`` and report on stdout.
+
+    One draft per registered person, other than the certifier, whose
+    continuity proof holds and whose GPG key the certifier's own proven
+    key certified at C (see ``parse_certifications``). SHA-1
+    certifications count: the draft is a reminder, and the certifier's
+    SSH signature on it is what counts.
+
+    Args:
+        pgp: The pgpkeys keyring at C.
+        root: The registry checkout.
+        certifier: The certifier's handle.
+        out: A new directory; drafts go to its endorsements/<subject>/.
+
+    Returns:
+        The number of drafts written.
+
+    Raises:
+        VouchError: The certifier's own continuity proof does not hold, or
+            gpg, ssh-keygen or git fails.
+    """
+    found = verify_continuity(pgp, root)
+    if certifier not in found.proven:
+        why = found.failed.get(certifier, "no ported person file")
+        raise VouchError(f"--as {certifier}: continuity not proven: {why}")
+    by = found.proven[certifier].fpr
+    people, revoked = found.check.people, found.check.revoked
+    endorser_key = _current_key(people[certifier], revoked)
+    subjects = {h: p.fpr for h, p in found.proven.items() if h != certifier}
+    certs = {}
+    if subjects:
+        certs = parse_certifications(
+            pgp.gpg(
+                "--with-colons",
+                "--fixed-list-mode",
+                "--allow-weak-key-signatures",
+                "--check-sigs",
+                values=sorted(set(subjects.values())),
+            ),
+            by,
+        )
+    now = datetime.now(timezone.utc).strftime(vouch.DATE_FORMAT)
+    written: dict[str, bytes] = {}
+    for handle, fpr in sorted(subjects.items()):
+        if fpr not in certs:
+            continue
+        person = people[handle]
+        try:
+            subject_key = _current_key(person, revoked)
+        except VouchError as e:
+            print(f"skip {handle}: {e}")
+            continue
+        uids = [UID_RE.fullmatch(c.uid) for c in certs[fpr]]
+        certified = {m.group(2).lower() for m in uids if m}
+        draft = {
+            "@context": [vouch.CONTEXT],
+            "endorser": certifier,
+            "endorserKey": endorser_key.did,
+            "subject": handle,
+            "subjectKey": subject_key.did,
+            "subjectName": person.name,
+            "subjectEmails": [m for m in person.emails if m.lower() in certified],
+            "note": " ".join(
+                f'Certified GPG key {fpr} user ID "{c.uid}" on {_utc(c.time)}.'
+                for c in certs[fpr]
+            ),
+            "date": now,
+        }
+        rel = f"endorsements/{handle}/{certifier}-{_next_seq(root, handle, certifier)}.json"
+        data = (json.dumps(draft, indent=2, ensure_ascii=False) + "\n").encode()
+        vouch.parse_record(rel, data)
+        written[rel] = data
+    for rel, data in written.items():
+        path = out / rel
+        path.parent.mkdir(parents=True)
+        path.write_bytes(data)
+        print(f"draft {rel}")
+    print(f"certified by {by}: {len(written)} drafts")
+    return len(written)
 
 
 def _open_pgpkeys(args: argparse.Namespace, home: Path) -> Pgpkeys:
@@ -650,6 +822,20 @@ def cmd_verify_continuity(args: argparse.Namespace) -> int:
         else:
             print(f"fail {handle}: {found.failed[handle]}")
     return 1 if found.failed else 0
+
+
+def cmd_drafts(args: argparse.Namespace) -> int:
+    """Check C's signature, then write the certifier's endorsement drafts."""
+    _check_signer(args)
+    vouch.validate_handle(args.handle)
+    out = Path(args.out)
+    if out.exists():
+        raise VouchError(
+            f"{out}: already exists; drafts are only written to a new directory"
+        )
+    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
+        drafts(_open_pgpkeys(args, Path(home)), Path(args.registry), args.handle, out)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -703,6 +889,33 @@ def build_parser() -> argparse.ArgumentParser:
         "handles", nargs="*", metavar="HANDLE", help="whose claims to verify"
     )
     p.set_defaults(func=cmd_verify_continuity)
+    p = sub.add_parser(
+        "drafts",
+        help="write your unsigned endorsement drafts from your GPG certifications",
+        description=(
+            "Run by each certifier on their own machine. Check C's signature and "
+            "the continuity proofs, as verify-continuity does, then write to a "
+            "new directory one unsigned draft "
+            "endorsements/<subject>/<HANDLE>-<n>.json for each person whose proof "
+            "holds and whose GPG key HANDLE's own proven GPG key certified at C. "
+            "Per user ID, the latest certification counts unless HANDLE later "
+            "revoked it; SHA-1 certifications count. subjectEmails are the "
+            "person file's emails on certified user IDs, and note names the "
+            "certified key, user IDs and dates. endorserKey and subjectKey are "
+            "each person's first current key. Read each draft, then sign it. "
+            "Provisional: HANDLE's own continuity proof must hold, pending the "
+            "owner's decision on whether a certifier without one may draft."
+        ),
+    )
+    p.add_argument("pgpkeys", help="a pgpkeys.git clone")
+    p.add_argument("registry", help="the registry checkout")
+    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument(
+        "--signer", required=True, help="primary fingerprint expected to sign C"
+    )
+    p.add_argument("--as", dest="handle", required=True, help="your own handle")
+    p.add_argument("--out", required=True, help="new directory for the drafts")
+    p.set_defaults(func=cmd_drafts)
     return parser
 
 
