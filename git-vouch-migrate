@@ -573,7 +573,11 @@ def port(pgp: Pgpkeys, out: Path) -> int:
 
 def _signed_by(rel: str, data: bytes, sig: bytes, key: vouch.PersonKey) -> bool:
     """Return whether one of the signatures in ``sig`` is by ``key``, per git-vouch."""
-    for block in vouch.split_signatures(sig):
+    try:
+        blocks = vouch.split_signatures(sig)
+    except VouchError:
+        return False
+    for block in blocks:
         try:
             vouch.signer_of(rel, data, block, [key])
         except VouchError:
@@ -582,45 +586,117 @@ def _signed_by(rel: str, data: bytes, sig: bytes, key: vouch.PersonKey) -> bool:
     return False
 
 
-def _prove(
+def _prove_version(
     pgp: Pgpkeys,
-    root: Path,
-    person: vouch.Person,
+    rel: str,
+    data: bytes,
+    sigs: Sequence[bytes],
+    ascs: Sequence[bytes],
     key: GpgKey,
     revoked: Collection[str],
 ) -> str:
-    """Return how the holder of GPG ``key`` proved that ``person`` is theirs.
+    """Return how GPG ``key``'s holder proved that version ``data`` of ``rel`` is theirs.
+
+    Args:
+        pgp: The pgpkeys keyring at C.
+        rel: ``people/<handle>.json``.
+        data: One version of it, claiming ``key``.
+        sigs: Contents of ``rel``.sig that may sign ``data``.
+        ascs: Contents of ``rel``.asc that may sign ``data``.
+        key: The GPG key claimed.
+        revoked: Every did:key revoked in the registry.
 
     Raises:
-        VouchError: The person file does not prove it.
+        VouchError: This version is not proven by any of ``sigs`` or ``ascs``.
     """
-    if key.validity in SKIPPED:
-        raise VouchError(f"{key.fpr} is {SKIPPED[key.validity]}")
+    person = vouch.parse_record(rel, data)
+    if person.migrated_from != key.fpr:
+        raise VouchError(f"does not claim {key.fpr}")
     uid_emails = _all_emails(key)
     for email in person.emails:
         if email.lower() not in uid_emails:
             raise VouchError(f"{email} is not on an unrevoked user ID of {key.fpr}")
-    rel = f"people/{person.handle}.json"
-    data = vouch.read_capped(root, rel)
     # The auth subkey must have signed this version: its public key is public,
     # so listing it proves nothing.
-    sig = vouch.read_capped(root, rel + ".sig")
     current = [k for k in person.keys if k.retired is None and k.did not in revoked]
     for sub in key.auth:
         ssh = pgp.ssh_key(sub)
-        if any(k.ssh == ssh and _signed_by(rel, data, sig, k) for k in current):
-            return f"auth subkey {sub}"
-    if not (root / f"{rel}.asc").exists():
+        for k in current:
+            if k.ssh == ssh and any(_signed_by(rel, data, s, k) for s in sigs):
+                return f"auth subkey {sub}"
+    if not ascs:
         raise VouchError(
             f"no {rel}.asc, and no signature by an auth subkey of {key.fpr}"
         )
+    errors = []
+    for asc in ascs:
+        try:
+            signer = pgp.detached_signer(asc, data)
+        except VouchError as e:
+            errors.append(f"{rel}.asc: {e}")
+            continue
+        if signer == key.fpr:
+            return ".asc"
+        errors.append(f"{rel}.asc: signed by {signer}, not {key.fpr}")
+    raise VouchError(errors[0])
+
+
+def _committed(root: Path, rel: str) -> list[bytes]:
+    """Return every committed content of ``rel`` in the registry, newest first.
+
+    Raises:
+        VouchError: The registry's history cannot be read.
+    """
+    if not vouch._is_repo_top(root):
+        return []
+    return [v.data for v in reversed(vouch.file_history(root, rel)) if v.data]
+
+
+def _prove(
+    pgp: Pgpkeys,
+    root: Path,
+    handle: str,
+    key: GpgKey,
+    revoked: Collection[str],
+    chained: bool,
+) -> str:
+    """Return how the holder of GPG ``key`` proved that ``people/<handle>.json`` is theirs.
+
+    The proof is judged against the version of the person file it was made
+    for, found in the registry's history, so a later add-key, retire-key or
+    email change does not undo it. That version must claim ``key`` and pass
+    the email check itself. Only the current version counts unless
+    ``chained``: a change that only review let through, such as a lost-key
+    recovery or a handle registered again after deletion, needs a new proof.
+
+    Raises:
+        VouchError: No version proves it; the reason given is the current
+            version's. Or the registry's history cannot be read.
+    """
+    if key.validity in SKIPPED:
+        raise VouchError(f"{key.fpr} is {SKIPPED[key.validity]}")
+    rel = f"people/{handle}.json"
+    data = vouch.read_capped(root, rel)
+    sigs = [vouch.read_capped(root, rel + ".sig")]
+    ascs = []
+    if (root / f"{rel}.asc").exists():
+        ascs.append(vouch.read_capped(root, rel + ".asc"))
     try:
-        signer = pgp.detached_signer(vouch.read_capped(root, rel + ".asc"), data)
+        return _prove_version(pgp, rel, data, sigs, ascs, key, revoked)
     except VouchError as e:
-        raise VouchError(f"{rel}.asc: {e}") from e
-    if signer != key.fpr:
-        raise VouchError(f"{rel}.asc: signed by {signer}, not {key.fpr}")
-    return ".asc"
+        why = e
+    if not chained:
+        raise why
+    # ponytail: every version against every signature, one verifier run per
+    # pair; fine for the few edits a person file sees.
+    sigs += _committed(root, rel + ".sig")
+    ascs += _committed(root, rel + ".asc")
+    for old in _committed(root, rel):
+        try:
+            return _prove_version(pgp, rel, old, sigs, ascs, key, revoked)
+        except VouchError:
+            continue
+    raise why
 
 
 def verify_continuity(
@@ -630,12 +706,13 @@ def verify_continuity(
 
     The person file must be validly signed by git-vouch's own rules, and
     its ``migratedFrom`` key in pgpkeys at C not revoked (an expired key is
-    accepted, D9), with every email in the file on an unrevoked user ID of
-    that key. The proof is a signature on the file by a live ed25519, P-256
-    or RSA authentication key (the primary or a subkey), or
-    ``people/<handle>.json.asc``, a detached signature by the key over the
-    file's exact bytes. A
-    fingerprint claimed by two or more handles proves none of them (D3).
+    accepted, D9). The proof is judged against the version of the file it
+    was made for, found in the registry's history (see ``_prove``): that
+    version has every email on an unrevoked user ID of the key, and is
+    signed by a live ed25519, P-256 or RSA authentication key (the primary
+    or a subkey), or by ``people/<handle>.json.asc``, a detached signature
+    by the key over its exact bytes. A fingerprint claimed by two or more
+    handles proves none of them (D3).
 
     Args:
         pgp: The pgpkeys keyring at C.
@@ -671,6 +748,9 @@ def verify_continuity(
     duplicates = {f: hs for f, hs in sorted(by_fpr.items()) if len(hs) > 1}
     keys = {k.fpr: k for k in pgp.keys()}
     proven: dict[str, Proof] = {}
+    # ponytail: any unchained change in the file's history, even one before
+    # the proven version, drops the history fallback; failing closed is fine.
+    unchained = "people/%s.json: WARNING: changed at "
     for handle, fpr in claims.items():
         if handles and handle not in handles:
             continue
@@ -682,7 +762,12 @@ def verify_continuity(
         else:
             try:
                 how = _prove(
-                    pgp, root, result.people[handle], keys[fpr], result.revoked
+                    pgp,
+                    root,
+                    handle,
+                    keys[fpr],
+                    result.revoked,
+                    not any(w.startswith(unchained % handle) for w in result.warnings),
                 )
             except VouchError as e:
                 failed[handle] = str(e)
@@ -783,10 +868,12 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
     """Write the certifier's unsigned endorsement drafts to ``out`` and report on stdout.
 
     One draft per registered person, other than the certifier, whose
-    continuity proof holds and whose GPG key the certifier's own proven
-    key certified at C (see ``parse_certifications``). SHA-1
-    certifications count: the draft is a reminder, and the certifier's
-    SSH signature on it is what counts.
+    continuity proof holds and whose GPG key the key in the certifier's
+    own ``migratedFrom`` certified at C (see ``parse_certifications``).
+    The certifier needs no continuity proof, and their other GPG keys'
+    certifications are not read. SHA-1 certifications and ones expired
+    by C count: the draft is a reminder, and the certifier's SSH
+    signature on it is what counts.
 
     Args:
         pgp: The pgpkeys keyring at C.
@@ -798,15 +885,19 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
         The number of drafts written.
 
     Raises:
-        VouchError: The certifier's own continuity proof does not hold, or
-            gpg, ssh-keygen or git fails.
+        VouchError: The certifier has no validly signed person file, or it
+            has no ``migratedFrom`` key in pgpkeys at C, or gpg, ssh-keygen
+            or git fails.
     """
     found = verify_continuity(pgp, root)
-    if certifier not in found.proven:
-        why = found.failed.get(certifier, "no ported person file")
-        raise VouchError(f"--as {certifier}: continuity not proven: {why}")
-    by = found.proven[certifier].fpr
     people, revoked = found.check.people, found.check.revoked
+    if certifier not in people:
+        raise VouchError(f"--as {certifier}: no validly signed person file")
+    by = people[certifier].migrated_from
+    if by is None:
+        raise VouchError(f"--as {certifier}: no migratedFrom")
+    if by not in {k.fpr for k in pgp.keys()}:
+        raise VouchError(f"--as {certifier}: {by} is not in pgpkeys at C")
     endorser_key = _current_key(people[certifier], revoked)
     subjects = {h: p.fpr for h, p in found.proven.items() if h != certifier}
     certs = {}
@@ -955,11 +1046,13 @@ def build_parser() -> argparse.ArgumentParser:
             "Check C's signature, then, for each validly signed person file in "
             "the registry with migratedFrom (or each HANDLE given), verify its "
             "continuity proof against the keys in pgpkeys.git at C: the GPG key "
-            "must not be revoked at C (expired is accepted), every email in the "
-            "file must be on an unrevoked user ID of it, and either an ed25519, "
-            "P-256 or RSA authentication key or subkey of it signed the person file, or "
-            "people/<handle>.json.asc is its detached signature over the file's "
-            "exact bytes. A fingerprint claimed by two handles proves neither. "
+            "must not be revoked at C (expired is accepted), and some version of "
+            "the person file in the registry's history must claim it, have "
+            "every email on an unrevoked user ID of it, and be signed by an "
+            "ed25519, P-256 or RSA authentication key or subkey of it listed "
+            "as current in that version, or by people/<handle>.json.asc, its "
+            "detached signature over that version's exact bytes. A "
+            "fingerprint claimed by two handles proves neither. "
             "Prints 'ok' or 'fail' per handle, and exits 1 if any fails."
         ),
     )
@@ -981,14 +1074,13 @@ def build_parser() -> argparse.ArgumentParser:
             "the continuity proofs, as verify-continuity does, then write to a "
             "new directory one unsigned draft "
             "endorsements/<subject>/<HANDLE>-<n>.json for each person whose proof "
-            "holds and whose GPG key HANDLE's own proven GPG key certified at C. "
-            "Per user ID, the latest certification counts unless HANDLE later "
-            "revoked it; SHA-1 certifications count. subjectEmails are the "
+            "holds and whose GPG key the key in HANDLE's own migratedFrom "
+            "certified at C; HANDLE needs no continuity proof. Per user ID, the "
+            "latest certification counts unless HANDLE later revoked it; SHA-1 "
+            "certifications and ones expired by C count. subjectEmails are the "
             "person file's emails on certified user IDs, and note names the "
             "certified key, user IDs and dates. endorserKey and subjectKey are "
-            "each person's first current key. Read each draft, then sign it. "
-            "Provisional: HANDLE's own continuity proof must hold, pending the "
-            "owner's decision on whether a certifier without one may draft."
+            "each person's first current key. Read each draft, then sign it."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")

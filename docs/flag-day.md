@@ -285,7 +285,12 @@ fail <handle>: <reason>
 
 A proof holds only if the GPG key is not revoked at C (expired is
 accepted), every email in the person file is on an unrevoked user ID of
-that key, and no other person file claims the same fingerprint.
+that key, and no other person file claims the same fingerprint. The
+proof is judged against the version of your person file it was made
+for, found in the registry's history, so a later `add-key`,
+`retire-key` or email change does not undo it. A change no current key
+signed, such as lost-key recovery or registering a deleted handle again,
+does: the current version then needs its own proof.
 
 ### Endorsements from GPG certifications
 
@@ -312,11 +317,13 @@ git push -q origin HEAD:endorse-lena
 ```
 
 `drafts --as` writes one draft per registered person whose continuity
-proof holds and whose GPG key your own proven key certified at C. It
-uses the latest certification you did not revoke, including SHA-1
-certifications that GnuPG 2.4 rejects: the draft is only a reminder, and
-your new SSH signature is what counts. Your own continuity proof must
-hold too, or it refuses.
+proof holds and whose GPG key the key in your own `migratedFrom`
+certified at C. It uses the latest certification you did not revoke,
+including SHA-1 certifications that GnuPG 2.4 rejects and ones that had
+expired by C: the draft is only a reminder, and your new SSH signature
+is what counts. You need no continuity proof yourself, only
+`migratedFrom` in your person file; certifications made with your other
+GPG keys are not read.
 
 **Read every draft before you sign it.** `subjectName` comes from the
 subject's own person file, not from your certification; `subjectEmails`
@@ -433,9 +440,8 @@ no manifest.
 | `fail <handle>: <email> is not on an unrevoked user ID of <fpr>` | Your person file has an email your GPG key does not | Before your branch is merged: remove that email from your draft, register again in a fresh registry checkout, and make a new `.asc`. |
 | `fail <handle>: no people/<handle>.json.asc, and no signature by an auth subkey of <fpr>` | No proof submitted, or the auth subkey is listed but another key signed the file | Add the `.asc`, or sign the person file with the auth subkey itself. |
 | `fail <handle>: people/<handle>.json.asc: signed by <X>, not <Y>` | The `.asc` was made with a different GPG key | Sign with the key in `migratedFrom` (`gpg -u <fingerprint>`). |
-| A proof that held now fails, after `add-key`, `retire-key` or an email change | The proof covers the person file's current bytes, and the change re-signed the file | Make a new `.asc` over the new file before the late cutoff, or sign the new version with the auth subkey. Endorsements already signed are unaffected. |
 | `check` warns `migratedFrom openpgp4fpr:<fpr> is also claimed by <handle>`; `verify-continuity` prints `duplicate` | Two person files claim the same GPG key | Neither gets drafts, whichever merged first. An anchor decides which claim is genuine, and the other claim comes out of the registry. Suspect a stolen GPG key. |
-| `drafts --as` refuses: `continuity not proven` | Your own continuity proof does not hold | Fix your proof first (see above). |
+| `drafts --as` refuses: `no migratedFrom` | Your person file does not name your GPG key | Add `migratedFrom` before the late cutoff, or endorse people afresh. |
 | A subject is missing from your drafts | They have not registered yet, or their proof does not hold | Run `drafts` again later, into a new `--out` directory. It drafts every subject again, including ones you already endorsed, so sign only the new ones. |
 | `git verify-tag` says "No principal matched" | The signer has no tier at or above the export's minimum, has not been approved yet, or your registry copy is stale | Have them approved, or run `git vouch sync`. |
 | A GPG-signed tag after the flag day | GPG is no longer accepted | Re-sign the tag with `git tag -s` after `git vouch setup`. |

@@ -656,9 +656,13 @@ drafts. It grants no tier, and registering without it works; the person
 then collects fresh endorsements. The proof is either
 `people/<handle>.json.asc`, a detached signature by the GPG key over the
 new person file's exact bytes, or reuse of that key's authentication
-subkey as the SSH key. `git-vouch-migrate` accepts it only if the GPG
-key is not revoked in C (an expired key is accepted), every email in the
-file is on an unrevoked UID of that key, and no other person file claims
+subkey as the SSH key. It is judged against the person-file version it
+was made for, found in the registry's history, so later signed edits do
+not undo it. A change that only review let through (lost-key recovery,
+or a handle registered again after deletion) ends that: the current
+version must then carry its own proof. `git-vouch-migrate` accepts it only if the GPG
+key is not revoked in C (an expired key is accepted), every email in
+that version is on an unrevoked UID of that key, and no other person file claims
 the same fingerprint. If two do, `check` flags both and neither gets
 drafts until an anchor resolves it, whichever merged first. `git-vouch`
 itself never runs GPG and never checks the `.asc`.
@@ -667,7 +671,9 @@ itself never runs GPG and never checks the `.asc`.
 certifier runs `git-vouch-migrate drafts --as <handle>` on their own
 machine, from the public pgpkeys at C and the registry, and gets one
 draft per subject with a continuity proof: the latest unrevoked
-certification, including SHA-1 ones that GnuPG 2.4 rejects, because the
+certification by the key in the certifier's `migratedFrom` (the
+certifier needs no proof), including SHA-1 ones that GnuPG 2.4 rejects
+and ones expired by C, because the
 draft is only a reminder and the certifier's new SSH signature is what
 counts. A draft takes `subjectName` from the
 person file, fills `subjectEmails` from the certified UIDs, and puts the

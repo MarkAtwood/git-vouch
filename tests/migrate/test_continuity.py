@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -424,8 +425,11 @@ def test_auth_subkey_retired_but_signing_fails(
 ) -> None:
     alice = pgpkeys.fprs["alice"]
     ssh, pub = auth_ssh_key(pgpkeys, alice, tmp_path)
-    path = write_person(registry, "alice", alice, ["alice@example.org"], [ssh])
-    ssh_sign(path, pub, env=agent)
+    # v1 lists the auth subkey, but only ed25519_key signs it: no proof yet.
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ssh, ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
     commit_all(registry, "v1")
     # v2 retires the auth subkey; git-vouch lets it sign, as current in v1.
     write_person(
@@ -506,3 +510,148 @@ def test_asc_by_signing_subkey_revoked_at_c_fails(
     proc = verify(pgpkeys, registry)
     assert proc.returncode == 1
     assert "fail carol: people/carol.json.asc: gpg reports REVKEYSIG" in proc.stdout
+
+
+def test_auth_subkey_proof_survives_retiring_it(
+    pgpkeys: Pgpkeys,
+    registry: Path,
+    agent: dict[str, str],
+    ed25519_key: Any,
+    tmp_path: Path,
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    sub, _ = auth_subkey(pgpkeys, alice)
+    ssh, pub = auth_ssh_key(pgpkeys, alice, tmp_path)
+    path = write_person(registry, "alice", alice, ["alice@example.org"], [ssh])
+    ssh_sign(path, pub, env=agent)  # the proof, made for v1
+    commit_all(registry, "v1")
+    write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey],
+        retired=[ssh],
+    )  # fmt: skip
+    ssh_sign_by(path, [(ed25519_key.private, None), (pub, agent)])
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"ok alice: openpgp4fpr:{alice} by auth subkey {sub}" in proc.stdout
+
+
+def test_asc_for_an_earlier_version_survives_add_key_and_email_change(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any, ecdsa_key: Any, tmp_path: Path
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # the proof, made for v1
+    commit_all(registry, "v1")
+    # v2 adds a key and an email the GPG key never had; the .asc is now stale.
+    write_person(
+        registry, "alice", alice, ["alice@example.org", "alice@new.example"],
+        [ed25519_key.pubkey, ecdsa_key.pubkey],
+    )  # fmt: skip
+    ssh_sign(path, ed25519_key.private)
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"ok alice: openpgp4fpr:{alice} by .asc" in proc.stdout
+    # The same files without their history do not prove it.
+    bare = tmp_path / "bare"
+    shutil.copytree(registry, bare, ignore=shutil.ignore_patterns(".git"))
+    proc = verify(pgpkeys, bare, "alice")
+    assert proc.returncode == 1
+    assert "alice@new.example is not on an unrevoked user ID" in proc.stdout
+
+
+def test_earlier_version_claiming_another_key_does_not_count(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any
+) -> None:
+    alice, bob = pgpkeys.fprs["alice"], pgpkeys.fprs["bob"]
+    path = write_person(
+        registry, "alice", bob, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # alice's .asc over a version claiming bob's key
+    commit_all(registry, "v1")
+    write_person(registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey])
+    ssh_sign(path, ed25519_key.private)
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 1
+    assert "fail alice: people/alice.json.asc: gpg reports BADSIG" in proc.stdout
+
+
+def test_earlier_version_with_an_email_off_the_key_does_not_count(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@old.example"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # alice@old.example is a revoked user ID
+    commit_all(registry, "v1")
+    write_person(registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey])
+    ssh_sign(path, ed25519_key.private)
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 1
+    assert "fail alice: people/alice.json.asc: gpg reports BADSIG" in proc.stdout
+
+
+def test_email_shared_with_a_differently_named_key_passes(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any
+) -> None:
+    # mallory's key also holds victor@example.com, under a different primary
+    # name; port drafts neither, but victor can still prove continuity.
+    victor = pgpkeys.fprs["victor"]
+    path = write_person(
+        registry, "victor", victor, ["victor@example.com"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, victor)
+    proc = verify(pgpkeys, registry, "victor")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"ok victor: openpgp4fpr:{victor} by .asc" in proc.stdout
+
+
+def test_earlier_proof_does_not_survive_an_unsigned_key_replacement(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any, ecdsa_key: Any
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # the proof, made for v1
+    commit_all(registry, "v1")
+    # v2 swaps in a key no v1 key signed for: only review lets it through.
+    write_person(registry, "alice", alice, ["alice@example.org"], [ecdsa_key.pubkey])
+    ssh_sign(path, ecdsa_key.private)
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 1
+    assert "fail alice: people/alice.json.asc: gpg reports BADSIG" in proc.stdout
+
+
+def test_earlier_proof_does_not_survive_re_registration(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any, ecdsa_key: Any
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # the proof, made for v1
+    commit_all(registry, "v1")
+    for f in path.parent.glob("alice.json*"):
+        f.unlink()
+    commit_all(registry, "delete")
+    # Someone else registers the handle again, claiming the same GPG key.
+    write_person(registry, "alice", alice, ["alice@example.org"], [ecdsa_key.pubkey])
+    ssh_sign(path, ecdsa_key.private)
+    commit_all(registry, "v2")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 1
+    assert "fail alice: no people/alice.json.asc" in proc.stdout

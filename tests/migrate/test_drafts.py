@@ -94,7 +94,17 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             "judy": gpg.new_key("Judy Revoked <judy@example.org>"),
             "kim": gpg.new_key("Kim Tied <kim@example.org>"),
             "nell": gpg.new_key("Nell Split"),
+            # Another GPG key of erin's, not the one in her migratedFrom.
+            "erin_alt": gpg.new_key("Erin Noproof <erin@example.net>"),
+            "lou": gpg.new_key("Lou Live <lou@example.org>"),
+            "max": gpg.new_key("Max Lapsed <max@example.org>"),
         }
+        # erin, who has no continuity proof, certifies lou, and max with a
+        # certification that expired before C; her other key certifies nell.
+        _certify(gpg, fprs["erin"], fprs["lou"], "20200102T000000")
+        _certify(gpg, fprs["erin"], fprs["max"], "20200102T000000",
+                 "--default-cert-expire", "1d")  # fmt: skip
+        _certify(gpg, fprs["erin_alt"], fprs["nell"], "20200102T000000")
         # Only nell's bare-address user ID is certified.
         gpg("--quick-add-uid", fprs["nell"], "nell@example.org")
         gpg("-u", cora + "!", "--quick-sign-key", fprs["nell"], "nell@example.org",
@@ -171,6 +181,9 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             ("judy", "judy", ["judy@example.org"], True),
             ("kim", "kim", ["kim@example.org"], True),
             ("nell", "nell", ["nell@example.org"], True),
+            ("lou", "lou", ["lou@example.org"], True),
+            ("max", "max", ["max@example.org"], True),
+            ("zoe", None, ["zoe@example.org"], False),  # registered fresh
         ]
         for handle, owner, emails, has_proof in people:
             private = base / f"{handle}.ssh"
@@ -181,12 +194,11 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             )  # fmt: skip
             pub = private.with_name(private.name + ".pub").read_text().split()
             ssh[handle] = (private, " ".join(pub[:2]))
-            path = write_person(registry, handle, fprs[owner], emails, [ssh[handle][1]])
+            fpr = None if owner is None else fprs[owner]
+            path = write_person(registry, handle, fpr, emails, [ssh[handle][1]])
             ssh_sign(path, private)
-            if has_proof:
-                gpg_sign(
-                    Certified(repo, commit, fprs, gpg, ssh, registry), path, fprs[owner]
-                )
+            if has_proof and fpr is not None:
+                gpg_sign(Certified(repo, commit, fprs, gpg, ssh, registry), path, fpr)
         yield Certified(repo, commit, fprs, gpg, ssh, registry)
     finally:
         for gnupg in (home, base / "relay"):
@@ -361,13 +373,62 @@ def test_revocation_as_new_as_certification_cancels_it(
     assert not (cora_drafts / "endorsements/kim").exists()
 
 
-def test_certifier_without_proven_continuity_fails(
+def test_certifier_without_proven_continuity_drafts_from_migrated_from_key(
+    certified: Certified, tmp_path: Path
+) -> None:
+    proc = run_migrate(
+        "verify-continuity", "--commit", certified.commit,
+        "--signer", certified.fprs["signer"], str(certified.repo),
+        str(certified.registry), "erin",
+    )  # fmt: skip
+    assert proc.returncode == 1
+    assert "fail erin: no people/erin.json.asc" in proc.stdout
+    out = tmp_path / "out"
+    proc = run_drafts(certified, certified.registry, "erin", out)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # Not nell: erin_alt, erin's other GPG key, certified her.
+    assert drafted(out) == {
+        "endorsements/lou/erin-1.json",
+        "endorsements/max/erin-1.json",
+    }
+
+
+def test_certification_expired_by_c_is_drafted(
+    certified: Certified, tmp_path: Path
+) -> None:
+    erin = certified.fprs["erin"]
+    out = certified.gpg("--with-colons", "--fixed-list-mode", "--list-sigs",
+                        certified.fprs["max"])  # fmt: skip
+    sigs = [
+        f for f in (ln.split(":") for ln in out.decode().splitlines())
+        if f[0] == "sig" and f[4] == erin[-16:]
+    ]  # fmt: skip
+    c_time = int(_git(certified.repo, "show", "-s", "--format=%ct",
+                      certified.commit, env=dict(os.environ)))  # fmt: skip
+    assert len(sigs) == 1 and sigs[0][6] and int(sigs[0][6]) < c_time
+    out_dir = tmp_path / "out"
+    proc = run_drafts(certified, certified.registry, "erin", out_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    draft = json.loads((out_dir / "endorsements/max/erin-1.json").read_text())
+    assert draft["subjectEmails"] == ["max@example.org"]
+    assert "on 2020-01-02." in draft["note"]
+
+
+def test_certifier_without_migrated_from_fails(
     certified: Certified, tmp_path: Path
 ) -> None:
     out = tmp_path / "out"
-    proc = run_drafts(certified, certified.registry, "erin", out)
+    proc = run_drafts(certified, certified.registry, "zoe", out)
     assert proc.returncode == 1
-    assert "--as erin: continuity not proven: no people/erin.json.asc" in proc.stderr
+    assert "--as zoe: no migratedFrom" in proc.stderr
+    assert not out.exists()
+
+
+def test_unregistered_certifier_fails(certified: Certified, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    proc = run_drafts(certified, certified.registry, "nobody", out)
+    assert proc.returncode == 1
+    assert "--as nobody: no validly signed person file" in proc.stderr
     assert not out.exists()
 
 
