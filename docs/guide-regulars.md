@@ -172,10 +172,7 @@ that are left and approves you (here as `alice`):
 ```sh
 cd registry
 for f in ~/endorsement-drafts/endorsements/*/*.json; do
-    d=endorsements/$(basename "$(dirname "$f")")
-    mkdir -p "$d"
-    ssh-keygen -q -Y sign -f ~/.ssh/id_ed25519.pub -n git-vouch-endorse "$f" &&
-        cp "$f" "$f.sig" "$d"/
+    git vouch endorse --from "$f"
 done
 git vouch approve bob contributor
 git add endorsements tiers

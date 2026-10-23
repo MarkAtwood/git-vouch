@@ -452,7 +452,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch status` | Shows registry commit, fetch age (warns past 7 days), and your own tier |
 | `git vouch register [--from FILE]` | Writes your person file from an SSH public key, or completes a draft such as one from `git-vouch-migrate`, and signs it through the agent |
 | `git vouch add-key` / `retire-key` | Rotation: edits your person file and re-signs it |
-| `git vouch endorse <handle>` | Writes and signs an endorsement |
+| `git vouch endorse <handle>` / `--from FILE` | Writes and signs an endorsement, or signs a draft such as one from `git-vouch-migrate drafts` once its `endorser` and `endorserKey` are the signer's |
 | `git vouch approve <handle> <tier>` | Writes and signs a tier record |
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
@@ -461,7 +461,8 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
-`DIR` defaults to the synced registry copy once `setup` has run.
+`DIR` defaults to the synced registry copy once `setup` has run; pass
+`.` to check or export a checkout.
 `register`, `endorse`, `approve` and `revoke` write files for a registry
 merge request; they never push. `--help` is the documentation; there is
 no man page.

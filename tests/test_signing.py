@@ -24,7 +24,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -283,6 +283,130 @@ def test_unregistered_signer_is_refused(tree: Path, keys: dict[str, Key]) -> Non
     )
     assert result.returncode == 1
     assert "no person file" in result.stderr
+
+
+def endorsement_draft(
+    tmp_path: Path, endorser: str, endorser_key: Key, alice: Key
+) -> Path:
+    """Write an unsigned endorsement of alice shaped like a git-vouch-migrate draft,
+    dated now as drafts are: after every key in the fixture registry was added."""
+    path = tmp_path / "drafts" / "alice.json"
+    path.parent.mkdir(exist_ok=True)
+    obj = {
+        "@context": [CONTEXT],
+        "endorser": endorser,
+        "endorserKey": did(endorser_key),
+        "subject": "alice",
+        "subjectKey": did(alice),
+        "subjectName": "Alice",
+        "subjectEmails": ["alice@example.org"],
+        "note": "Certified GPG key 0123 on 2020-01-02.",
+        "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    path.write_text(json.dumps(obj, indent=2) + "\n")
+    return path
+
+
+def test_endorse_from_a_draft_signs_it_with_the_matching_key(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    before = path.read_bytes()
+    sign = ["--sign-with", str(keys["torvalds"].private)]
+    out = ok(tree, "endorse", "--from", str(path), *sign)
+    rel = tree / "endorsements/alice/torvalds-1.json"
+    assert out.split() == [
+        "endorsements/alice/torvalds-1.json",
+        "endorsements/alice/torvalds-1.json.sig",
+    ]
+    verify(rel, keys["torvalds"], "git-vouch-endorse")
+    assert rel.read_bytes() == before
+    assert path.read_bytes() == before
+    assert check(tree).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "endorser, key, signer, refusal",
+    [
+        ("torvalds", "gregkh", "torvalds", "endorserKey is not"),
+        ("gregkh", "torvalds", "torvalds", "endorser is not torvalds"),
+        ("alice", "alice", "alice", "nobody can endorse themselves"),
+    ],
+)
+def test_endorse_from_a_draft_for_another_signer_is_refused(
+    tree: Path,
+    keys: dict[str, Key],
+    tmp_path: Path,
+    endorser: str,
+    key: str,
+    signer: str,
+    refusal: str,
+) -> None:
+    path = endorsement_draft(tmp_path, endorser, keys[key], keys["alice"])
+    sign = ["--sign-with", str(keys[signer].private)]
+    result = vouch(tree, "endorse", "--from", str(path), *sign)
+    assert result.returncode == 1
+    assert refusal in result.stderr
+    assert not list((tree / "endorsements/alice").glob(f"{signer}-*"))
+
+
+@pytest.mark.parametrize(
+    "spoil",
+    [
+        lambda o: o.pop("subjectKey"),
+        lambda o: o.update(date="2026-11-03"),
+        lambda o: o.update(subjectEmails="alice@example.org"),
+    ],
+    ids=["no-subjectKey", "date-without-time", "emails-not-a-list"],
+)
+def test_endorse_from_a_schema_invalid_draft_is_refused(
+    tree: Path,
+    keys: dict[str, Key],
+    tmp_path: Path,
+    spoil: Callable[[dict[str, object]], object],
+) -> None:
+    """The right endorser and key do not excuse a draft that breaks the
+    DESIGN.md endorsement schema: every term but note, an RFC 3339 date."""
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    obj = json.loads(path.read_text())
+    spoil(obj)
+    path.write_text(json.dumps(obj, indent=2) + "\n")
+    sign = ["--sign-with", str(keys["torvalds"].private)]
+    result = vouch(tree, "endorse", "--from", str(path), *sign)
+    assert result.returncode == 1
+    assert "endorsements/alice/torvalds-1.json" in result.stderr
+    assert not list((tree / "endorsements/alice").glob("torvalds-*"))
+
+
+def test_endorse_from_a_draft_that_is_not_an_object_is_refused(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    path.write_text(json.dumps([json.loads(path.read_text())]) + "\n")
+    sign = ["--sign-with", str(keys["torvalds"].private)]
+    result = vouch(tree, "endorse", "--from", str(path), *sign)
+    assert result.returncode == 1
+    assert "not an endorsement draft" in result.stderr
+    assert not list((tree / "endorsements/alice").glob("torvalds-*"))
+
+
+def test_endorse_from_a_draft_refuses_overrides(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    sign = ["--sign-with", str(keys["torvalds"].private)]
+    for extra in (["alice"], ["--note", "x"], ["--email", "alice@example.org"]):
+        result = vouch(tree, "endorse", "--from", str(path), *extra, *sign)
+        assert result.returncode == 1
+        assert "come from the draft" in result.stderr
+    assert vouch(tree, "endorse", *sign).returncode == 1
+    assert not (tree / "endorsements/alice/torvalds-1.json").exists()
+
+
+def test_check_help_says_to_pass_a_dot_for_a_checkout() -> None:
+    result = vouch(Path("."), "check", "--help")
+    assert result.returncode == 0
+    assert "pass . to check a checkout" in " ".join(result.stdout.split())
 
 
 def test_add_key_then_retire_key_chain(tree: Path, keys: dict[str, Key]) -> None:

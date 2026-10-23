@@ -330,9 +330,10 @@ subject's own person file, not from your certification; `subjectEmails`
 are the person file's emails on the user IDs you certified; `note` names
 the certified key, user IDs and dates. Before running the loop, delete
 any draft you would not vouch for today (see `docs/vouching.md`); the
-loop prints each remaining one again as it signs it. No `git vouch`
-command signs a prepared draft, so the loop calls `ssh-keygen -Y sign`
-directly with the endorsement namespace.
+loop prints each remaining one again as it signs it with
+`ssh-keygen -Y sign` in the endorsement namespace.
+`git vouch endorse --from FILE` signs one draft the same way, after
+checking that its `endorser` and `endorserKey` are you and your key.
 
 The anchor approves maintainers in the same branch. The registry
 maintainer merges it as above, with `branch=endorse-lena`.

@@ -2774,8 +2774,47 @@ def cmd_retire_key(args: argparse.Namespace) -> int:
     return 0
 
 
+def _endorse_draft(args: argparse.Namespace) -> int:
+    """Sign an endorsement draft, such as one from ``git-vouch-migrate drafts``.
+
+    The draft's ``endorserKey`` must be the signing key and its ``endorser``
+    the handle of the person file that lists that key as current. The
+    draft's bytes are signed unchanged, so what the endorser read is what
+    they sign.
+
+    Raises:
+        VouchError: The draft is invalid, names another endorser or key,
+            or endorses its own endorser.
+    """
+    if args.handle or args.email or args.note is not None:
+        raise VouchError("the handle, --email and --note come from the draft")
+    data = _read_local(args.from_file, "draft")
+    obj = _load_json(data)
+    if not isinstance(obj, dict):
+        raise VouchError(f"{args.from_file}: not an endorsement draft")
+    root = Path(".")
+    key = _signing_key(args.sign_with)
+    if obj.get("endorserKey") != key.did:
+        raise VouchError(f"{args.from_file}: endorserKey is not {key.did}")
+    endorser = _signer_file(root, key)[0].handle
+    if obj.get("endorser") != endorser:
+        raise VouchError(f"{args.from_file}: endorser is not {endorser}")
+    subject = validate_handle(obj.get("subject"))
+    if subject == endorser:
+        raise VouchError("nobody can endorse themselves")
+    d = f"endorsements/{subject}"
+    rel = f"{d}/{endorser}-{_next_seq(root, d, endorser)}.json"
+    parse_record(rel, data)
+    _write_signed(rel, data, key)
+    return 0
+
+
 def cmd_endorse(args: argparse.Namespace) -> int:
     """Write and sign an endorsement of ``handle``'s name, first current key and emails."""
+    if args.from_file:
+        return _endorse_draft(args)
+    if not args.handle:
+        raise VouchError("pass a handle, or --from a draft")
     root = Path(".")
     subject = _load_person(root, args.handle)
     key = _signing_key(args.sign_with)
@@ -2936,7 +2975,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("key", metavar="KEY", help=".pub file, key text or did:key")
     p.set_defaults(func=cmd_retire_key)
     p = signing("endorse", "write and sign an endorsement")
-    p.add_argument("handle")
+    p.add_argument("handle", nargs="?")
+    p.add_argument(
+        "--from",
+        dest="from_file",
+        metavar="FILE",
+        help="sign this draft, such as one from git-vouch-migrate drafts",
+    )
     p.add_argument(
         "--email", action="append", help="endorse only this address (repeatable)"
     )
@@ -2959,7 +3004,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         metavar="DIR",
         help="registry checkout (default: the synced copy once setup has run,"
-        " else the current directory)",
+        " else the current directory; pass . to check a checkout)",
     )
     p.set_defaults(func=cmd_check)
     p = add("export", "write the allowed-signers file and the revocation file")

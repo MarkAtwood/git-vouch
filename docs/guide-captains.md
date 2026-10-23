@@ -203,10 +203,7 @@ that are left and approve your contributors (here as `alice`):
 ```sh
 cd registry
 for f in ~/endorsement-drafts/endorsements/*/*.json; do
-    d=endorsements/$(basename "$(dirname "$f")")
-    mkdir -p "$d"
-    ssh-keygen -q -Y sign -f ~/.ssh/id_ed25519.pub -n git-vouch-endorse "$f" &&
-        cp "$f" "$f.sig" "$d"/
+    git vouch endorse --from "$f"
 done
 git vouch approve bob contributor
 git add endorsements tiers
@@ -216,9 +213,10 @@ git push -q origin HEAD:endorse-alice
 
 <!-- merge endorse-alice -->
 
-No `git vouch` command signs a prepared draft, so the loop calls
-`ssh-keygen -Y sign` directly with the endorsement namespace. A draft is
-copied into the registry only once its signature is made.
+`endorse --from` refuses a draft whose `endorser` or `endorserKey` is
+not you and your signing key. Otherwise it signs the draft exactly as
+you read it and writes it and its signature into the registry under the
+next free number. The draft itself is left where it is.
 
 ### Switch git to SSH signing
 
