@@ -5,7 +5,7 @@ command block on this page is run, in order, by
 `tests/test_guide_anchors.py` in a throwaway registry, with real `git`
 and `ssh-keygen`. The `shell` blocks under
 [Patch signing](#patch-signing) are run by
-`tests/patatt/test_patch_docs.py` with released b4 and the patatt fork,
+`tests/patatt/test_patch_docs.py` with the b4 and patatt forks,
 mail going to a local sink. Who runs each block is noted in the text.
 
 An anchor is one of the few people `anchors.json` in the registry lists:
@@ -530,8 +530,11 @@ Every tag the revoked key signed also stops verifying, which for an
 anchor can include release tags: one more reason to keep signing keys on
 hardware tokens with a PIN, and the backup in a drawer. So do patches:
 once someone checking them has synced, patatt no longer finds the key.
-b4 remembers a verdict for up to 24 hours, so a series it already
-checked can keep its tick until then.
+With the b4 fork set up as in
+[Check incoming patches](#check-incoming-patches), b4 checks a signature
+again every time. Upstream b4 newer than 0.16 remembers a verdict for
+up to 24 hours, so a series it already checked can keep its tick until
+then.
 
 **Without a backup key,** the only way back is a change no previous key
 signed, as `alice` made above. It rests on the registry maintainer's
@@ -547,18 +550,32 @@ signer's current keys. A patch verifies when one of the signer's current
 keys signed it and it comes from an endorsed email, whatever the
 signer's tier, automation identities included.
 
-### Install the fork
+### Install the forks
 
-Install the fork into the Python environment b4 runs from; it replaces
-the patatt that came with b4:
+Install b4 and patatt from their forks' `git-vouch` branches in one
+command, so b4 gets the patatt fork in place of released patatt:
 
 <!-- patch not-run needs-network -->
 ```shell
-pip install 'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
+pip install 'b4 @ git+https://github.com/MarkAtwood/b4@git-vouch' \
+    'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
 ```
 
-If you run b4 from a checkout with `b4.sh`, check out the fork's
-`git-vouch` branch in its `patatt` submodule instead.
+The b4 fork can check every patch afresh, which makes a revocation take
+effect at once. If you run b4 from a checkout with `b4.sh`, clone the b4
+fork's `git-vouch` branch and put the patatt fork in its `patatt`
+submodule. The submodule points at kernel.org, which has no `git-vouch`
+branch, so fetch that branch from github.com/MarkAtwood/patatt and check
+it out there.
+
+`misc/vouch-check.sh` in the b4 fork tests the pair offline in a
+throwaway home: it signs a series with a registry key and checks that
+`b4 am` passes it, then fails it once the key is revoked. Unless
+git-vouch and the patatt fork are checked out next to b4 and b4 has a
+`.venv`, set `GIT_VOUCH` to the git-vouch script, `PATATT_FORK` to a pip
+requirement for the patatt fork and `PYTHON` to a Python with b4's
+dependencies. It also needs `uv`, with setuptools in its cache. It sets up its own
+config: set yours as this page does, not as the script's header shows.
 
 ### Sign with your registry key
 
@@ -590,11 +607,21 @@ git -C ~/pgpkeys checkout -q --detach "$FREEZE_COMMIT"
 git config --global --unset-all b4.keyringsrc || true
 git config --global patatt.keyringsrc vouch:
 git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
+git config --global b4.attestation-recheck-hours 0
 ```
 
 patatt reads the keyring as files on disk, so leave that clone at the
 freeze commit: a key added after it would verify too. The checkout
 fails if the clone does not hold the freeze commit.
+
+`b4.attestation-recheck-hours = 0` is a setting of the b4 fork: b4
+checks every signature again instead of remembering a verdict for up to
+24 hours, so a revoked key stops verifying at your next `git vouch
+sync`. Any other b4 ignores it, and upstream b4 newer than 0.16 keeps a
+pass for up to 24 hours. The fork names the keyring after every registry
+pass: if `b4 am` prints `✓ Signed: openssh/...` with no
+`(key: vouch:...)` after it, the b4 you run is not the fork. Check
+`command -v b4`.
 
 b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
 documentation suggests, so the block removes `b4.keyringsrc`. Then
@@ -615,10 +642,11 @@ verify.
 ### Kernel-wide settings
 
 Nothing in the kernel tree can set the keyring for people: b4 ignores
-`keyringsrc` in a tree's `.b4-config`. Each developer sets the two
-`keyringsrc` lines in their own git config, so publish them with the
-flag-day announcement, together with the install line and the date
-they stop needing the second one.
+`keyringsrc` in a tree's `.b4-config`. Each developer sets the lines
+of [Check incoming patches](#check-incoming-patches) in their own git
+config, so publish them with the flag-day announcement, together with
+the install line and the date they stop needing the legacy keyring
+line.
 
 ### Dropping the GPG fallback
 

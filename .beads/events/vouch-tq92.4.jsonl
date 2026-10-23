@@ -1,0 +1,2 @@
+{"id":"01a169cd-a6fe-7a65-9b49-784cc3a5dc50","issue_id":"vouch-tq92.4","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T17:27:27.742682504Z"}
+{"id":"01a169cf-08c9-7d45-ae6f-fa31ad367ef9","issue_id":"vouch-tq92.4","event_type":"closed","actor":"agent","old_value":"","new_value":"Moot: release files scoped out (vouch-omzm.15), so there is no release-file overlap to reconcile with 'no dual period'.","created_at":"2026-10-23T17:28:58.313870423Z"}

@@ -1,0 +1,23 @@
+{
+  "id": "vouch-tq92.5",
+  "title": "Show what Linus sees for an unregistered maintainer's tag",
+  "description": "Cover note says only that an unregistered maintainer's tag fails git verify-tag after flag day. Reproduce with real git and ssh-keygen in a throwaway registry: export with --min-tier maintainer, a tag signed by an unregistered key and by a below-tier key, git pull / git verify-tag / git log --show-signature; capture the exact messages. Document them (DESIGN or guide-anchors, and one line in the cover note) and say what the sender must do. If the message is unhelpful, consider whether git vouch can explain it (e.g. git vouch why \u003ctag\u003e) as a separate proposal, not built here.",
+  "acceptance_criteria": "Exact outputs captured from real tools and documented; cover note line updated; any tooling idea filed as its own bead, not implemented.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:27:27.810191532Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:27:27.810191532Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-tq92.5",
+      "depends_on_id": "vouch-tq92",
+      "type": "parent-child",
+      "created_at": "2026-10-23T17:27:27.822873381Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

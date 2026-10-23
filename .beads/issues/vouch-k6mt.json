@@ -1,0 +1,14 @@
+{
+  "id": "vouch-k6mt",
+  "title": "One registry per repository (multi-registry, no federation)",
+  "description": "Mark 2026-10-23: let other communities (LF, LF working groups, LF business, Apache, ...) each keep their own git tree of signed person files, and let one user work with several. Today git-vouch is one registry per user: setup records a global vouch.registry, sync keeps one copy, keys/query/status read it; check/export DIR already accept any checkout. Proposal: (1) honour vouch.registry per repository (git config local) as well as globally; (2) key the synced copy, fetch stamp and exports by registry URL so several coexist; (3) git vouch setup run inside a repo points that repo's gpg.ssh.allowedSignersFile (and revocation file) at that registry's export; keys/query/status take the registry from the current repo or --registry. Kept rejected (DESIGN Rejected alternatives): merging registries into one allowed_signers file, cross-registry endorsements or tier inheritance, any trust between registries; tiers are per-community and the same email may map to different keys in different registries. Post-kernel: does not block flag day. Update DESIGN's 'LF-wide registry federation' row to distinguish per-repo registries (accepted) from federation (rejected).",
+  "acceptance_criteria": "Two registries synced on one machine; a repo configured for each verifies only its own registry's signers with real git verify-commit/verify-tag; no cross-registry leakage test (signer valid in A is rejected in a repo bound to B); global config still works unchanged for single-registry users; DESIGN updated; tests pass on 3.12 and 3.9.",
+  "notes": "Relevant to the LFDT lab question: makes git-vouch a general tool for LF and Apache, not kernel-only.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "feature",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:51:18.949319353Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:51:18.949319353Z"
+}

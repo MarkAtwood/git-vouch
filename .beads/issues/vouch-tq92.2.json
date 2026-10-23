@@ -1,0 +1,23 @@
+{
+  "id": "vouch-tq92.2",
+  "title": "Source or cut the '80% of maintainers have no GPG key' figure",
+  "description": "DESIGN.md Flag day 'Scale' and docs/for-kernel-reviewers.md say about 80% of maintainers have no GPG key; no measurement is on record. Measure it: fetch pgpkeys.git (verify the freeze/HEAD commit signature) and linux MAINTAINERS (M: lines, unique emails), count how many maintainer emails appear on an unrevoked UID in pgpkeys. Keep names/emails local; commit only aggregates with method, source commits and date. Replace the figure in DESIGN and the cover note with the measured number, or cut it. Delete fetched data afterwards.",
+  "acceptance_criteria": "Measured aggregate with method and source commits in DESIGN (or figure removed from both files); no personal data committed; fetched copies deleted.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:27:27.597235543Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:27:27.597235543Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-tq92.2",
+      "depends_on_id": "vouch-tq92",
+      "type": "parent-child",
+      "created_at": "2026-10-23T17:27:27.613773992Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

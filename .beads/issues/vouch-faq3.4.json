@@ -55,6 +55,14 @@
       "created_at": "2026-10-23T04:45:16.97179056Z",
       "created_by": "agent",
       "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-faq3.4",
+      "depends_on_id": "vouch-faq3.12",
+      "type": "blocks",
+      "created_at": "2026-10-23T17:54:24.737429826Z",
+      "created_by": "agent",
+      "metadata": "{}"
     }
   ]
 }

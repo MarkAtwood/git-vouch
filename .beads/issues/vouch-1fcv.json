@@ -1,0 +1,14 @@
+{
+  "id": "vouch-1fcv",
+  "title": "Tests leak gpg-agent and scdaemon processes",
+  "description": "Observed 2026-10-23: ~100 gpg-agent/scdaemon processes left running from pytest homedirs under /tmp/pytest-of-mark (e.g. regulars0/*/gnupg, captains0/verifier), some 40+ minutes old. Fixtures that create GNUPGHOME must kill their agents at teardown (gpgconf --homedir X --kill all) or run gpg with --no-autostart where possible. Applies to tests/migrate and doc tests.",
+  "acceptance_criteria": "After a full test run, no gpg-agent/scdaemon remains with a pytest homedir; a test or conftest check enforces it.",
+  "notes": "Also git-vouch-migrate itself leaks: gpg-agent processes with --homedir /tmp/mig-ring.* (its own temp keyrings) stay running after the tool exits; the tool must kill its agent (gpgconf --homedir --kill all) in a finally block. Session scratchpad keyrings also leaked. Mark asked 2026-10-23 to kill them all; cleaned by hand (age \u003e 15 min).",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:54:24.533445147Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:55:09.410542551Z"
+}

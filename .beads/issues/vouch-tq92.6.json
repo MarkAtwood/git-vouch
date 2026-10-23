@@ -1,0 +1,31 @@
+{
+  "id": "vouch-tq92.6",
+  "title": "Cite the six-month cutoff in the cover note",
+  "description": "The six-month late cutoff is the one uncited claim in docs/for-kernel-reviewers.md, pending vouch-omzm.11 adding it to DESIGN. After omzm.11 lands, replace 'not yet in DESIGN' with the DESIGN citation.",
+  "acceptance_criteria": "Cover note cites DESIGN for the six-month cutoff.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:27:27.883887851Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:27:27.883887851Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-tq92.6",
+      "depends_on_id": "vouch-tq92",
+      "type": "parent-child",
+      "created_at": "2026-10-23T17:27:27.898065042Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-tq92.6",
+      "depends_on_id": "vouch-omzm.11",
+      "type": "blocks",
+      "created_at": "2026-10-23T17:27:27.949803355Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

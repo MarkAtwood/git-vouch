@@ -1,4 +1,4 @@
-"""The Patch signing blocks of the user guides, run with released b4 and the patatt fork.
+"""The Patch signing blocks of the user guides, run with the b4 and patatt forks.
 
 Each guide marks its patch-signing commands ``<!-- patch as <who> -->``
 over a ``shell`` block, which the guides' own tests do not parse. For
@@ -12,23 +12,27 @@ has git-vouch set up, its SSH keys in an agent, and mail delivered to one
 local mbox. Before the page, alice, bob, carol, dave and erin each mail
 alice a signed patch.
 
-The tools are real: b4 from a stock source tree (``B4_TREE``, default
-``~/GIT/b4``) run by an interpreter with its dependencies (``B4_PYTHON``,
-default ``~/PROJECT/b4/.venv/bin/python``), always with
-``--offline-mode``; and the fork's committed ``git-vouch`` branch
-(conftest ``FORK``) put ahead of b4's own patatt, which is what the
-page's ``pip install`` line does. A block's stdin is a terminal holding
+The tools are real: the b4 fork's committed ``git-vouch`` branch
+(``B4_FORK``, default ``~/PROJECT/b4``) run by an interpreter with b4's
+dependencies (``B4_PYTHON``, default ``~/PROJECT/b4/.venv/bin/python``),
+always with ``--offline-mode``; and the patatt fork's committed
+``git-vouch`` branch (conftest ``FORK``) put ahead of b4's own patatt,
+which is what the page's ``pip install`` line does. A block's stdin is a terminal holding
 a few newlines, so ``b4 send`` gets its Enter.
 
 After the page, carol, whose ``b4.keyringsrc`` points at her pgpkeys
 clone as b4's documentation suggests, checks every patch with the page's
 keyring lines,
 then the page's late-cutoff line, while bob rotates his key and lena
-revokes it. The oracles are b4's and patatt's own verdicts on signatures
+revokes it. The page sets ``b4.attestation-recheck-hours = 0``; one check
+before and one after the revocation override it to 24, to show the
+verdict b4 would otherwise remember; upstream b4, the fork's merge-base
+with ``upstream/master``, runs the same two checks unchanged. The oracles are b4's and patatt's own verdicts on signatures
 ssh-keygen and gpg made, the selector computed from ``ssh-keygen -l``
 (conftest ``selector``), and the page's sample output, which must be
 what b4 printed. The one ``not-run`` block needs the network and is only
-checked to be the install line, with ``FORK``'s branch the one on GitHub.
+checked to be the install line, with each fork's local branch the one on
+GitHub.
 """
 
 from __future__ import annotations
@@ -49,11 +53,15 @@ import pytest
 from .conftest import FORK, STOCK, selector
 
 ROOT = Path(__file__).resolve().parents[2]
-B4_TREE = Path(os.environ.get("B4_TREE", Path.home() / "GIT" / "b4"))
+B4_FORK = Path(os.environ.get("B4_FORK", Path.home() / "PROJECT" / "b4"))
 B4_PYTHON = Path(
     os.environ.get(
         "B4_PYTHON", Path.home() / "PROJECT" / "b4" / ".venv" / "bin" / "python"
     )
+)
+# vouch-check.sh installs offline, from uv's cache, which the isolated HOME hides.
+UV_CACHE = os.environ.get("UV_CACHE_DIR") or str(
+    Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "uv"
 )
 READERS = {"regulars": "bob", "captains": "alice", "anchors": "lena"}
 BLOCK = re.compile(
@@ -61,7 +69,10 @@ BLOCK = re.compile(
 )
 CONSOLE = re.compile(r"^```console\n(.*?)^```$", re.M | re.S)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-INSTALL = "pip install 'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'\n"
+INSTALL = (
+    "pip install 'b4 @ git+https://github.com/MarkAtwood/b4@git-vouch' \\\n"
+    "    'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'\n"
+)
 SSH = {"lena": ["id_ed25519"], "alice": ["id_ed25519"], "bob": ["id_ed25519", "id_new"],
        "carol": ["id_ed25519"], "dave": [], "erin": []}  # fmt: skip
 DROP = ("GIT_CONFIG_GLOBAL", "GIT_DIR", "GNUPGHOME", "GPG_AGENT_INFO",
@@ -84,6 +95,11 @@ git send-email -q --to alice@example.org ~/out-{n}/*.patch
 CONFIG = "git config --global patatt.signingkey\ngit config --global patatt.selector\n"
 B4_AM = 'b4 am -m {mbox} -o ~/am "{msgid}"\n'
 FORGET = "rm -rf ~/.local/share/b4\n"  # b4's patatt verdict store
+# Released b4's window: b4 remembers a pass for up to 24 hours.
+RECHECK_24 = (
+    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=b4.attestation-recheck-hours"
+    " GIT_CONFIG_VALUE_0=24\n"
+)
 
 
 class Ran(NamedTuple):
@@ -127,13 +143,13 @@ def _git(cwd: Path, *args: str, env: dict[str, str]) -> str:
     ).stdout.strip()
 
 
-def _write_bin(world: Path, fork: Path) -> None:
+def _write_bin(world: Path, fork: Path, src: Path) -> None:
     """Write b4, patatt and the mail sink that every home finds on PATH."""
     bindir = world / "bin"
     bindir.mkdir()
-    py, src = B4_PYTHON, B4_TREE / "src"
+    py = B4_PYTHON
     scripts = {
-        "b4": f'PYTHONPATH="${{PATATT_SRC:-{fork}}}:{src}" exec "{py}" '
+        "b4": f'PYTHONPATH="${{PATATT_SRC:-{fork}}}:${{B4_SRC:-{src}}}" exec "{py}" '
         "-c 'import b4.command; b4.command.cmd()' --offline-mode \"$@\"",
         "patatt": f'PYTHONPATH="${{PATATT_SRC:-{fork}}}" exec "{py}" '
         "-c 'import patatt; patatt.command()' \"$@\"",
@@ -170,11 +186,20 @@ def _home(world: Path, who: str) -> Path:
 
 
 def _build(world: Path, env: dict[str, str]) -> dict[str, str]:
-    """Build homes, the fork, pgpkeys.git, registry.git and linux.git; return each sender's patatt config."""
-    fork = world / "patatt"
-    _git(world, "clone", "-q", "--depth", "1", "--branch", "git-vouch", f"file://{FORK}",
-         str(fork), env=env)  # fmt: skip
-    _write_bin(world, fork / "src")
+    """Build homes, the forks, pgpkeys.git, registry.git and linux.git; return each sender's patatt config."""
+    for name, tree in (("patatt", FORK), ("b4", B4_FORK)):
+        _git(world, "clone", "-q", "--depth", "1", "--branch", "git-vouch",
+             f"file://{tree}", str(world / name), env=env)  # fmt: skip
+    # Upstream b4 the fork branches from: it remembers a pass for up to 24
+    # hours and reads no b4.attestation-recheck-hours.
+    base = _git(B4_FORK, "merge-base", "git-vouch", "upstream/master", env=env)
+    tree = subprocess.run(["git", "-C", str(B4_FORK), "archive", base, "src"],
+                          env=env, check=True, capture_output=True).stdout  # fmt: skip
+    (world / "b4-upstream").mkdir()
+    subprocess.run(
+        ["tar", "-x", "-C", str(world / "b4-upstream")], input=tree, check=True
+    )
+    _write_bin(world, world / "patatt" / "src", world / "b4" / "src")
     homes = {who: _home(world, who) for who in SSH}
 
     dave = dict(env, GNUPGHOME=str(homes["dave"] / "gnupg"))
@@ -397,6 +422,11 @@ def world(
         rotated = _msgids(root)[-1][1]
         run("sync", "carol", "git vouch sync\n")
         am("am rotated", rotated)
+        run("am rotated 24h", "carol", RECHECK_24
+            + B4_AM.format(mbox="~/mail.mbox", msgid=rotated))  # fmt: skip
+        upstream = f"B4_SRC={root / 'b4-upstream' / 'src'} "
+        run("upstream b4", "carol", FORGET + upstream
+            + B4_AM.format(mbox="~/mail.mbox", msgid=rotated))  # fmt: skip
         run(
             "retired",
             "carol",
@@ -413,6 +443,10 @@ def world(
             'patatt validate "$WORLD"/bob/out-2/*.patch || rc=$?\ntest $rc -eq 8\n',
         )
         am("am rotated cached", rotated)
+        run("am rotated cached 24h", "carol", RECHECK_24
+            + B4_AM.format(mbox="~/mail.mbox", msgid=rotated))  # fmt: skip
+        run("upstream b4 cached", "carol", upstream
+            + B4_AM.format(mbox="~/mail.mbox", msgid=rotated))  # fmt: skip
         run("send revoked", "bob", SEND.format(n=3))
         am("am revoked", _msgids(root)[-1][1])
         yield World(page, root, ran)
@@ -429,18 +463,49 @@ def test_the_not_run_block_is_the_install_line() -> None:
         assert skipped == [INSTALL], page
 
 
-def test_the_install_line_installs_the_tested_fork() -> None:
-    # The world runs FORK's local git-vouch branch; the install line gets
-    # the one on GitHub. Fetch FORK's origin before the run to compare.
+@pytest.mark.parametrize(
+    "tree,repo", [(FORK, "MarkAtwood/patatt"), (B4_FORK, "MarkAtwood/b4")]
+)
+def test_the_install_line_installs_the_tested_fork(tree: Path, repo: str) -> None:
+    # The world runs each fork's local git-vouch branch; the install line
+    # gets the one on GitHub. Fetch the fork's origin before the run to compare.
     def git(*args: str) -> str:
-        return subprocess.run(["git", "-C", str(FORK), *args], check=True,
+        return subprocess.run(["git", "-C", str(tree), *args], check=True,
                               capture_output=True, text=True).stdout.strip()  # fmt: skip
 
+    assert f"github.com/{repo}@git-vouch'" in INSTALL
     assert "github.com" in git("remote", "get-url", "origin")
-    assert "MarkAtwood/patatt" in git("remote", "get-url", "origin")
+    assert repo in git("remote", "get-url", "origin")
     assert git("rev-parse", "refs/heads/git-vouch") == git(
         "rev-parse", "refs/remotes/origin/git-vouch"
     )
+
+
+def test_the_check_script_the_pages_name_is_in_the_b4_fork() -> None:
+    script = "misc/vouch-check.sh"
+    show = ["git", "-C", str(B4_FORK), "cat-file", "-e", f"git-vouch:{script}"]
+    assert subprocess.run(show).returncode == 0
+    for page in READERS:
+        assert f"`{script}`" in (ROOT / "docs" / f"guide-{page}.md").read_text(), page
+
+
+def test_the_check_script_passes_then_fails_a_revoked_key(tmp_path: Path) -> None:
+    # Run from a lone clone of the fork with only what the pages say it needs.
+    clone = tmp_path / "b4"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "git-vouch",
+                    f"file://{B4_FORK}", str(clone)], check=True)  # fmt: skip
+    env = {k: v for k, v in os.environ.items() if k not in DROP}
+    env.update(
+        GIT_VOUCH=str(ROOT / "git-vouch"),
+        PATATT_FORK=f"patatt @ git+file://{FORK}@git-vouch",
+        PYTHON=str(B4_PYTHON),
+        UV_CACHE_DIR=UV_CACHE,
+    )
+    proc = subprocess.run(["bash", str(clone / "misc/vouch-check.sh")], env=env,
+                          capture_output=True, text=True, timeout=300)  # fmt: skip
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PASS: registry key verifies" in proc.stdout
+    assert "PASS: revoked key fails" in proc.stdout
 
 
 def test_every_page_block_ran(world: World) -> None:
@@ -478,14 +543,17 @@ def test_registry_signed_patches_verify(world: World) -> None:
         assert "✓ Signed: openssh/bob@example.org" in world.out(label)
 
 
-def test_legacy_keyring_verifies_with_a_warning_once(world: World) -> None:
+def test_legacy_keyring_verifies_with_a_warning_on_every_check(world: World) -> None:
     for who, algo in (("dave", "openpgp"), ("erin", "ed25519")):
         out = world.out(f"am {who}")
         assert f"✓ Signed: {algo}/{who}@example.org" in out
         assert re.search(rf"^W: {who}@example.org/default verified via legacy keyring .*/pgpkeys/"
                          rf"\.keyring/{algo}/example\.org/{who}/default", out, re.M)  # fmt: skip
+    # With b4.attestation-recheck-hours = 0, b4 remembers nothing, so
+    # patatt checks again and warns again.
     again = world.out("am dave again")
-    assert "✓ Signed: openpgp/dave@example.org" in again and "W:" not in again
+    assert "✓ Signed: openpgp/dave@example.org" in again
+    assert "W: dave@example.org/default verified via legacy keyring" in again
 
 
 def test_bad_and_unknown_signatures(world: World) -> None:
@@ -524,10 +592,24 @@ def test_rotation_and_revocation(world: World) -> None:
     assert "✓ Signed: openssh/bob@example.org" in world.out("am rotated")
     assert "NOKEY" in world.out("retired")
     assert "NOKEY" in world.out("sync revoked")
-    # b4 remembers the earlier pass for up to 24 hours.
-    assert "✓ Signed: openssh/bob@example.org" in world.out("am rotated cached")
+    # With b4.attestation-recheck-hours = 24, b4 remembers the earlier pass ...
+    assert "✓ Signed: openssh/bob@example.org" in world.out("am rotated 24h")
+    assert "✓ Signed: openssh/bob@example.org" in world.out("am rotated cached 24h")
+    # ... and with the page's 0, the revocation shows at once.
+    cached = world.out("am rotated cached")
+    assert "✗ No key: openssh/bob@example.org" in cached and "Signed:" not in cached
     revoked = world.out("am revoked")
     assert "✗ No key: openssh/bob@example.org" in revoked and "Signed:" not in revoked
+
+
+def test_b4_other_than_the_fork_names_no_keyring_and_keeps_a_revoked_pass(
+    world: World,
+) -> None:
+    assert "✓ Signed: openssh/bob@example.org (key: vouch:" in world.out("am rotated")
+    upstream = world.out("upstream b4")
+    assert "✓ Signed: openssh/bob@example.org" in upstream and "(key:" not in upstream
+    # Upstream b4 ignores the page's recheck-hours = 0 and keeps the pass.
+    assert "✓ Signed: openssh/bob@example.org" in world.out("upstream b4 cached")
 
 
 def test_sample_output_on_the_page_was_printed(world: World) -> None:

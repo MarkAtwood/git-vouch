@@ -577,10 +577,14 @@ small and in upstream style so it could be offered upstream. The rules
   legacy line; no code changes.
 - **Limits** (`docs/patatt-interop.md`): patatt cannot enforce FIDO
   touch or PIN, nor key validity dates beyond what `git vouch keys`
-  returns. b4 caches verdicts for up to 24 hours, so a revoked key can
-  still show a pass in b4 for up to a day, and the legacy-keyring
-  warning appears only on checks b4 has not cached. Fixing either needs
-  a b4 change.
+  returns. Upstream b4 newer than 0.16 caches verdicts for up to 24
+  hours, so a revoked key can still show a pass for up to a day, and the legacy-keyring
+  warning appears only on checks b4 has not cached. A b4 fork
+  (github.com/MarkAtwood/b4, branch `git-vouch`; upstream submission
+  held) makes the window `b4.attestation-recheck-hours`, and the guides
+  set it to 0, so b4 checks every signature again. It also names the
+  keyring that verified a pass, `(key: vouch:<email>/<selector>)`, and
+  carries `misc/vouch-check.sh`.
 
 ## TRQP bridge
 

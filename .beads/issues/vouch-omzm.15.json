@@ -1,0 +1,24 @@
+{
+  "id": "vouch-omzm.15",
+  "title": "Release files and kup are out of scope",
+  "description": "DECIDED (Mark 2026-10-23): release-file signing (tarball .tar.sign, sha256sums.asc, the checksum autosigner) and kup upload authentication are out of git-vouch's scope. Reasons: a handful of release signers, not a keyring; endorsements/tiers/continuity do not apply; a release tarball is git archive of a signed tag, which git-vouch covers, so anyone can regenerate and compare; moving distro gpg --verify scripts to ssh-keygen costs downstream a lot for little gain. kernel.org owns tarball signing and kup auth (GPG today). git-vouch replaces the keyring, not every gpg use; gpg remains for a few release keys and old tags. Rejected: (b) SSH signatures alongside GPG during an overlap. To do when the docs lock frees: DESIGN.md states the scope (Summary/Flag day: what git-vouch covers: tags, commits, patches, registry records); remove or narrow any DESIGN mention of ssh-keygen -Y for release files.",
+  "acceptance_criteria": "DESIGN.md states release files and kup are out of scope with the reason; no doc claims git-vouch signs release files; cover note matches.",
+  "notes": "Cover note updated 2026-10-23 (scope paragraph under 'What it replaces'); it has no DESIGN citation yet: add (DESIGN: \u003csection\u003e) once DESIGN states the scope.",
+  "status": "open",
+  "priority": 1,
+  "issue_type": "decision",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T17:25:28.620897059Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T17:28:58.358446417Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.15",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-23T17:25:28.636362656Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

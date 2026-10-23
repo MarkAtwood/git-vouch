@@ -5,7 +5,7 @@ command block on this page is run, in order, by
 `tests/migrate/test_guide_captains.py` in a throwaway registry, with
 real `git`, `ssh-keygen` and `gpg` and a synthetic `pgpkeys.git`. The
 `shell` blocks under [Patch signing](#patch-signing) are run by
-`tests/patatt/test_patch_docs.py` with released b4 and the patatt fork,
+`tests/patatt/test_patch_docs.py` with the b4 and patatt forks,
 mail going to a local sink. Who runs each block is noted in the text.
 
 A captain is a subsystem maintainer: someone an anchor has approved at
@@ -420,9 +420,11 @@ key: the signing time comes from the signer, so whoever holds a retired
 key can backdate signatures. A revoked key's signatures all stop
 verifying, past and future, and every endorsement and tier record it
 signed becomes void. That includes patches: once someone checking them
-has synced, patatt no longer finds the key. b4 remembers a verdict for
-up to 24 hours, so a series it already checked can keep its tick until
-then.
+has synced, patatt no longer finds the key. With the b4 fork set up as
+in [Check incoming patches](#check-incoming-patches), b4 checks a
+signature again every time. Upstream b4 newer than 0.16 remembers a
+verdict for up to 24 hours, so a series it already checked can keep its
+tick until then.
 
 ### With your backup key
 
@@ -508,18 +510,32 @@ signer's current keys. A patch verifies when one of the signer's current
 keys signed it and it comes from an endorsed email, whatever the
 signer's tier.
 
-### Install the fork
+### Install the forks
 
-Install the fork into the Python environment b4 runs from; it replaces
-the patatt that came with b4:
+Install b4 and patatt from their forks' `git-vouch` branches in one
+command, so b4 gets the patatt fork in place of released patatt:
 
 <!-- patch not-run needs-network -->
 ```shell
-pip install 'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
+pip install 'b4 @ git+https://github.com/MarkAtwood/b4@git-vouch' \
+    'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
 ```
 
-If you run b4 from a checkout with `b4.sh`, check out the fork's
-`git-vouch` branch in its `patatt` submodule instead.
+The b4 fork can check every patch afresh, which makes a revocation take
+effect at once. If you run b4 from a checkout with `b4.sh`, clone the b4
+fork's `git-vouch` branch and put the patatt fork in its `patatt`
+submodule. The submodule points at kernel.org, which has no `git-vouch`
+branch, so fetch that branch from github.com/MarkAtwood/patatt and check
+it out there.
+
+`misc/vouch-check.sh` in the b4 fork tests the pair offline in a
+throwaway home: it signs a series with a registry key and checks that
+`b4 am` passes it, then fails it once the key is revoked. Unless
+git-vouch and the patatt fork are checked out next to b4 and b4 has a
+`.venv`, set `GIT_VOUCH` to the git-vouch script, `PATATT_FORK` to a pip
+requirement for the patatt fork and `PYTHON` to a Python with b4's
+dependencies. It also needs `uv`, with setuptools in its cache. It sets up its own
+config: set yours as this page does, not as the script's header shows.
 
 ### Sign with your registry key
 
@@ -550,6 +566,7 @@ git -C ~/pgpkeys checkout -q --detach "$FREEZE_COMMIT"
 git config --global --unset-all b4.keyringsrc || true
 git config --global patatt.keyringsrc vouch:
 git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
+git config --global b4.attestation-recheck-hours 0
 ```
 
 patatt reads the keyring as files on disk, so leave that clone at the
@@ -558,6 +575,15 @@ fails if the clone does not hold the freeze commit.
 
 b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
 documentation suggests, so the second line removes `b4.keyringsrc`.
+
+`b4.attestation-recheck-hours = 0` is a setting of the b4 fork: b4
+checks every signature again instead of remembering a verdict for up to
+24 hours, so a revoked key stops verifying at your next `git vouch
+sync`. Any other b4 ignores it, and upstream b4 newer than 0.16 keeps a
+pass for up to 24 hours. The fork names the keyring after every registry
+pass: if `b4 am` prints `✓ Signed: openssh/...` with no
+`(key: vouch:...)` after it, the b4 you run is not the fork. Check
+`command -v b4`.
 
 Sync, then fetch the series by its message-id, here `$MSGID`, bob's
 patch from your mailbox; without `-m`, b4 fetches it from lore (here as
@@ -573,17 +599,17 @@ b4 am -m ~/mail.mbox "$MSGID"
 `b4 am` prints one of these for each signature:
 
 ```console
-  ✓ Signed: openssh/bob@example.org
+  ✓ Signed: openssh/bob@example.org (key: vouch:bob@example.org/...)
 W: dave@example.org/default verified via legacy keyring .../.keyring/openpgp/example.org/dave/default, not the vouch registry; legacy keyrings stop working after the flag day late cutoff
-  ✓ Signed: openpgp/dave@example.org
+  ✓ Signed: openpgp/dave@example.org (key: .../pgpkeys/.keyring)
   ✗ BADSIG: openssh/bob@example.org
   ✗ No key: openssh/carol@example.org
 ```
 
 | Result | Means | Tell the contributor |
 |---|---|---|
-| `✓ Signed: openssh/...` | A current key of a registered person signed it, from an endorsed email. Until the late cutoff, a recheck of a series that passed through pgpkeys also shows a bare `✓ Signed`, without the warning; `git vouch keys <email>` lists the registry's keys for the signer. | Nothing. |
-| `W: ... verified via legacy keyring` and `✓ Signed` | It verified through pgpkeys, not the registry: a GPG key, or a key `patatt genkey` made. The warning shows only the first time b4 checks a series. | Register an SSH key and sign with it before the late cutoff. |
+| `✓ Signed: ... (key: vouch:...)` | A current key of a registered person signed it, from an endorsed email; `git vouch keys <email>` lists the registry's keys for the signer. | Nothing. |
+| `W: ... verified via legacy keyring` and `✓ Signed: ... (key: .../pgpkeys/.keyring)` | It verified through pgpkeys, not the registry: a GPG key, or a key `patatt genkey` made. With `b4.attestation-recheck-hours = 0`, the warning shows on every check. | Register an SSH key and sign with it before the late cutoff. |
 | `✗ BADSIG` | The message changed after it was signed, or the signature is broken. | Resend it; mail in transit may have rewritten it. |
 | `✗ No key` | The email is not endorsed, the key is not current in the registry, the selector is not that key's, or your copy is stale. | Run `git vouch sync` and check again. Otherwise ask them to get the email endorsed and to sign with a current key and its selector from `git vouch status`. |
 
