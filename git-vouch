@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -2297,12 +2298,19 @@ def cmd_setup(args: argparse.Namespace) -> int:
     return cmd_sync(args)
 
 
-def _own_tier(result: CheckResult) -> str:
-    """Return who the user's signing key belongs to in ``result``, and their tier."""
-    try:
-        key = _signing_key(None)
-    except VouchError as e:
-        return f"unknown: {e}"
+def patatt_selector(ssh: str) -> str:
+    """Return the patatt selector for an SSH key "type base64": ``k-`` and a fingerprint prefix.
+
+    The prefix is the first 16 lowercase hex digits of the SHA-256 of the
+    key blob, the hash ``ssh-keygen -l`` shows in base64. Hex, because
+    patatt lowercases selectors in file keyrings (DESIGN.md, Patch signing).
+    """
+    blob = base64.b64decode(ssh.split()[1])
+    return "k-" + hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _own_tier(result: CheckResult, key: SigningKey) -> str:
+    """Return who ``key`` belongs to in ``result``, and their tier."""
     owners = [
         h
         for h, p in sorted(result.people.items())
@@ -2315,7 +2323,7 @@ def _own_tier(result: CheckResult) -> str:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    """Print the registry URL, its commit, when it was fetched, and the user's own tier."""
+    """Print the registry URL, commit and fetch time, and the user's tier and patatt selector."""
     url = _config("vouch.registry")
     copy = registry_copy()
     if url is None or not (copy / ".git").is_dir():
@@ -2333,7 +2341,13 @@ def cmd_status(args: argparse.Namespace) -> int:
     errors = len(result.problems)
     summary = f"{errors} errors (run git vouch check {copy})" if errors else "ok"
     print(f"check: {summary}")
-    print(f"you: {_own_tier(result)}")
+    try:
+        key = _signing_key(None)
+    except VouchError as e:
+        print(f"you: unknown: {e}")
+        return 0
+    print(f"you: {_own_tier(result, key)}")
+    print(f"patatt.selector: {patatt_selector(key.ssh)}")
     return 0
 
 
@@ -2431,6 +2445,44 @@ def cmd_query(args: argparse.Namespace) -> int:
         )
     print(json.dumps(answer, indent=2))
     return 0 if found else 1
+
+
+def cmd_keys(args: argparse.Namespace) -> int:
+    """Print "<selector> <type> <base64>" for each current key of the person with an endorsed email.
+
+    The email matches ignoring case. Any tier counts, automation included.
+    A current key is valid now, as ``query`` judges it: added, not retired,
+    not revoked. The exit status is 1, printing nothing, if no person has
+    the email endorsed.
+
+    Only the copy ``sync`` keeps is read, never the current directory:
+    patatt runs this wherever b4 does, often in a tree someone else wrote.
+
+    Raises:
+        VouchError: no registry is configured or synced, or the registry
+            check fails, so nothing is printed.
+    """
+    if _config("vouch.registry") is None:
+        raise VouchError("no registry configured: run git vouch setup")
+    root = _registry_dir(None)
+    _fetched(root)
+    result = check_registry(root)
+    if result.problems:
+        raise VouchError(f"the registry check failed; run git vouch check {root}")
+    email = args.email.lower()
+    # check fails on an email listed in two person files, so one handle at most.
+    handles = [h for h, ms in result.emails.items() if email in (m.lower() for m in ms)]
+    if not handles:
+        return 1
+    now = datetime.now(timezone.utc)
+    for key in result.people[handles[0]].keys:
+        if (
+            key.did not in result.revoked
+            and key.added <= now
+            and (key.retired is None or now < key.retired)
+        ):
+            print(f"{patatt_selector(key.ssh)} {key.ssh}")
+    return 0
 
 
 class SigningKey(NamedTuple):
@@ -3049,6 +3101,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="RFC 3339 time to answer for (default: now)",
     )
     p.set_defaults(func=cmd_query)
+    p = add(
+        "keys", "print an endorsed email's current keys with their patatt selectors"
+    )
+    p.add_argument("email", metavar="<email>")
+    p.set_defaults(func=cmd_keys)
     return parser
 
 

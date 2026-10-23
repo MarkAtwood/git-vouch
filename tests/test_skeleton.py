@@ -27,6 +27,7 @@ DESIGN_COMMANDS = [
     "check",
     "export",
     "did",
+    "keys",
 ]
 
 

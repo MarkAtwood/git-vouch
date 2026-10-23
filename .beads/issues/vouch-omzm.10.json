@@ -1,0 +1,23 @@
+{
+  "id": "vouch-omzm.10",
+  "title": "Rename pgpkeys 'C' to 'the freeze commit'",
+  "description": "Mark 2026-10-22: 'C' is a terrible name for the last signed pgpkeys.git commit, since C is the language the kernel is written in, and readers also take it for a person. Replace it with 'the freeze commit' everywhere: DESIGN.md (Flag day, Porting pgpkeys, continuity, endorsements), docs/flag-day.md and other guides, git-vouch-migrate help text, messages and comments, and test names/comments. Keep any real C-language mentions. Queued until the two-stream workflow finishes (it is editing the same docs).",
+  "acceptance_criteria": "grep finds no standalone 'C' meaning the freeze commit in docs, help text, messages or tests; tests pass on 3.12 and 3.9; ruff clean.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T05:54:17.769323028Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T05:54:17.769323028Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.10",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-23T05:54:18.172232782Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}
