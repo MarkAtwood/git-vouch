@@ -3,15 +3,15 @@
   "title": "Flaky: test_unverified_certification_is_not_drafted",
   "description": "Failed once in a full suite run (1 failed, 820 passed, 14 skipped) on 2026-10-22 at tests/migrate/test_drafts.py:318, the gpg --check-sigs assertion (cora == ['-']). Passed 3/3 in isolation. Likely gpg agent/keyboxd contention under load in the fresh homedir. Find the cause; do not weaken the assertion.",
   "notes": "Root cause: gpg --faked-system-time without '!' keeps a running clock offset in whole seconds (timewarp = faked - time(NULL)). A keygen 'at T0' that crosses a real-second boundary in its first ms is stamped T0+1; the fresh home then imports at T0, rejects cora's self-sig as created in the future, skips her key, and lists her sig on ivan as '?' (observed: assert ['?'] == ['-']). Same cause can break any fixture step at T0 after a T0+1 key (e.g. nell --quick-add-uid: 'signing failed: Time conflict'), in test_drafts and conftest pgpkeys. Repro: PATH wrapper for gpg that sleeps until 2ms before a second boundary on rsa2048 keygen -\u003e fails 2/3; on every --quick-gen-key -\u003e fixture errors. Fix: freeze the clock (at + '!') in Gpg.__call__, Gpg.revoke_subkey (tests/migrate/conftest.py) and _edit_key (test_drafts.py), as git-vouch-migrate already does. Assertion unchanged. After: both wrappers pass 6/6, full tests/migrate under all-keygen wrapper 102 passed, 18 parallel runs pass, 3.12 and 3.9 102 passed, ruff clean.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "issue_type": "bug",
   "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T01:07:40.119504615Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T04:21:24.29761629Z",
+  "updated_at": "2026-10-23T04:31:36.41349773Z",
   "started_at": "2026-10-23T04:05:39.818685745Z",
-  "lease_expires_at": "2026-10-23T04:10:39.818685745Z",
-  "heartbeat_at": "2026-10-23T04:05:39.818685745Z"
+  "closed_at": "2026-10-23T04:31:36.41349773Z",
+  "close_reason": "Closed"
 }

@@ -27,10 +27,15 @@ class Gpg:
         self.home = home
 
     def __call__(self, *args: str, at: str = T0) -> bytes:
-        """Run gpg with the clock at ``at`` and return its stdout."""
+        """Run gpg with the clock frozen at ``at`` and return its stdout.
+
+        Frozen (the ``!``), since gpg keeps a running faked clock in whole
+        seconds: a key made at T0 could be stamped T0+1, and a later call at
+        T0 would then refuse it as created in the future.
+        """
         cmd = ["gpg", "--homedir", str(self.home), "--batch", "--no-tty", "--quiet"]
         cmd += ["--passphrase", "", "--pinentry-mode", "loopback"]
-        cmd += ["--faked-system-time", at, *args]
+        cmd += ["--faked-system-time", at + "!", *args]
         return subprocess.run(cmd, check=True, capture_output=True).stdout
 
     def new_key(
@@ -63,7 +68,7 @@ class Gpg:
         """Revoke subkey ``sub`` of key ``fpr`` (gpg has no quick command for it)."""
         cmd = ["gpg", "--homedir", str(self.home), "--batch", "--no-tty", "--quiet"]
         cmd += ["--passphrase", "", "--pinentry-mode", "loopback"]
-        cmd += ["--faked-system-time", T0, "--command-fd", "0", "--edit-key", fpr]
+        cmd += ["--faked-system-time", T0 + "!", "--command-fd", "0", "--edit-key", fpr]
         script = f"key {sub}\nrevkey\ny\n0\n\ny\nsave\n"
         subprocess.run(cmd, input=script.encode(), check=True, capture_output=True)
 

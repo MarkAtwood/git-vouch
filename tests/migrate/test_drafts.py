@@ -41,7 +41,7 @@ def _edit_key(gpg: Gpg, fpr: str, script: str, *extra: str, at: str = T0) -> Non
     """Run gpg --edit-key on ``fpr``, answering its prompts from ``script``."""
     cmd = ["gpg", "--homedir", str(gpg.home), "--batch", "--no-tty", "--quiet"]
     cmd += ["--passphrase", "", "--pinentry-mode", "loopback", "--faked-system-time"]
-    cmd += [at, *extra, "--command-fd", "0", "--edit-key", fpr]
+    cmd += [at + "!", *extra, "--command-fd", "0", "--edit-key", fpr]
     subprocess.run(cmd, input=script.encode(), check=True, capture_output=True)
 
 
