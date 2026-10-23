@@ -1,0 +1,26 @@
+{
+  "id": "vouch-xlha.12",
+  "title": "attest: non-ASCII SSH key text crashes with a traceback",
+  "description": "git-vouch-attest:143-146 (parse_sk_key) catches only binascii.Error around base64.b64decode(fields[1], validate=True). When given a str containing a non-ASCII character, b64decode raises a plain ValueError (\"string argument should contain only ASCII characters\"), which is not a binascii.Error. Nothing up the stack catches it: main() at 409-415 catches only AttestError and OSError.\n\nReproduced:\n- File mode: a .pub whose base64 field contains 0xc3 0xa9 is decoded with \"replace\" at line 403 to U+FFFD, and the tool exits 1 with a full Python traceback.\n- Person-file mode: {\"keys\":[{\"ssh\":\"sk-ssh-ed25519@openssh.com AAAAé\", \"attestation\":{...}}]} gives the same traceback. Every later key in the file is then left unverified and unreported, because the exception escapes the per-key loop at 408-413.\n\nThe tool fails closed (exit 1), but person files are attacker-authored input. One malformed key hides the verdicts for the rest, and users will file the traceback as a bug.\n\nFix: catch ValueError there; binascii.Error is a subclass, so `except ValueError` covers both. Add a test with a non-ASCII key in a person file next to a valid attested key, and assert that the valid key still prints \"verified\".\n",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:53.458302036Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:53.458302036Z",
+  "labels": [
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.12",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:53.4786789Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

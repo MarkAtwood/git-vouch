@@ -1,0 +1,25 @@
+{
+  "id": "vouch-xlha.9",
+  "title": "Keep: git runs pinned against config, replace refs, argv",
+  "description": "git-vouch:86-114 and 216-224. run() puts untrusted values only after '--' via values=, never in argv. Every git call goes through GIT/GIT_LOG: --no-replace-objects, --literal-pathspecs, -c log.follow=false, -c log.showSignature=false, plus explicit --root/--no-renames in file_history. Without these, a verifier's ~/.gitconfig (log.follow, diff.renames, log.showRoot) or a fetched refs/replace/* would change which history check judges, so two maintainers could get different answers from the same registry. Keep them even though they look like noise. Any new git invocation must use GIT/GIT_LOG, not a bare ['git', ...].",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "decision",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:41.535360289Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:41.535360289Z",
+  "labels": [
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.9",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:41.552273002Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

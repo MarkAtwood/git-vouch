@@ -16,7 +16,7 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent.parent / "git-vouch-migrate"
 T0 = "20200101T000000"  # when most synthetic keys are made
-C_DATE = "2020-06-01T00:00:00Z"  # committer date of the frozen commit C
+FREEZE_DATE = "2020-06-01T00:00:00Z"  # committer date of the freeze commit
 
 
 class Gpg:
@@ -119,9 +119,9 @@ class Pgpkeys(NamedTuple):
     """A synthetic pgpkeys.git and what went into it."""
 
     repo: Path
-    commit: str  # C, signed by signing_subkey of fprs["signer"]
+    commit: str  # the freeze commit, signed by signing_subkey of fprs["signer"]
     signing_subkey: str
-    unsigned: str  # an unsigned commit on top of C
+    unsigned: str  # an unsigned commit on top of the freeze commit
     fprs: dict[str, str]
     points: dict[
         str, dict[str, bytes]
@@ -177,7 +177,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
     revoker.home.mkdir(mode=0o700)
     try:
         fprs = {
-            # Expires after C but before today: live at C, and C's signature is good at C.
+            # Expires after the freeze commit but before today: live at the freeze
+            # commit, and the freeze commit's signature is good then.
             "signer": gpg.new_key("Sig Ner <signer@kernel.org>", expire="1y"),
             "alice": gpg.new_key("Alice Example <alice@example.org>"),
             "bob": gpg.new_key("Bob Builder <bob@example.net>"),
@@ -190,12 +191,14 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
                 "Eve Expired <eve@example.org>", expire="1d", at="20190101T000000"
             ),
             "frank": gpg.new_key("Frank Revoked <frank@example.org>"),
-            # One person: an older live key and a newer key expired at C.
+            # One person: an older live key and a newer key expired at the freeze
+            # commit.
             "gina_old": gpg.new_key("Gina Green <gina@example.org>"),
             "gina_new": gpg.new_key(
                 "Gina Green <gina@example.org>", expire="1d", at="20200201T000000"
             ),
-            # One person whose keys both expired before C: the newer one is used.
+            # One person whose keys both expired before the freeze commit: the
+            # newer one is used.
             "hank_old": gpg.new_key(
                 "Hank Hill <hank@example.org>", expire="1d", at="20190101T000000"
             ),
@@ -263,10 +266,12 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             "Dave Davis <dave@kernel.org>",
             at="20200201T000000",
         )
-        # Reusable-curve auth subkeys that are not live at C: revoked, and expired.
+        # Reusable-curve auth subkeys that are not live at the freeze commit:
+        # revoked, and expired.
         gpg.revoke_subkey(fprs["sam1"], gpg.add_key(fprs["sam1"], "ed25519", "auth"))
         gpg.add_key(fprs["sam2"], "ed25519", "auth", "1d")
-        # A non-expiring auth subkey under a primary that expired before C.
+        # A non-expiring auth subkey under a primary that expired before the
+        # freeze commit.
         gpg.add_key(fprs["eve"], "ed25519", "auth", at="20190101T000000")
         # A signing subkey revoked in pgpkeys but live in this home: revoke it
         # in a copy of carol's key.
@@ -295,8 +300,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             GNUPGHOME=str(home),
             GIT_CONFIG_NOSYSTEM="1",
             GIT_CONFIG_GLOBAL=os.devnull,
-            GIT_AUTHOR_DATE=C_DATE,
-            GIT_COMMITTER_DATE=C_DATE,
+            GIT_AUTHOR_DATE=FREEZE_DATE,
+            GIT_COMMITTER_DATE=FREEZE_DATE,
         )
         ident = ["-c", "user.name=Sig Ner", "-c", "user.email=signer@kernel.org"]
         _git(repo, "init", "-q", env=env)

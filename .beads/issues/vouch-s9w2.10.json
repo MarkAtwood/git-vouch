@@ -1,0 +1,27 @@
+{
+  "id": "vouch-s9w2.10",
+  "title": "trqp: unavailable replies discard git vouch stderr; nothing logged",
+  "description": "git-vouch-trqp:216-231. query() captures stderr and the exit status of 'git vouch query' and never uses either. The OSError/TimeoutExpired path (219-220) and the 'cannot be checked' path (231) also log nothing: the TaskError becomes a 503 whose body says only 'the registry cannot be checked'. Only internalError gets logged (345-346). What goes wrong: if the registry check breaks (bad person file, signature failure, git missing, timeout), every verify-trust query fails with 503 and the operator has no record of why: no exit code, no git-vouch diagnostic, no timeout note. They must reproduce it by hand in the registry directory. Fix: on each unavailable path write one line to stderr, where http.server's own log_message already goes, naming the cause: returncode plus the last line of proc.stderr (truncated, e.g. 300 chars), or the exception class for OSError/timeout. Keep the client body generic. Test: test_registry_check_failure_is_unavailable also asserts the bridge log (tmp_path/bridge-N.log) names the failing file or git-vouch's error.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:19:25.091526837Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:19:25.091526837Z",
+  "labels": [
+    "idiomatic-python",
+    "error-handling",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-s9w2.10",
+      "depends_on_id": "vouch-s9w2",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:19:25.126137685Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

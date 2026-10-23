@@ -1,0 +1,5 @@
+{"id":"01a16a34-25fb-75a6-8d17-8c0401ca9a44","issue_id":"vouch-s9w2.9","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T19:19:24.923371816Z"}
+{"id":"01a16a34-25ff-74d3-ab0e-5490ae9372de","issue_id":"vouch-s9w2.9","event_type":"label_added","actor":"agent","comment":"Added label: idiomatic-python","created_at":"2026-10-23T19:19:24.927317637Z"}
+{"id":"01a16a34-2603-7375-85b9-a0d4ef390a33","issue_id":"vouch-s9w2.9","event_type":"label_added","actor":"agent","comment":"Added label: error-handling","created_at":"2026-10-23T19:19:24.931227757Z"}
+{"id":"01a16a34-260e-7afb-82db-e0c5f05e1c00","issue_id":"vouch-s9w2.9","event_type":"label_added","actor":"agent","comment":"Added label: review","created_at":"2026-10-23T19:19:24.942721Z"}
+{"id":"01a16a34-4e16-7ea9-b5d5-6a995979aba9","issue_id":"vouch-s9w2.9","event_type":"closed","actor":"agent","old_value":"","new_value":"duplicate of vouch-s9w2.7 (filed concurrently; scratch repro: stub git-vouch 'sleep 40' survives run(timeout=2))","created_at":"2026-10-23T19:19:35.190961955Z"}

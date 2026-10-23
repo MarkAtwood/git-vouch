@@ -1,0 +1,18 @@
+{
+  "id": "vouch-s9w2",
+  "title": "Review: git-vouch bridge (git-vouch-trqp @4237c43) 2026-10-23",
+  "status": "in_progress",
+  "priority": 1,
+  "issue_type": "epic",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:13:10.959521415Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:13:11.127306552Z",
+  "started_at": "2026-10-23T19:13:11.127306552Z",
+  "lease_expires_at": "2026-10-23T19:18:11.127306552Z",
+  "heartbeat_at": "2026-10-23T19:13:11.127306552Z",
+  "labels": [
+    "review"
+  ]
+}

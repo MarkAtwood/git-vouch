@@ -1,0 +1,27 @@
+{
+  "id": "vouch-xlha.13",
+  "title": "attest: openssl verify setup errors blamed on the chain",
+  "description": "git-vouch-attest:305-324. Any nonzero exit from `openssl verify` is reported as \"attestation certificate does not chain to --ca: openssl verify failed\". The attestation gets blamed whenever the openssl lookup-reason line is missing.\n\nConcrete triggers:\n1. A --ca path that does not exist, is unreadable, or holds no PEM certificates. Reproduced: `--ca /nonexistent.pem` gives \"attestation certificate does not chain to --ca: openssl verify failed\".\n2. `-no-CAstore` was added in OpenSSL 3.0. On OpenSSL 1.1.1 (still the system openssl on RHEL 8 and Debian 11), `openssl verify` rejects the unknown option. Every attestation, including genuine hardware ones, then fails with the same \"does not chain\" message. DESIGN.md:76 lists the `openssl` dependency without a minimum version.\n\nImpact: users are told their token's attestation is bad when the cause is a typo or the platform's openssl version. That is the kind of message that produces recurring issue reports, and on 1.1.1 hosts the tool cannot work at all.\n\nFix: check that --ca is readable and contains at least one certificate before doing any verification, and exit with an error that names --ca. State \"OpenSSL \u003e= 3.0\" in DESIGN.md:76 and in the --help text. Optionally, when no \"lookup:\"/\"error\" reason line is present, include openssl's stderr in the message instead of the generic \"openssl verify failed\".\n",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:53.535261432Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:53.535261432Z",
+  "labels": [
+    "risk",
+    "maintainer-burden",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.13",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:53.560533655Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

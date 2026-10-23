@@ -1,0 +1,29 @@
+{
+  "id": "vouch-s9w2.9",
+  "title": "trqp: query timeout orphans git-vouch, breaking QUERY_SLOTS cap",
+  "description": "git-vouch-trqp:216-222 (snapshot @4237c43). subprocess.run(timeout=QUERY_TIMEOUT) SIGKILLs only its direct child, git. git runs git-vouch as its own child, which survives as an orphan and keeps doing its full registry check, while the finally releases the QUERY_SLOTS slot. Reproduced in scratch: git-vouch stub 'sleep 40', run(['git','vouch','query','x'], timeout=2) raises TimeoutExpired after 2 s, and 'sh .../git-vouch query x' plus 'sleep 40' are still running. What goes wrong: on a slow registry every timed-out request leaves a live checker behind and frees its slot, so the 'fixed cap on concurrent registry checks' (lines 37-41) does not bound concurrent checks; repeated slow queries pile up unbounded orphan processes (CPU/memory exhaustion). Fix: start the query with subprocess.Popen(..., start_new_session=True) and, on TimeoutExpired, os.killpg(proc.pid, signal.SIGKILL), then proc.communicate() before releasing the slot (stdlib, 3.9-safe). Test: a stub git that execs a long-running grandchild; assert no process is left after the 503 (pgrep by a unique marker in the stub).",
+  "status": "closed",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:19:24.916610085Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:19:35.171726825Z",
+  "closed_at": "2026-10-23T19:19:35.171726825Z",
+  "close_reason": "duplicate of vouch-s9w2.7 (filed concurrently; scratch repro: stub git-vouch 'sleep 40' survives run(timeout=2))",
+  "labels": [
+    "idiomatic-python",
+    "error-handling",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-s9w2.9",
+      "depends_on_id": "vouch-s9w2",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:19:24.952637947Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

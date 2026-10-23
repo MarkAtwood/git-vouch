@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Flag-day rehearsal: the runbook docs/flag-day.md prints, run end to end.
 #
-# tests/migrate/test_rehearsal.py runs this after building the world as it
-# stands on the freeze: pgpkeys.git frozen at a signed commit C, an empty
-# registry, a kernel tree, and a home per person. Published with C:
-#   $C        the frozen commit
-#   $SIGNER   the primary fingerprint of the key that signed C
+# tests/migrate/test_rehearsal.py runs this after building the world as
+# it stands on the freeze: pgpkeys.git frozen at a signed commit, the
+# freeze commit, an empty registry, a kernel tree, and a home per
+# person. Published with the freeze commit:
+#   $FREEZE_COMMIT   the freeze commit
+#   $SIGNER   the primary fingerprint of the key that signed the freeze commit
 #   $PGPKEYS, $REGISTRY, $LINUX   the repository URLs
 #
 # Cast: korg runs kernel.org and merges into the registry; lena is the
-# anchor; alice, bob and dave hold pgpkeys keys (bob's expired before C,
-# dave reuses his GPG authentication subkey); carol has no GPG key. lena
-# certified alice (SHA-1), bob and dave in pgpkeys.
+# anchor; alice, bob and dave hold pgpkeys keys (bob's expired before
+# the freeze commit, dave reuses his GPG authentication subkey); carol
+# has no GPG key. lena certified alice (SHA-1), bob and dave in pgpkeys.
 #
 # The helpers marked "harness" stand in for each person's own machine
 # and are not runbook steps. Every other line is one.
@@ -40,8 +41,8 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
     )
 }
 
-# 1. Freeze. pgpkeys.git is read-only at C; C, $SIGNER, the flag-day date
-#    and the late cutoff are published together.
+# 1. Freeze. pgpkeys.git is read-only at the freeze commit; the freeze
+#    commit, $SIGNER, the flag-day date and the late cutoff are published together.
 
 # 2. Window. The first merge holds the anchors' person files and anchors.json.
 (
@@ -53,7 +54,7 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
     agent
     git config --global user.signingKey ~/.ssh/id_ed25519.pub
     git clone -q "$PGPKEYS" pgpkeys
-    git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+    git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
     git clone -q "$REGISTRY" registry
     cd registry
     git vouch register --from ~/drafts/people/lena.json ~/.ssh/id_ed25519.pub
@@ -81,7 +82,7 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
     agent
     git config --global user.signingKey ~/.ssh/id_ed25519.pub
     git clone -q "$PGPKEYS" pgpkeys
-    git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+    git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
     git clone -q "$REGISTRY" registry
     cd registry
     git vouch register --from ~/drafts/people/alice.json ~/.ssh/id_ed25519.pub
@@ -93,13 +94,14 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
 merge register-alice
 
 # ...made after extending an expired key locally (never publish the new
-# expiry: the proof is judged against the key as it was at C)...
+# expiry: the proof is judged against the key as it was at the freeze
+# commit)...
 (
     home bob
     agent
     git config --global user.signingKey ~/.ssh/id_ed25519.pub
     git clone -q "$PGPKEYS" pgpkeys
-    git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+    git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
     git clone -q "$REGISTRY" registry
     cd registry
     git vouch register --from ~/drafts/people/bob.json ~/.ssh/id_ed25519.pub
@@ -117,7 +119,7 @@ merge register-bob
 (
     home dave
     git clone -q "$PGPKEYS" pgpkeys
-    git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+    git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
     echo enable-ssh-support >>"${GNUPGHOME:-$HOME/.gnupg}/gpg-agent.conf"
     gpg --list-secret-keys --with-colons --with-keygrip |
         awk -F: '$1 == "sec" || $1 == "ssb" {auth = $1 == "ssb" && $12 ~ /a/}
@@ -150,12 +152,12 @@ merge register-dave
 )
 merge register-carol
 
-# Anyone can check the continuity proofs against C.
+# Anyone can check the continuity proofs against the freeze commit.
 (
     home korg
     git clone -q "$PGPKEYS" pgpkeys
     cd registry
-    git-vouch-migrate verify-continuity ~/pgpkeys . --commit "$C" --signer "$SIGNER"
+    git-vouch-migrate verify-continuity ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER"
 )
 
 # Each certifier drafts endorsements from their own GPG certifications, on
@@ -168,7 +170,7 @@ merge register-carol
     cd registry
     git fetch -q origin
     git switch -q -c endorse-lena origin/main
-    git-vouch-migrate drafts ~/pgpkeys . --commit "$C" --signer "$SIGNER" --as lena \
+    git-vouch-migrate drafts ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER" --as lena \
         --out ~/endorsement-drafts
     for f in ~/endorsement-drafts/endorsements/*/*.json; do
         cat "$f"

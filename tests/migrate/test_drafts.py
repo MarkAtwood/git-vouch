@@ -15,7 +15,7 @@ from typing import NamedTuple
 
 import pytest
 
-from .conftest import C_DATE, T0, Gpg, _created, _git, run_migrate
+from .conftest import FREEZE_DATE, T0, Gpg, _created, _git, run_migrate
 from .test_continuity import gpg_sign, ssh_sign, write_person
 
 VOUCH = Path(__file__).resolve().parent.parent.parent / "git-vouch"
@@ -68,7 +68,7 @@ def _forge(gpg: Gpg, relay: Gpg, by: str, fpr: str) -> bytes:
 
 @pytest.fixture(scope="module")
 def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
-    """Return pgpkeys at a signed C where cora certified some keys, and a registry."""
+    """Return pgpkeys at a freeze commit where cora certified keys, and a registry."""
     base = tmp_path_factory.mktemp("certified")
     home = base / "gnupg"
     home.mkdir(mode=0o700)
@@ -100,7 +100,8 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             "max": gpg.new_key("Max Lapsed <max@example.org>"),
         }
         # erin, who has no continuity proof, certifies lou, and max with a
-        # certification that expired before C; her other key certifies nell.
+        # certification that expired before the freeze commit; her other key
+        # certifies nell.
         _certify(gpg, fprs["erin"], fprs["lou"], "20200102T000000")
         _certify(gpg, fprs["erin"], fprs["max"], "20200102T000000",
                  "--default-cert-expire", "1d")  # fmt: skip
@@ -151,8 +152,8 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             GNUPGHOME=str(home),
             GIT_CONFIG_NOSYSTEM="1",
             GIT_CONFIG_GLOBAL=os.devnull,
-            GIT_AUTHOR_DATE=C_DATE,
-            GIT_COMMITTER_DATE=C_DATE,
+            GIT_AUTHOR_DATE=FREEZE_DATE,
+            GIT_COMMITTER_DATE=FREEZE_DATE,
         )
         (home / "gpg.conf").write_text("faked-system-time 20200601T000000!\n")
         ident = ["-c", "user.name=Sig Ner", "-c", "user.email=signer@kernel.org"]
@@ -403,9 +404,9 @@ def test_certification_expired_by_c_is_drafted(
         f for f in (ln.split(":") for ln in out.decode().splitlines())
         if f[0] == "sig" and f[4] == erin[-16:]
     ]  # fmt: skip
-    c_time = int(_git(certified.repo, "show", "-s", "--format=%ct",
-                      certified.commit, env=dict(os.environ)))  # fmt: skip
-    assert len(sigs) == 1 and sigs[0][6] and int(sigs[0][6]) < c_time
+    freeze_time = int(_git(certified.repo, "show", "-s", "--format=%ct",
+                           certified.commit, env=dict(os.environ)))  # fmt: skip
+    assert len(sigs) == 1 and sigs[0][6] and int(sigs[0][6]) < freeze_time
     out_dir = tmp_path / "out"
     proc = run_drafts(certified, certified.registry, "erin", out_dir)
     assert proc.returncode == 0, proc.stdout + proc.stderr

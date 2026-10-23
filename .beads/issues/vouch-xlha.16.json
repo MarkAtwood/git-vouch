@@ -1,0 +1,27 @@
+{
+  "id": "vouch-xlha.16",
+  "title": "ssh key base64 not canonical: accepts keys OpenSSH cannot load",
+  "description": "git-vouch:475 (ssh_to_did) decodes the key's base64 with base64.b64decode(validate=True). That accepts non-zero padding bits, so one key has several 'ssh' spellings. OpenSSH's decoder (__b64_pton) rejects those spellings. _base64 at git-vouch:686 already refuses non-canonical base64 for attestations; the key field does not.\n\nReproduced with a fresh ecdsa-sha2-nistp256 key whose last base64 character had its low bit set (scratchpad agentE/b64.py). ssh_to_did returns the same did:key as the canonical line. 'ssh-keygen -l -f bad.pub' fails with 'is not a public key file' (exit 255). In an allowed_signers file, ssh-keygen skips that line and still verifies other signers, so the damage does not spread to other people.\n\nWhat goes wrong: a person file update signed by an existing key can add the non-canonical line, and check passes. The PersonKey.ssh string then lands verbatim in the exported allowed_signers (git-vouch:2172) and revoked_keys (git-vouch:2183), where OpenSSH ignores it. The person's commits signed with that key show no valid signature, check gives no diagnostic, and a revocation line for that key is dead. Fails closed; the cost is a silently unusable key. verify_person (git-vouch:1001-1003) also dedups by the ssh string, so two blocks by the same key count as 'different keys'. That is harmless because one signature suffices.\n\nFix: in ssh_to_did, require base64.b64encode(decoded) == fields[1], the same check _base64 already does.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:24:13.734025058Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:24:13.734025058Z",
+  "labels": [
+    "crypto",
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.16",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:24:13.764627465Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

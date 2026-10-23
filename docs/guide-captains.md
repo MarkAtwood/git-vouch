@@ -22,11 +22,10 @@ endorsements you approve on.
 ## What the commands assume
 
 - `$REGISTRY` is the registry's URL and `$LINUX` a kernel tree you push
-  tags to. `$PGPKEYS`, `$C` and `$SIGNER` are the frozen `pgpkeys.git`,
-  its last commit and the fingerprint that signed it, all published by
-  kernel.org at the freeze (see [the flag-day runbook](flag-day.md)).
-  `$FREEZE_COMMIT`, under Patch signing, is that same last commit,
-  the freeze commit.
+  tags to. `$PGPKEYS`, `$FREEZE_COMMIT` and `$SIGNER` are the frozen
+  `pgpkeys.git`, its last commit (the freeze commit) and the fingerprint
+  that signed it, all published by kernel.org at the freeze (see
+  [the flag-day runbook](flag-day.md)).
 - `git-vouch` and `git-vouch-migrate` are on `PATH`, so `git vouch`
   works. You need `git-vouch-migrate` and `gpg` only on the flag day.
 - Your SSH keys are loaded in an agent. The commands use
@@ -64,15 +63,16 @@ cutoff.
 
 ### Register with your pgpkeys key
 
-If you hold a key in `pgpkeys.git` that was not revoked by C, register
-from the draft `git-vouch-migrate` writes for you and sign the result
-with your GPG key as a continuity proof (here as `alice`):
+If you hold a key in `pgpkeys.git` that was not revoked by the freeze
+commit, register from the draft `git-vouch-migrate` writes for you and
+sign the result with your GPG key as a continuity proof (here as
+`alice`):
 
 <!-- as alice -->
 ```sh
 git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 cat drafts/people/alice.json
 git clone -q "$REGISTRY" registry
 cd registry
@@ -84,11 +84,12 @@ git commit -q -m "people: register alice"
 git push -q origin HEAD:register-alice
 ```
 
-`port` checks C's signature by `$SIGNER`, then writes one unsigned draft
-per person in pgpkeys: a proposed handle, your name, the emails on your
-unrevoked user IDs, and `migratedFrom`. Read yours before registering:
-the handle is permanent. `register --from` adds your SSH key and signs
-the file; `add-key` lists your backup key, signed by the main one.
+`port` checks the freeze commit's signature by `$SIGNER`, then writes
+one unsigned draft per person in pgpkeys: a proposed handle, your name,
+the emails on your unrevoked user IDs, and `migratedFrom`. Read yours
+before registering: the handle is permanent. `register --from` adds your
+SSH key and signs the file; `add-key` lists your backup key, signed by
+the main one.
 
 Make the `.asc` last. It covers the person file's exact bytes, so any
 later `add-key`, `retire-key` or email change needs a new one before the
@@ -188,16 +189,16 @@ approve your contributors in the same branch (here as `alice`):
 cd registry
 git fetch -q origin
 git switch -q -c endorse-alice origin/main
-git-vouch-migrate drafts ~/pgpkeys . --commit "$C" --signer "$SIGNER" --as alice \
+git-vouch-migrate drafts ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER" --as alice \
     --out ~/endorsement-drafts
 cat ~/endorsement-drafts/endorsements/*/*.json
 ```
 
 `drafts --as` writes one draft for each registered person whose
 continuity proof holds and whose GPG key your own proven key certified
-at C. Your own proof must hold too, or it refuses. A subject who has not
-registered yet gets no draft; run `drafts` again later into a new
-`--out` directory and sign only the new ones.
+at the freeze commit. Your own proof must hold too, or it refuses. A
+subject who has not registered yet gets no draft; run `drafts` again
+later into a new `--out` directory and sign only the new ones.
 
 **Read every draft before the loop signs it.** `subjectName` comes from
 the subject's own person file, not from your certification;

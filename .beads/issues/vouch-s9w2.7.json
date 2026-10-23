@@ -1,0 +1,26 @@
+{
+  "id": "vouch-s9w2.7",
+  "title": "Query timeout orphans git-vouch, defeating QUERY_SLOTS cap",
+  "description": "git-vouch-trqp:213-222 (query). subprocess.run([\"git\",\"vouch\",\"query\",...], timeout=QUERY_TIMEOUT) kills only the direct child, git. git runs the dashed external git-vouch as its own child (git.c execv_dashed_external, run_command), and SIGKILL gives git no chance to clean up, so git-vouch (plus its git/ssh-keygen children) is reparented to PID 1 and keeps running a full registry check. CPython run() only waits for the killed pid on POSIX, so it returns at once and the finally releases the QUERY_SLOTS slot while the check is still running.\n\nReproduced (scratch copy, QUERY_TIMEOUT=2, fake git-vouch on PATH that sleeps 40): six sequential requests each got 503 unavailable after 2.0s, and ps then showed six orphaned git-vouch processes with ppid 1, all still running.\n\nFailure scenario: once a registry check takes longer than QUERY_TIMEOUT (large registry, loaded host), every request leaves an orphan behind. An unauthenticated client sending 4 requests at a time every 30s (never tripping the 503 \"busy\" path) keeps adding checks, so the number of concurrent registry checks is unbounded, not 4. Load slows each check further, so more requests time out: a positive feedback loop to CPU and process exhaustion. The cap fails in exactly the overload case it exists for (ponytail at :37-41). Fails closed (503), so this is availability, not a wrong answer.\n\nFix: start the query in its own process group (Popen(..., start_new_session=True)); on TimeoutExpired, os.killpg(proc.pid, SIGKILL), then communicate()/wait, and release the slot only after that. Test: a fake git-vouch that spawns a long sleep; after the 503, assert no process from that group survives.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:18:29.034258023Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:18:29.034258023Z",
+  "labels": [
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-s9w2.7",
+      "depends_on_id": "vouch-s9w2",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:18:29.062367332Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

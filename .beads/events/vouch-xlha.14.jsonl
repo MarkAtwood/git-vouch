@@ -1,0 +1,4 @@
+{"id":"01a16a38-3f98-79a4-8887-21e956aee8b4","issue_id":"vouch-xlha.14","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T19:23:53.624633092Z"}
+{"id":"01a16a38-3f9c-7dd0-8731-39ee4249258d","issue_id":"vouch-xlha.14","event_type":"label_added","actor":"agent","comment":"Added label: risk","created_at":"2026-10-23T19:23:53.628906354Z"}
+{"id":"01a16a38-3fa1-7070-9140-af2ec51db5cf","issue_id":"vouch-xlha.14","event_type":"label_added","actor":"agent","comment":"Added label: maintainer-burden","created_at":"2026-10-23T19:23:53.63302931Z"}
+{"id":"01a16a38-3fa5-73c3-b6d0-6a39ea9e4be7","issue_id":"vouch-xlha.14","event_type":"label_added","actor":"agent","comment":"Added label: review","created_at":"2026-10-23T19:23:53.637247223Z"}

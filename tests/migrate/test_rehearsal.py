@@ -2,9 +2,9 @@
 
 The fixture builds the world as it stands on the freeze: a pgpkeys.git of
 throwaway GPG keys, with certifications (one SHA-1) and an expired key,
-frozen at a commit C that its signer signed; an empty registry; a kernel
-tree; and one home per person. rehearsal.sh then runs every runbook step
-as those people, and the tests check what came out: gpg made the
+frozen at a commit its signer signed (the freeze commit); an empty
+registry; a kernel tree; and one home per person. rehearsal.sh then runs
+every runbook step as those people, and the tests check what came out: gpg made the
 certifications and git verify-tag judges the tags, so neither oracle is
 git-vouch's own code.
 """
@@ -22,13 +22,13 @@ from typing import NamedTuple
 
 import pytest
 
-from .conftest import C_DATE, Gpg, _created, _git
+from .conftest import FREEZE_DATE, Gpg, _created, _git
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK = Path(__file__).with_name("rehearsal.sh")
 OLD = "20180101T000000"  # before every certification below
 CERTIFIED = "20200102T000000"  # when lena certifies alice (SHA-1) and dave
-BOB_MADE = "20190101T000000"  # bob's key expires a day later, long before C
+BOB_MADE = "20190101T000000"  # bob's key expires a day later, before the freeze
 BOB_CERTIFIED = "20190101T120000"  # while bob's key was still valid
 # A line of git vouch check output: a handle and its tier.
 TIER_RE = re.compile(r"[a-z0-9_-]+ (anchor|maintainer|contributor|automation|none)")
@@ -60,7 +60,10 @@ def _home(world: Path, handle: str, name: str, email: str, ssh: bool = True) -> 
 
 
 def _build(world: Path) -> tuple[dict[str, str], str]:
-    """Build the frozen pgpkeys.git, the registry and the kernel tree; return (fprs, C)."""
+    """Build the frozen pgpkeys.git, the registry and the kernel tree.
+
+    Returns (fprs, the freeze commit).
+    """
     korg = _home(world, "korg", "Kay Org", "korg@kernel.org", ssh=False)
     lena = _home(world, "lena", "Lena Anchor", "lena@example.org")
     alice = _home(world, "alice", "Alice Example", "alice@example.org")
@@ -105,8 +108,8 @@ def _build(world: Path) -> tuple[dict[str, str], str]:
         GNUPGHOME=str(korg.home),
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,
-        GIT_AUTHOR_DATE=C_DATE,
-        GIT_COMMITTER_DATE=C_DATE,
+        GIT_AUTHOR_DATE=FREEZE_DATE,
+        GIT_COMMITTER_DATE=FREEZE_DATE,
     )
     ident = ["-c", "user.name=Kay Org", "-c", "user.email=korg@kernel.org"]
     sign = ["-c", "gpg.format=openpgp", "-c", "gpg.program=gpg"]
@@ -147,7 +150,7 @@ def rehearsal(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Rehearsal]:
             ),
             GIT_CONFIG_NOSYSTEM="1",
             WORLD=str(world),
-            C=commit,
+            FREEZE_COMMIT=commit,
             SIGNER=fprs["korg"],
             PGPKEYS=str(world / "pgpkeys.git"),
             REGISTRY=str(world / "registry.git"),
@@ -179,7 +182,8 @@ def test_every_continuity_proof_holds(rehearsal: Rehearsal) -> None:
     out = rehearsal.proc.stdout
     assert f"ok lena: openpgp4fpr:{f['lena']} by .asc" in out
     assert f"ok alice: openpgp4fpr:{f['alice']} by .asc" in out
-    # bob's key expired before C; his proof was made after extending it locally.
+    # bob's key expired before the freeze commit; his proof was made after
+    # extending it locally.
     assert f"ok bob: openpgp4fpr:{f['bob']} by .asc" in out
     assert f"ok dave: openpgp4fpr:{f['dave']} by auth subkey " in out
     assert "fail " not in out

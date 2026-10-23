@@ -1,4 +1,7 @@
-"""Tests for ``git-vouch-migrate verify-continuity``: GPG continuity proofs against pgpkeys at C."""
+"""Tests for ``git-vouch-migrate verify-continuity``.
+
+They check GPG continuity proofs against pgpkeys at the freeze commit.
+"""
 
 from __future__ import annotations
 
@@ -215,7 +218,7 @@ def test_swapped_ssh_key_fails(
 def test_asc_by_key_expired_at_c_passes(
     pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any
 ) -> None:
-    eve = pgpkeys.fprs["eve"]  # expired 2019-01-02, before C (D9)
+    eve = pgpkeys.fprs["eve"]  # expired 2019-01-02, before the freeze commit (D9)
     path = write_person(registry, "eve", eve, ["eve@example.org"], [ed25519_key.pubkey])
     ssh_sign(path, ed25519_key.private)
     gpg_sign(pgpkeys, path, eve, "20190101T120000")
@@ -367,7 +370,9 @@ def test_migrated_from_key_not_in_pgpkeys_fails(
     gpg_sign(pgpkeys, path, outsider)
     proc = verify(pgpkeys, registry)
     assert proc.returncode == 1
-    assert f"fail alice: {outsider} is not in pgpkeys at C" in proc.stdout
+    assert (
+        f"fail alice: {outsider} is not in pgpkeys at the freeze commit" in proc.stdout
+    )
 
 
 def test_malformed_migrated_from_fails(

@@ -645,27 +645,28 @@ day. No period accepts both GPG and SSH signatures on new tags or pulls.
 Before the flag day every pgpkeys holder who still signs registers an
 SSH key. After it, nothing new needs `gpg`.
 
-1. **Freeze.** `pgpkeys.git` gets one last signed commit, C, and becomes
-   read-only. C's hash, the flag-day date and the late cutoff are
-   published together.
+1. **Freeze.** `pgpkeys.git` gets one last signed commit, the freeze
+   commit, and becomes read-only. Its hash, the flag-day date and the
+   late cutoff are published together.
 2. **Window.** The first registry merge holds `anchors.json` and the
    anchors' person files. Everyone else then registers.
 3. **Flag day.** Linus and the release tooling switch to files from
    `git vouch export`, and GPG-signed tags and pulls stop being accepted.
-4. **Late cutoff.** Continuity claims against C are accepted until this
-   date. After it, people register as newcomers. No tool enforces it:
-   after the cutoff, registry maintainers do not merge any change that
-   adds or alters a `migratedFrom` field or adds a `people/*.json.asc`.
-   That covers both proof routes, since reusing an auth subkey also
-   needs `migratedFrom`. The merge date counts, not the commit date.
+4. **Late cutoff.** Continuity claims against the freeze commit are
+   accepted until this date. After it, people register as newcomers. No
+   tool enforces it: after the cutoff, registry maintainers do not merge
+   any change that adds or alters a `migratedFrom` field or adds a
+   `people/*.json.asc`. That covers both proof routes, since reusing an
+   auth subkey also needs `migratedFrom`. The merge date counts, not the
+   commit date.
 
-**Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at C, after
-verifying C's signature. For each unrevoked person key it writes an unsigned
-draft person file: a proposed handle, the name, emails from unrevoked
-UIDs, and `migratedFrom`. The holder adds an SSH key, signs the draft
-with `git vouch register --from` and submits it. The tool never writes a signed
-record, and it calls `git-vouch` for person-file checks rather than
-re-implementing them.
+**Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at the
+freeze commit, after verifying the freeze commit's signature. For each
+unrevoked person key it writes an unsigned draft person file: a proposed
+handle, the name, emails from unrevoked UIDs, and `migratedFrom`. The
+holder adds an SSH key, signs the draft with `git vouch register --from`
+and submits it. The tool never writes a signed record, and it calls
+`git-vouch` for person-file checks rather than re-implementing them.
 
 **Continuity proof** is needed only to receive ported endorsement
 drafts. It grants no tier, and registering without it works; the person
@@ -676,35 +677,36 @@ subkey as the SSH key. It is judged against the person-file version it
 was made for, found in the registry's history, so later signed edits do
 not undo it. A change that only review let through (lost-key recovery,
 or a handle registered again after deletion) ends that: the current
-version must then carry its own proof. `git-vouch-migrate` accepts it only if the GPG
-key is not revoked in C (an expired key is accepted), every email in
-that version is on an unrevoked UID of that key, and no other person file claims
-the same fingerprint. If two do, `check` flags both and neither gets
-drafts until an anchor resolves it, whichever merged first. `git-vouch`
-itself never runs GPG and never checks the `.asc`.
+version must then carry its own proof. `git-vouch-migrate` accepts it
+only if the GPG key is not revoked in the freeze commit (an expired key
+is accepted), every email in that version is on an unrevoked UID of that
+key, and no other person file claims the same fingerprint. If two do,
+`check` flags both and neither gets drafts until an anchor resolves it,
+whichever merged first. `git-vouch` itself never runs GPG and never
+checks the `.asc`.
 
 **Endorsements.** GPG certifications are not ported as records. Each
 certifier runs `git-vouch-migrate drafts --as <handle>` on their own
-machine, from the public pgpkeys at C and the registry, and gets one
-draft per subject with a continuity proof: the latest unrevoked
-certification by the key in the certifier's `migratedFrom` (the
-certifier needs no proof), including SHA-1 ones that GnuPG 2.4 rejects
-and ones expired by C, because the
-draft is only a reminder and the certifier's new SSH signature is what
-counts. A draft takes `subjectName` from the
-person file, fills `subjectEmails` from the certified UIDs, and puts the
-certified fingerprint, UID and date in `note`. The certifier reads and
-signs them. Drafts are never generated centrally, and unsigned drafts
-never enter the registry.
+machine, from the public pgpkeys at the freeze commit and the registry,
+and gets one draft per subject with a continuity proof: the latest
+unrevoked certification by the key in the certifier's `migratedFrom`
+(the certifier needs no proof), including SHA-1 ones that GnuPG 2.4
+rejects and ones expired by the freeze commit, because the draft is only
+a reminder and the certifier's new SSH signature is what counts. A draft
+takes `subjectName` from the person file, fills `subjectEmails` from the
+certified UIDs, and puts the certified fingerprint, UID and date in
+`note`. The certifier reads and signs them. Drafts are never generated
+centrally, and unsigned drafts never enter the registry.
 
 **Tiers.** GPG supplies none. Linus certifies 2 keys, so the web of
 trust says nothing about who is a maintainer. Anchors approve
 maintainers on their own judgement, using MAINTAINERS and endorsements.
 
 **What continuity cannot catch.** Someone holding a GPG key that was
-stolen and not revoked by C can claim that person's identity, just as
-they can sign tags with it today. The duplicate-claim rule exposes this
-if the real holder also migrates, and the late cutoff ends it.
+stolen and not revoked by the freeze commit can claim that person's
+identity, just as they can sign tags with it today. The duplicate-claim
+rule exposes this if the real holder also migrates, and the late cutoff
+ends it.
 
 **Scale** (pgpkeys at research time): 645 live keys for about 606
 people; 188 can reuse an authentication key as an accepted SSH key;
@@ -712,7 +714,8 @@ about 1,784 verified certification pairs become drafts; about 80% of
 maintainers have no GPG key and register fresh.
 
 **Old signatures.** GPG-signed tags stay valid in history. Verifying
-them uses `gpg` with the archived pgpkeys at C. There is no manifest.
+them uses `gpg` with the archived pgpkeys at the freeze commit. There is
+no manifest.
 
 **Out of scope.** Encryption keys (the remail and security lists).
 kernel.org keeps a small encryption-only GPG keyring. Patch signing is
@@ -857,12 +860,13 @@ Decided 2026-10-22:
   challenge}`, shape-checked by `git-vouch` and verified only by
   `git-vouch-attest` against a user-supplied root.
 - **Flag day:** GPG and `pgpkeys.git` replaced on one date, frozen at
-  signed commit C, no dual tags; ported files carry `migratedFrom` and
-  duplicate fingerprints block drafts for both; continuity proof (`.asc`
-  or reused auth subkey, expired keys accepted) only unlocks drafts and
-  grants no tier; drafts generated locally by each certifier; old tags
-  verified with `gpg` and pgpkeys at C, no manifest; encryption keys
-  out of scope; patch signing via the patatt fork.
+  signed commit (the freeze commit), no dual tags; ported files carry
+  `migratedFrom` and duplicate fingerprints block drafts for both;
+  continuity proof (`.asc` or reused auth subkey, expired keys accepted)
+  only unlocks drafts and grants no tier; drafts generated locally by
+  each certifier; old tags verified with `gpg` and pgpkeys at the freeze
+  commit, no manifest; encryption keys out of scope; patch signing via
+  the patatt fork.
 - **CLI details:** `git vouch did` takes a `.pub` path or key text;
   `register --from` completes a draft; no
   man page; `setup`/`sync` remember `--min-tier` and

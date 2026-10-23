@@ -21,11 +21,10 @@ endorsement binds and what evidence to ask for.
 ## What the commands assume
 
 - `$REGISTRY` is the registry's URL and `$LINUX` a kernel tree you push
-  to. `$PGPKEYS`, `$C` and `$SIGNER` are the frozen `pgpkeys.git`, its
-  last commit and the fingerprint that signed it, all published by
-  kernel.org at the freeze (see [the flag-day runbook](flag-day.md)).
-  `$FREEZE_COMMIT`, under Patch signing, is that same last commit,
-  the freeze commit.
+  to. `$PGPKEYS`, `$FREEZE_COMMIT` and `$SIGNER` are the frozen
+  `pgpkeys.git`, its last commit (the freeze commit) and the fingerprint
+  that signed it, all published by kernel.org at the freeze (see
+  [the flag-day runbook](flag-day.md)).
 - `git-vouch` and `git-vouch-migrate` are on `PATH`, so `git vouch`
   works. You need `git-vouch-migrate` and `gpg` only on the flag day.
 - Your SSH keys are loaded in an agent: `~/.ssh/id_ed25519` is your
@@ -77,16 +76,16 @@ files to `register` or `add-key` with `--challenge` and `--attestation`.
 
 ### Register
 
-If you hold a key in `pgpkeys.git` that was not revoked by C, register
-from the draft `git-vouch-migrate` writes for you, add your backup key,
-and sign the result with your GPG key as a continuity proof (here as
-`bob`):
+If you hold a key in `pgpkeys.git` that was not revoked by the freeze
+commit, register from the draft `git-vouch-migrate` writes for you, add
+your backup key, and sign the result with your GPG key as a continuity
+proof (here as `bob`):
 
 <!-- as bob -->
 ```sh
 git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 cat drafts/people/bob.json
 git clone -q "$REGISTRY" registry
 cd registry
@@ -167,7 +166,7 @@ endorsements (here as `alice`):
 cd registry
 git fetch -q origin
 git switch -q -c endorse-alice origin/main
-git-vouch-migrate drafts ~/pgpkeys . --commit "$C" --signer "$SIGNER" --as alice \
+git-vouch-migrate drafts ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER" --as alice \
     --out ~/endorsement-drafts
 cat ~/endorsement-drafts/endorsements/*/*.json
 ```

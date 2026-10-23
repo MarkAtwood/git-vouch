@@ -1,0 +1,27 @@
+{
+  "id": "vouch-s9w2.12",
+  "title": "trqp serve: bind failures exit with a traceback; IPv6 --bind unsupported",
+  "description": "git-vouch-trqp:366-369, 389-396. ThreadingHTTPServer((bind, port), ...) is not guarded. Reproduced: '--port 22' gives a PermissionError traceback, a port in use gives OSError EADDRINUSE through the same path, and '--bind ::1' gives 'socket.gaierror: Address family for hostname not supported', because HTTPServer.address_family is always AF_INET. --help says 'address' with no IPv4-only caveat. What goes wrong: common operator mistakes (port taken, unprivileged low port, an IPv6 proxy upstream) end in a raw traceback instead of a one-line error, unlike the sibling git-vouch's no-traceback rule (see vouch-88xy), and IPv6 binding is impossible. Fix: catch OSError around server construction, print 'git-vouch-trqp: cannot listen on {bind}:{port}: {e.strerror}' to stderr and return 1. For IPv6, either say 'IPv4 address' in --bind help (constraint) or pick the address family from socket.getaddrinfo(bind, port)[0][0] in a one-line subclass, as http.server's own CLI does. Test: start serve on an already-bound port, assert exit 1 and no 'Traceback' in stderr.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:19:26.177700411Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:19:26.177700411Z",
+  "labels": [
+    "idiomatic-python",
+    "error-handling",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-s9w2.12",
+      "depends_on_id": "vouch-s9w2",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:19:26.208187781Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

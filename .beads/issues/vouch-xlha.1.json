@@ -1,0 +1,28 @@
+{
+  "id": "vouch-xlha.1",
+  "title": "export/sync rewrite allowed-signers and revocation files as 0600",
+  "description": "git-vouch:2186-2197 _write_atomic uses tempfile.NamedTemporaryFile (mkstemp, mode 0600) then os.replace, so every export/sync leaves gpg.ssh.allowedSignersFile and gpg.ssh.revocationFile at 0600, replacing whatever mode the file had. Reproduced on the HEAD snapshot: a 0644 file becomes 0600 after _write_atomic.\n\nWhy it matters: these files are public data meant to be read by git. docs/flag-day.md:53 has release tooling switching to exported files; any setup where the exporter and the verifier are different users (service account exporting for a CI or release user, root exporting to a shared path) loses read access after the first export, and git verify-commit fails for everyone else. It fails closed, but silently re-breaks after an admin chmods it back. It is also inconsistent with _replace_at (git-vouch:2761), which creates at 0o666 \u0026 ~umask.\n\nFix: keep the existing file's mode (os.fstat of the target if it exists, else 0o666 \u0026 ~umask) and fchmod the temp fd before os.replace; or create the temp with os.open(..., 0o666) like _replace_at.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:06.034603818Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:06.034603818Z",
+  "labels": [
+    "correctness",
+    "file-io",
+    "python-standards",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.1",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:06.070549936Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

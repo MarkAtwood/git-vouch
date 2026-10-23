@@ -1,10 +1,10 @@
 """docs/guide-regulars.md, run block by block in a throwaway registry.
 
 The world is built as a regular finds it during the flag-day window: a
-pgpkeys.git of throwaway GPG keys frozen at a commit C that korg signed,
-in which alice certified bob's key; a registry where lena is the anchor
-and alice a maintainer registered with a continuity proof (the PRELUDE,
-steps other guides cover); and a kernel tree.
+pgpkeys.git of throwaway GPG keys frozen at a commit that korg signed
+(the freeze commit), in which alice certified bob's key; a registry where
+lena is the anchor and alice a maintainer registered with a continuity
+proof (the PRELUDE, steps other guides cover); and a kernel tree.
 Then every ``sh`` block on the page runs, in order, as the person its
 ``<!-- as <who> -->`` marker names: in their own home, with their SSH
 keys in an agent and their own GNUPGHOME. A ``<!-- merge <branch> -->``
@@ -38,7 +38,7 @@ from typing import NamedTuple
 
 import pytest
 
-from .conftest import C_DATE, Gpg, _git
+from .conftest import FREEZE_DATE, Gpg, _git
 
 ROOT = Path(__file__).resolve().parents[2]
 DOC = ROOT / "docs" / "guide-regulars.md"
@@ -115,7 +115,7 @@ git push -q origin main
 """),
     Step("alice", """git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 git clone -q "$REGISTRY" registry
 cd registry
 git vouch register --from ~/drafts/people/alice.json ~/.ssh/id_ed25519.pub
@@ -205,7 +205,7 @@ def _home(world: Path, who: str) -> Gpg:
 def _build(world: Path) -> tuple[dict[str, str], str]:
     """Build the homes, the frozen pgpkeys.git, the registry and the kernel tree.
 
-    Return (fprs, C).
+    Return (fprs, the freeze commit).
     """
     gpgs = {who: _home(world, who) for who in KEYS}
     fprs = {
@@ -232,8 +232,8 @@ def _build(world: Path) -> tuple[dict[str, str], str]:
         GNUPGHOME=str(korg),
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,
-        GIT_AUTHOR_DATE=C_DATE,
-        GIT_COMMITTER_DATE=C_DATE,
+        GIT_AUTHOR_DATE=FREEZE_DATE,
+        GIT_COMMITTER_DATE=FREEZE_DATE,
     )
     (korg / "gpg.conf").write_text("faked-system-time 20200601T000000!\n")
     ident = ["-c", "user.name=Kay Org", "-c", "user.email=korg@kernel.org"]
@@ -272,7 +272,7 @@ def guide(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Guide]:
             # git passes verify-time as local time without a zone, and OpenSSH
             # 9.6 reads it as standard time, an hour late under DST.
             TZ="UTC",
-            C=commit,
+            FREEZE_COMMIT=commit,
             SIGNER=fprs["korg"],
             PGPKEYS=str(world / "pgpkeys.git"),
             REGISTRY=str(world / "registry.git"),

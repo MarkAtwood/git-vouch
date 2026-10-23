@@ -1,0 +1,27 @@
+{
+  "id": "vouch-xlha.15",
+  "title": "key parse accepts keys anyone can sign with (small-order ed25519, prime-modulus RSA)",
+  "description": "git-vouch:447-495 (ssh_to_did) and 497-534 (did_to_ssh) accept any 32-byte ed25519 key and any odd-e RSA modulus of 2048-16384 bits (_check_rsa, git-vouch:432). Two kinds of key have a private key anyone can compute:\n\n1. ed25519 small-order or non-canonical points, e.g. the identity point pk = 0x01 followed by 31 zero bytes (did:key:z6MkeXATEjyXENzBXBxgC5EHk2JE5aqd7qMGGtDpLUH1e2Sj). The signature R = identity, S = 0 is valid for every message. With the other 7 small-order points, a forger succeeds with probability 1/8 per try.\n2. RSA keys whose modulus n is prime: d = e^-1 mod (n-1) is public. Keys where n has a small factor are the same case.\n\nReproduced against the installed ssh-keygen (OpenSSH 9.6p1, OpenSSL 3.0.13). The script is /tmp/claude-1000/-home-mark-PROJECT-git-vouch/90586ab0-ccaf-45b4-9b85-b9df553114e9/scratchpad/agentE/forge.py. ssh_to_did accepts both keys. ssh-keygen -Y verify prints 'Good \"git-vouch-register\" signature' for the forged ed25519 sig, 'Good \"git\"' for the same key in the git namespace, and 'Good \"git-vouch-endorse\"' for a forged rsa-sha2-512 sig under a 2048-bit prime n.\n\nWhat goes wrong: once a registrant's person file lists such a key, anyone can sign updates to that file (adding their own key), endorsements, approvals, and git commits that export maps to that person's emails. A malicious registrant could always leak their real private key. The new harm is that this key looks normal to reviewers, hands every holder a covert 'anyone could have signed it' denial, and passes check.\n\nSecond effect: the check result depends on the OpenSSH version. openssh-portable HEAD (26b1363, 2026-10-18) ed25519.c:4643-4648 rejects non-canonical and small-order public keys (ge25519_is_canonical, ge25519_has_small_order). On those builds, every record signed by such a key fails verification, but 9.6p1 accepts the same registry. I checked this at source level only and did not build HEAD.\n\nFix (a constraint, not a mechanism): in ssh_to_did and did_to_ssh, refuse ed25519 keys whose y \u003e= p and the 8 small-order encodings (fixed blocklist, as in libsodium). For RSA, refuse an n that is prime (a Miller-Rabin pass in pow(), a few lines) or has a factor below a small bound (e.g. trial division by primes \u003c 2^16). Test against the identity point and the forge.py prime-modulus key as independent vectors, both confirmed by ssh-keygen.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:24:07.305284536Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:24:07.305284536Z",
+  "labels": [
+    "crypto",
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.15",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:24:07.336063554Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

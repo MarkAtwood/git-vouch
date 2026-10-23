@@ -302,8 +302,11 @@ def test_port_skips_rsa_auth_subkey_below_2048(ported: Ported) -> None:
     assert drafts(ported)[ported.pgp.fprs["tim"]]["keys"] == []
 
 
-@pytest.mark.parametrize("person", ["sam1", "sam2"])  # revoked, expired at C
-def test_port_skips_auth_subkey_not_live_at_c(ported: Ported, person: str) -> None:
+# sam1 is revoked, sam2 expired at the freeze commit.
+@pytest.mark.parametrize("person", ["sam1", "sam2"])
+def test_port_skips_auth_subkey_not_live_at_freeze_commit(
+    ported: Ported, person: str
+) -> None:
     assert drafts(ported)[ported.pgp.fprs[person]]["keys"] == []
 
 

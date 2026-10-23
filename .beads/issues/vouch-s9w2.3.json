@@ -1,0 +1,26 @@
+{
+  "id": "vouch-s9w2.3",
+  "title": "trqp tests: authorized() drops reply; re-posts, split schema",
+  "description": "tests/trqp/test_trqp.py:71-93 (the authorized/error helpers) return only a bool or the payload. Two kinds of duplication follow:\n\n1. Tests post the same request twice to read a second field: :136-138, :149-151, :180-182, :196-198. Each post is a full `git vouch query` registry check (a subprocess walking history), so this doubles the cost of those cases for no extra coverage.\n2. Schema conformance lives in separate tests that rebuild setups already exercised above and re-post a hand-picked subset: test_responses_match_schema :587-607 (6 cases), test_errors_match_schema :610-629 (6), test_oversized_matches_schema :632-633, test_unavailable_matches_schema :636-644 (the same broken-registry setup as :461-468). The other ~80 replies are never schema-checked.\n\nWhat goes wrong if left: a reply-shape regression in a path outside the hand-picked subset (for example an unsupportedVersion error, or a time_requested on a response) passes the suite. The suite also pays for about 20 extra registry checks.\n\nFix: make authorized() return (authorized, payload) and have authorized()/error() call check_schema on every reply. Pass the session check_schema fixture in, or turn the helpers into a fixture. Then delete the four *_matches_schema tests and the second post in each listed test. Keep test_verify_trust_example_request_is_valid and test_spec_invalid_payloads_fail_the_schema: they check requests and guard the oracle, and nothing else covers them.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:15:38.462476848Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:15:38.462476848Z",
+  "labels": [
+    "readability",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-s9w2.3",
+      "depends_on_id": "vouch-s9w2",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:15:38.488277236Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

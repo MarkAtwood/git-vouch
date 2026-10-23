@@ -1,0 +1,26 @@
+{
+  "id": "vouch-xlha.6",
+  "title": "check_registry is one 760-line function of closures",
+  "description": "git-vouch:1341-2100. check_registry holds the whole trust model in one function: about 25 nested closures (record_at, keys_at, adding, is_signed, owners, check_signer, may_grant, lowered, judge, judge_tier, standing, tier_ends, anchor_ends, judge_endorsement, endorsed_at, held_at...). They share and mutate local dicts (people, which loses claimants at 1623; signed, judged, stood), and held_at escapes in CheckResult with all of that captured.\n\nWhat goes wrong if it stays: kernel reviewers cannot review one phase without holding all 760 lines in mind. No phase can be unit-tested on its own, so every test builds a whole registry, which is part of why the suite is slow. Phase order is implicit: the revocation pass at 1627 relies on owns() over the key-ownership state built at 1555-1625, and tier judging relies on revoked. A contributor reordering blocks gets no error.\n\nFix: no new abstractions needed. Turn the phases already marked by comments into module-level functions that pass their inputs explicitly: _load_records (1390-1425), _person_continuity (1443-1535), _key_owners (1555-1625), _revocations (1627-1700), _warn_unchained (1702-1733), tiers (check_signer through tier_ends), endorsements (1975-2005), and keep held_at as the one closure. An alternative is one small class whose memo dicts are attributes. Either way, each phase's inputs show up in its signature.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:26.147621639Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:26.147621639Z",
+  "labels": [
+    "readability",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.6",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:26.172948609Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -2,12 +2,12 @@
 """git-vouch-migrate: port the frozen pgpkeys.git into git-vouch person-file drafts.
 
 Flag day only, and the only git-vouch tool that runs gpg. It reads
-pgpkeys.git at one signed commit C, after checking C's signature, and
-writes unsigned drafts that holders complete with
-``git vouch register --from``, verifies registered people's
-continuity proofs against C, and writes each certifier's unsigned
-endorsement drafts from their GPG certifications. Person-file checks are git-vouch's own,
-imported from the git-vouch script. See DESIGN.md, Flag day.
+pgpkeys.git at one signed commit, the freeze commit, after checking its
+signature, and writes unsigned drafts that holders complete with
+``git vouch register --from``, verifies registered people's continuity
+proofs against the freeze commit, and writes each certifier's unsigned
+endorsement drafts from their GPG certifications. Person-file checks are
+git-vouch's own, imported from the git-vouch script. See DESIGN.md, Flag day.
 """
 
 from __future__ import annotations
@@ -61,10 +61,15 @@ GPG_FAILURES = ("NO_PUBKEY", "BADSIG", "REVKEYSIG", "EXPSIG", "ERRSIG")
 # Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts;
 # RSA (algorithm 1) is accepted in git-vouch's size range.
 REUSABLE_CURVES = ("ed25519", "nistp256")
-# gpg validity letters for keys not live at C. A primary key is skipped only
-# if revoked or invalid: an expired one is still continuity proof (D9).
-NOT_LIVE = {"e": "expired at C", "r": "revoked", "i": "invalid at C"}
-SKIPPED = {"r": "revoked", "i": "invalid at C"}
+# gpg validity letters for keys not live at the freeze commit. A primary
+# key is skipped only if revoked or invalid: an expired one is still
+# continuity proof (D9).
+NOT_LIVE = {
+    "e": "expired at the freeze commit",
+    "r": "revoked",
+    "i": "invalid at the freeze commit",
+}
+SKIPPED = {"r": "revoked", "i": "invalid at the freeze commit"}
 UID_RE = re.compile(r"(.*?)\s*(?:\([^()]*\))?\s*<([^<>]*)>")
 NAME_ONLY_RE = re.compile(r"([^<>@]*?)\s*(?:\([^()]*\))?")
 # kernel.org remail and security lists: "Flippant Fireant <flippant-fireant@kernel.org>".
@@ -78,7 +83,7 @@ PLACEHOLDER_KEY = (
 
 
 class GpgKey(NamedTuple):
-    """One primary key from the pgpkeys keyring, as gpg lists it at C."""
+    """One primary key from the pgpkeys keyring, as gpg lists it then."""
 
     fpr: str
     created: int
@@ -104,7 +109,7 @@ class Continuity(NamedTuple):
 
 
 class Certification(NamedTuple):
-    """One user ID certification, as gpg verified it at C."""
+    """One user ID certification, as gpg verified it at the freeze commit."""
 
     uid: str
     time: int
@@ -327,7 +332,7 @@ def check_draft(handle: str, data: bytes) -> None:
 
 
 class Pgpkeys:
-    """A temporary keyring holding the keys/*.asc of pgpkeys.git at commit C."""
+    """A temporary keyring of the keys/*.asc of pgpkeys.git at the freeze commit."""
 
     def __init__(self, repo: Path, commit: str, home: Path) -> None:
         """Resolve ``commit`` in ``repo`` and import its keys/*.asc into ``home``.
@@ -341,7 +346,8 @@ class Pgpkeys:
             "rev-parse", "--verify", "--end-of-options", commit + "^{commit}"
         )
         self.time = int(self._git("show", "-s", "--format=%ct", self.commit))
-        # Judge every key and C's own signature at C, for gpg and git verify-commit alike.
+        # Judge every key and the freeze commit's own signature at the freeze
+        # commit, for gpg and git verify-commit alike.
         (home / "gpg.conf").write_text(f"faked-system-time {self.time}!\n")
         archive = vouch.run(["git", "archive", self.commit, "keys"], cwd=repo)
         # Files gpg did not fully import, with why; port reports and skips them.
@@ -393,7 +399,7 @@ class Pgpkeys:
     def gpg(
         self, *args: str, values: Sequence[str] = (), stdin: Optional[bytes] = None
     ) -> bytes:
-        """Run gpg on the temporary keyring, whose clock is set to C's committer date."""
+        """Run gpg on the temporary keyring, clocked at the freeze commit's date."""
         cmd = [*self._gpg_cmd(), *args]
         return vouch.run(cmd, values=values, stdin=stdin)  # type: ignore[no-any-return]
 
@@ -406,7 +412,8 @@ class Pgpkeys:
         """Return the primary fingerprint of the key that made ``sig``, a signature over ``data``.
 
         ``sig`` must be one detached binary signature (class 00), so it covers
-        ``data``'s exact bytes. A key expired at C counts (D9): gpg then says
+        ``data``'s exact bytes. A key expired at the freeze commit counts (D9):
+        gpg then says
         EXPKEYSIG instead of GOODSIG, and exits 0 for both. A revoked key does
         not: gpg says REVKEYSIG.
 
@@ -444,12 +451,14 @@ class Pgpkeys:
         return valid[0][11]
 
     def check_signature(self, signer: str) -> None:
-        """Check that C carries a good signature by the key with primary fingerprint ``signer``.
+        """Check that the freeze commit is signed by primary fingerprint ``signer``.
 
-        The signer's key must be in C's own keys/, as it is for pgpkeys.
+        The signer's key must be in the freeze commit's own keys/, as it is
+        for pgpkeys.
 
         Raises:
-            VouchError: C is unsigned, the signature is bad, or someone else made it.
+            VouchError: The freeze commit is unsigned, the signature is bad, or
+                someone else made it.
         """
         cmd = ["git", "-c", "gpg.format=openpgp", "-c", "gpg.program=gpg"]
         cmd += ["verify-commit", "--raw", self.commit]
@@ -475,7 +484,7 @@ class Pgpkeys:
             )
 
     def keys(self) -> list[GpgKey]:
-        """Return every key in the keyring, judged at C."""
+        """Return every key in the keyring, judged at the freeze commit."""
         return parse_listing(
             self.gpg("--with-colons", "--fixed-list-mode", "--list-keys")
         )
@@ -598,7 +607,7 @@ def _prove_version(
     """Return how GPG ``key``'s holder proved that version ``data`` of ``rel`` is theirs.
 
     Args:
-        pgp: The pgpkeys keyring at C.
+        pgp: The pgpkeys keyring at the freeze commit.
         rel: ``people/<handle>.json``.
         data: One version of it, claiming ``key``.
         sigs: Contents of ``rel``.sig that may sign ``data``.
@@ -726,9 +735,10 @@ def verify_continuity(
     """Verify the continuity proof of each ported person file in the registry at ``root``.
 
     The person file must be validly signed by git-vouch's own rules, and
-    its ``migratedFrom`` key in pgpkeys at C not revoked (an expired key is
-    accepted, D9). The proof is judged against the version of the file it
-    was made for, found in the registry's history (see ``_prove``): that
+    its ``migratedFrom`` key in pgpkeys at the freeze commit not revoked
+    (an expired key is accepted, D9). The proof is judged against the
+    version of the file it was made for, found in the registry's history
+    (see ``_prove``): that
     version has every email on an unrevoked user ID of the key, and is
     signed by a live ed25519, P-256 or RSA authentication key (the primary
     or a subkey), or by ``people/<handle>.json.asc``, a detached signature
@@ -736,7 +746,7 @@ def verify_continuity(
     handles proves none of them (D3).
 
     Args:
-        pgp: The pgpkeys keyring at C.
+        pgp: The pgpkeys keyring at the freeze commit.
         root: The registry checkout.
         handles: Whose claims to verify; every ported person file if empty.
 
@@ -777,7 +787,7 @@ def verify_continuity(
             others = ", ".join(h for h in duplicates[fpr] if h != handle)
             failed[handle] = f"{fpr} is also claimed by {others}"
         elif fpr not in keys:
-            failed[handle] = f"{fpr} is not in pgpkeys at C"
+            failed[handle] = f"{fpr} is not in pgpkeys at the freeze commit"
         else:
             try:
                 how = _prove(
@@ -892,14 +902,14 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
 
     One draft per registered person, other than the certifier, whose
     continuity proof holds and whose GPG key the key in the certifier's
-    own ``migratedFrom`` certified at C (see ``parse_certifications``).
+    own ``migratedFrom`` certified at the freeze commit (see ``parse_certifications``).
     The certifier needs no continuity proof, and their other GPG keys'
     certifications are not read. SHA-1 certifications and ones expired
-    by C count: the draft is a reminder, and the certifier's SSH
+    by the freeze commit count: the draft is a reminder, and the certifier's SSH
     signature on it is what counts.
 
     Args:
-        pgp: The pgpkeys keyring at C.
+        pgp: The pgpkeys keyring at the freeze commit.
         root: The registry checkout.
         certifier: The certifier's handle.
         out: A new directory; drafts go to its endorsements/<subject>/.
@@ -909,8 +919,8 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
 
     Raises:
         VouchError: The certifier has no validly signed person file, or it
-            has no ``migratedFrom`` key in pgpkeys at C, or gpg, ssh-keygen
-            or git fails.
+            has no ``migratedFrom`` key in pgpkeys at the freeze commit, or
+            gpg, ssh-keygen or git fails.
     """
     found = verify_continuity(pgp, root)
     people, revoked = found.check.people, found.check.revoked
@@ -920,7 +930,9 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
     if by is None:
         raise VouchError(f"--as {certifier}: no migratedFrom")
     if by not in {k.fpr for k in pgp.keys()}:
-        raise VouchError(f"--as {certifier}: {by} is not in pgpkeys at C")
+        raise VouchError(
+            f"--as {certifier}: {by} is not in pgpkeys at the freeze commit"
+        )
     endorser_key = _current_key(people[certifier], revoked)
     subjects = {h: p.fpr for h, p in found.proven.items() if h != certifier}
     certs = {}
@@ -975,7 +987,7 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
 
 
 def _open_pgpkeys(args: argparse.Namespace, home: Path) -> Pgpkeys:
-    """Return the pgpkeys keyring at ``args.commit``, after checking C's signature."""
+    """Return the pgpkeys keyring at ``args.commit``, after checking its signature."""
     pgp = Pgpkeys(Path(args.pgpkeys), args.commit, home)
     pgp.check_signature(args.signer)
     print(f"pgpkeys at {pgp.commit}, signed by {args.signer}")
@@ -989,7 +1001,7 @@ def _check_signer(args: argparse.Namespace) -> None:
 
 
 def cmd_port(args: argparse.Namespace) -> int:
-    """Check C's signature, then write the person-file drafts."""
+    """Check the freeze commit's signature, then write the person-file drafts."""
     _check_signer(args)
     out = Path(args.out)
     if out.exists():
@@ -1002,7 +1014,10 @@ def cmd_port(args: argparse.Namespace) -> int:
 
 
 def cmd_verify_continuity(args: argparse.Namespace) -> int:
-    """Check C's signature, then report each continuity claim; 1 if any is not proven."""
+    """Check the freeze commit's signature, then report each continuity claim.
+
+    Returns 1 if any claim is not proven.
+    """
     _check_signer(args)
     for handle in args.handles:
         vouch.validate_handle(handle)
@@ -1021,7 +1036,7 @@ def cmd_verify_continuity(args: argparse.Namespace) -> int:
 
 
 def cmd_drafts(args: argparse.Namespace) -> int:
-    """Check C's signature, then write the certifier's endorsement drafts."""
+    """Check the freeze commit's signature, then write the endorsement drafts."""
     _check_signer(args)
     vouch.validate_handle(args.handle)
     out = Path(args.out)
@@ -1040,50 +1055,56 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
     p = sub.add_parser(
         "port",
-        help="write unsigned person-file drafts from pgpkeys.git at commit C",
+        help="write unsigned person-file drafts from pgpkeys.git at the freeze commit",
         description=(
-            "Import keys/*.asc from pgpkeys.git at commit C into a temporary keyring, "
-            "check C's signature, and write one unsigned draft people/<handle>.json "
-            "per person to a new directory. Keys are judged at C's committer date: "
-            "revoked keys and kernel.org list keys are skipped, expired keys are "
-            "not; keys sharing an email are one person, drafted from the newest "
-            "unexpired key, preferring one with a reusable authentication key "
-            "(else the newest key), if "
-            "their primary names match, and otherwise none is drafted. Emails "
-            "come from unrevoked user IDs. An ed25519 or P-256 authentication key "
-            "or subkey is pre-filled as the SSH key, else an RSA one of 2048 to "
-            "16384 bits."
+            "Import keys/*.asc from pgpkeys.git at the freeze commit into a temporary "
+            "keyring, check the freeze commit's signature, and write one unsigned "
+            "draft people/<handle>.json per person to a new directory. Keys are judged "
+            "at the freeze commit's committer date: revoked keys and kernel.org list "
+            "keys are skipped, expired keys are not; keys sharing an email are one "
+            "person, drafted from the newest unexpired key, preferring one with a "
+            "reusable authentication key (else the newest key), if their primary names "
+            "match, and otherwise none is drafted. Emails come from unrevoked user "
+            "IDs. An ed25519 or P-256 authentication key or subkey is pre-filled as "
+            "the SSH key, else an RSA one of 2048 to 16384 bits."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")
-    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument("--commit", required=True, help="the freeze commit")
     p.add_argument(
-        "--signer", required=True, help="primary fingerprint expected to sign C"
+        "--signer",
+        required=True,
+        help="primary fingerprint expected to sign the freeze commit",
     )
     p.add_argument("--out", required=True, help="new directory for the drafts")
     p.set_defaults(func=cmd_port)
     p = sub.add_parser(
         "verify-continuity",
-        help="verify ported person files' GPG continuity proofs against pgpkeys at C",
+        help=(
+            "verify ported person files' GPG continuity proofs against pgpkeys "
+            "at the freeze commit"
+        ),
         description=(
-            "Check C's signature, then, for each validly signed person file in "
-            "the registry with migratedFrom (or each HANDLE given), verify its "
-            "continuity proof against the keys in pgpkeys.git at C: the GPG key "
-            "must not be revoked at C (expired is accepted), and some version of "
-            "the person file in the registry's history must claim it, have "
-            "every email on an unrevoked user ID of it, and be signed by an "
-            "ed25519, P-256 or RSA authentication key or subkey of it listed "
-            "as current in that version, or by people/<handle>.json.asc, its "
-            "detached signature over that version's exact bytes. A "
-            "fingerprint claimed by two handles proves neither. "
-            "Prints 'ok' or 'fail' per handle, and exits 1 if any fails."
+            "Check the freeze commit's signature, then, for each validly signed person "
+            "file in the registry with migratedFrom (or each HANDLE given), verify its "
+            "continuity proof against the keys in pgpkeys.git at the freeze commit: "
+            "the GPG key must not be revoked at the freeze commit (expired is "
+            "accepted), and some version of the person file in the registry's history "
+            "must claim it, have every email on an unrevoked user ID of it, and be "
+            "signed by an ed25519, P-256 or RSA authentication key or subkey of it "
+            "listed as current in that version, or by people/<handle>.json.asc, its "
+            "detached signature over that version's exact bytes. A fingerprint claimed "
+            "by two handles proves neither. Prints 'ok' or 'fail' per handle, and "
+            "exits 1 if any fails."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")
     p.add_argument("registry", help="the registry checkout")
-    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument("--commit", required=True, help="the freeze commit")
     p.add_argument(
-        "--signer", required=True, help="primary fingerprint expected to sign C"
+        "--signer",
+        required=True,
+        help="primary fingerprint expected to sign the freeze commit",
     )
     p.add_argument(
         "handles", nargs="*", metavar="HANDLE", help="whose claims to verify"
@@ -1093,24 +1114,26 @@ def build_parser() -> argparse.ArgumentParser:
         "drafts",
         help="write your unsigned endorsement drafts from your GPG certifications",
         description=(
-            "Run by each certifier on their own machine. Check C's signature and "
-            "the continuity proofs, as verify-continuity does, then write to a "
-            "new directory one unsigned draft "
+            "Run by each certifier on their own machine. Check the freeze commit's "
+            "signature and the continuity proofs, as verify-continuity does, then "
+            "write to a new directory one unsigned draft "
             "endorsements/<subject>/<HANDLE>-<n>.json for each person whose proof "
-            "holds and whose GPG key the key in HANDLE's own migratedFrom "
-            "certified at C; HANDLE needs no continuity proof. Per user ID, the "
+            "holds and whose GPG key the key in HANDLE's own migratedFrom certified at "
+            "the freeze commit; HANDLE needs no continuity proof. Per user ID, the "
             "latest certification counts unless HANDLE later revoked it; SHA-1 "
-            "certifications and ones expired by C count. subjectEmails are the "
-            "person file's emails on certified user IDs, and note names the "
-            "certified key, user IDs and dates. endorserKey and subjectKey are "
-            "each person's first current key. Read each draft, then sign it."
+            "certifications and ones expired by the freeze commit count. subjectEmails "
+            "are the person file's emails on certified user IDs, and note names the "
+            "certified key, user IDs and dates. endorserKey and subjectKey are each "
+            "person's first current key. Read each draft, then sign it."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")
     p.add_argument("registry", help="the registry checkout")
-    p.add_argument("--commit", required=True, help="the frozen commit C")
+    p.add_argument("--commit", required=True, help="the freeze commit")
     p.add_argument(
-        "--signer", required=True, help="primary fingerprint expected to sign C"
+        "--signer",
+        required=True,
+        help="primary fingerprint expected to sign the freeze commit",
     )
     p.add_argument("--as", dest="handle", required=True, help="your own handle")
     p.add_argument("--out", required=True, help="new directory for the drafts")

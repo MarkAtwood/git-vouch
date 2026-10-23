@@ -1,0 +1,26 @@
+{
+  "id": "vouch-xlha.2",
+  "title": "check: one file_history per path costs minutes at kernel scale",
+  "description": "git-vouch:1270-1275 (registry_history) calls file_history once per people/tiers/revocations file and .sig. Each call is 4 git processes (git-vouch:282 rev-parse --is-shallow-repository, the per-path git log at 285, cat-file --batch-check and --batch in read_blobs at 241/251), and each git log walks the whole history. At kernel scale (606 people, about 2,424 people+tiers files) that is about 9,700 git runs per check, O(paths x commits).\n\nMeasured on a synthetic repo (3,000 linear commits, 2,424 paths, git fast-import): 20 paths' worth of those 4 processes took 2.04 s, i.e. about 100 ms per path, or about 245 s per check projected. One combined 'git log --full-history -c --raw --no-renames --no-abbrev -z --format=\"%H %ct %P\" -- people tiers revocations anchors.json' over the same repo took 0.53 s. The ponytail at git-vouch:1270 ('a registry of thousands of files takes seconds') understates the ceiling by about two orders of magnitude. check is the merge gate and runs on every sync/export/query, so this is the dominant cost.\n\nWhat goes wrong if it stays: check takes minutes per run once the registry has years of history, and each new commit makes every later run slower.\n\nFix (cheapest): run one git log over the four sources and bucket the raw lines by path. With --full-history, -c's per-file combined diff gives each path the same lines its single-path log would. Then run one cat-file --batch-check and one --batch over all blobs, and the shallow check once. The parser at 300-315 only drops its 'path != rel' assertion in favour of a dict. The merge log at 1235-1262 already has this multi-path shape. Until then, correct the ponytail's stated ceiling.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:23:11.250707245Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:23:11.250707245Z",
+  "labels": [
+    "efficiency",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.2",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:23:11.269471821Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -18,10 +18,10 @@ holder who still signs registers an SSH key; after it, nothing new needs
 
 | Phase | When | Who acts | What happens |
 |---|---|---|---|
-| 1. Freeze | _freeze date_ | kernel.org | `pgpkeys.git` gets one last signed commit, C, and becomes read-only. C's hash, the flag-day date and the late cutoff are published together. |
+| 1. Freeze | _freeze date_ | kernel.org | `pgpkeys.git` gets one last signed commit, the freeze commit, and becomes read-only. Its hash, the flag-day date and the late cutoff are published together. |
 | 2. Window | freeze to flag day (_window length_) | anchors first, then everyone | The first registry merge holds the anchors' person files and `anchors.json`. Everyone else registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and gets approved. Everyone who signs or checks patches installs the patatt fork and sets its keyring sources. |
 | 3. Flag day | _flag-day date_ | Linus, release tooling, every developer | Linus and the release tooling switch to files from `git vouch export`. GPG-signed tags and pulls stop being accepted. |
-| 4. Late cutoff | _late-cutoff date_ | nobody; every patch checker deletes one config line | Continuity claims against C are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
+| 4. Late cutoff | _late-cutoff date_ | nobody; every patch checker deletes one config line | Continuity claims against the freeze commit are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
 
 ## Kernel-team calls
 
@@ -44,7 +44,7 @@ adds a `people/*.json.asc`. The merge date counts, not the commit date.
 
 | Role | In the commands below | Does |
 |---|---|---|
-| kernel.org and the registry maintainer | `korg` | Freezes pgpkeys at C and publishes it. Merges each registry branch once `git vouch check` passes, and commits `anchors.json`. |
+| kernel.org and the registry maintainer | `korg` | Freezes pgpkeys and publishes the freeze commit. Merges each registry branch once `git vouch check` passes, and commits `anchors.json`. |
 | Anchor | `lena` | Registers first. Drafts and signs endorsements from her own GPG certifications. Approves maintainers. |
 | pgpkeys holder | `alice`, `bob`, `dave` | Ports pgpkeys, completes their person-file draft, adds a continuity proof. |
 | Developer with no GPG key (about 80% of maintainers) | `carol` | Registers fresh and collects fresh endorsements. |
@@ -58,10 +58,11 @@ on their own judgement, using MAINTAINERS and endorsements.
 
 ## What the commands assume
 
-Published with C, and used as shell variables below:
+Published with the freeze commit, and used as shell variables below:
 
-- `$C`, the frozen commit;
-- `$SIGNER`, the primary fingerprint of the key that signed C;
+- `$FREEZE_COMMIT`, the freeze commit's hash;
+- `$SIGNER`, the primary fingerprint of the key that signed the freeze
+  commit;
 - `$PGPKEYS`, `$REGISTRY` and `$LINUX`, the repository URLs.
 
 Each person runs their own commands on their own machine, from their home
@@ -73,13 +74,14 @@ own in their place.
 
 ## 1. Freeze
 
-kernel.org makes the last commit C to `pgpkeys.git`, signs it, makes the
-repository read-only, and publishes C, `$SIGNER`, the flag-day date and
-the late cutoff together.
+kernel.org makes the last commit to `pgpkeys.git`, the freeze commit,
+signs it, makes the repository read-only, and publishes the freeze
+commit, `$SIGNER`, the flag-day date and the late cutoff together.
 
-Nobody needs to verify C by hand: every `git-vouch-migrate` command
-checks C's signature by `$SIGNER` first and refuses to run otherwise. It
-reads pgpkeys only at C, never at a later commit.
+Nobody needs to verify the freeze commit by hand: every
+`git-vouch-migrate` command checks the freeze commit's signature by
+`$SIGNER` first and refuses to run otherwise. It reads pgpkeys only at
+the freeze commit, never at a later commit.
 
 ## 2. Window
 
@@ -98,7 +100,7 @@ their GPG key as a continuity proof:
 ```sh
 git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 git clone -q "$REGISTRY" registry
 cd registry
 git vouch register --from ~/drafts/people/lena.json ~/.ssh/id_ed25519.pub
@@ -111,9 +113,9 @@ git push -q origin HEAD:register-lena
 `port` writes one unsigned draft per person in pgpkeys, with a proposed
 handle, the name, the emails from unrevoked user IDs and `migratedFrom`.
 Everyone runs it themselves; it is deterministic from the public pgpkeys
-at C, so there is no central copy to trust. Find your own draft and read
-it before registering: the handle is permanent. `register --from` adds
-your SSH key and signs the file.
+at the freeze commit, so there is no central copy to trust. Find your
+own draft and read it before registering: the handle is permanent.
+`register --from` adds your SSH key and signs the file.
 
 The registry maintainer then merges the anchors' branches and commits
 `anchors.json` on top:
@@ -138,10 +140,10 @@ Pick your route:
 
 | You have | Route | Continuity proof |
 |---|---|---|
-| A pgpkeys key, not revoked by C | Complete your draft | `people/<handle>.json.asc` |
-| A pgpkeys key that expired (but was not revoked) by C | Extend it locally, then the same | `people/<handle>.json.asc` |
+| A pgpkeys key, not revoked by the freeze commit | Complete your draft | `people/<handle>.json.asc` |
+| A pgpkeys key that expired (but was not revoked) by the freeze commit | Extend it locally, then the same | `people/<handle>.json.asc` |
 | An ed25519, P-256 or RSA (2048+) authentication key or subkey on your pgpkeys key | Use it as your SSH key | The subkey signs your person file |
-| No pgpkeys key, or one revoked by C | Register fresh | None |
+| No pgpkeys key, or one revoked by the freeze commit | Register fresh | None |
 
 Every route needs an SSH key: ed25519, P-256, or RSA of 2048 to 16384
 bits. In `pgpkeys.git` at af88128 (2026-10-20), 602 of 645 unexpired
@@ -160,7 +162,7 @@ you then collect fresh endorsements.
 ```sh
 git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 git clone -q "$REGISTRY" registry
 cd registry
 git vouch register --from ~/drafts/people/alice.json ~/.ssh/id_ed25519.pub
@@ -173,12 +175,12 @@ git push -q origin HEAD:register-alice
 **With an expired key.** gpg refuses to sign with an expired key, so
 extend it in your local keyring first. Never publish the new expiry (do
 not send the key anywhere): the proof is judged against the key as it
-was at C, where expired is accepted.
+was at the freeze commit, where expired is accepted.
 
 ```sh
 git config --global user.signingKey ~/.ssh/id_ed25519.pub
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 git clone -q "$REGISTRY" registry
 cd registry
 git vouch register --from ~/drafts/people/bob.json ~/.ssh/id_ed25519.pub
@@ -200,7 +202,7 @@ the person file with it:
 
 ```sh
 git clone -q "$PGPKEYS" pgpkeys
-git-vouch-migrate port pgpkeys --commit "$C" --signer "$SIGNER" --out drafts
+git-vouch-migrate port pgpkeys --commit "$FREEZE_COMMIT" --signer "$SIGNER" --out drafts
 echo enable-ssh-support >>"${GNUPGHOME:-$HOME/.gnupg}/gpg-agent.conf"
 gpg --list-secret-keys --with-colons --with-keygrip |
     awk -F: '$1 == "sec" || $1 == "ssb" {auth = $1 == "ssb" && $12 ~ /a/}
@@ -267,12 +269,13 @@ endorsed; that is expected until their endorsements merge.
 
 ### Checking continuity proofs
 
-Anyone can check every continuity proof in the registry against C:
+Anyone can check every continuity proof in the registry against the
+freeze commit:
 
 ```sh
 git clone -q "$PGPKEYS" pgpkeys
 cd registry
-git-vouch-migrate verify-continuity ~/pgpkeys . --commit "$C" --signer "$SIGNER"
+git-vouch-migrate verify-continuity ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER"
 ```
 
 It prints one line per ported person file and exits 1 if any fails:
@@ -283,11 +286,11 @@ ok dave: openpgp4fpr:<fingerprint> by auth subkey <subkey fingerprint>
 fail <handle>: <reason>
 ```
 
-A proof holds only if the GPG key is not revoked at C (expired is
-accepted), every email in the person file is on an unrevoked user ID of
-that key, and no other person file claims the same fingerprint. The
-proof is judged against the version of your person file it was made
-for, found in the registry's history, so a later `add-key`,
+A proof holds only if the GPG key is not revoked at the freeze commit
+(expired is accepted), every email in the person file is on an unrevoked
+user ID of that key, and no other person file claims the same
+fingerprint. The proof is judged against the version of your person file
+it was made for, found in the registry's history, so a later `add-key`,
 `retire-key` or email change does not undo it, provided every version
 since was signed by a key current in the version before it (the change
 `git vouch check` warns about otherwise, such as lost-key recovery or
@@ -295,16 +298,17 @@ registering a deleted handle again, means you make a fresh `.asc`).
 
 ### Endorsements from GPG certifications
 
-GPG certifications are not ported as records. Each certifier drafts their
-own endorsements on their own machine, from the public pgpkeys at C and
-the registry, and signs only the ones that are right. Drafts are never
-generated centrally, and unsigned drafts never enter the registry.
+GPG certifications are not ported as records. Each certifier drafts
+their own endorsements on their own machine, from the public pgpkeys at
+the freeze commit and the registry, and signs only the ones that are
+right. Drafts are never generated centrally, and unsigned drafts never
+enter the registry.
 
 ```sh
 cd registry
 git fetch -q origin
 git switch -q -c endorse-lena origin/main
-git-vouch-migrate drafts ~/pgpkeys . --commit "$C" --signer "$SIGNER" --as lena \
+git-vouch-migrate drafts ~/pgpkeys . --commit "$FREEZE_COMMIT" --signer "$SIGNER" --as lena \
     --out ~/endorsement-drafts
 for f in ~/endorsement-drafts/endorsements/*/*.json; do
     cat "$f"
@@ -318,12 +322,12 @@ git push -q origin HEAD:endorse-lena
 
 `drafts --as` writes one draft per registered person whose continuity
 proof holds and whose GPG key the key in your own `migratedFrom`
-certified at C. It uses the latest certification you did not revoke,
-including SHA-1 certifications that GnuPG 2.4 rejects and ones that had
-expired by C: the draft is only a reminder, and your new SSH signature
-is what counts. You need no continuity proof yourself, only
-`migratedFrom` in your person file; certifications made with your other
-GPG keys are not read.
+certified at the freeze commit. It uses the latest certification you did
+not revoke, including SHA-1 certifications that GnuPG 2.4 rejects and
+ones that had expired by the freeze commit: the draft is only a
+reminder, and your new SSH signature is what counts. You need no
+continuity proof yourself, only `migratedFrom` in your person file;
+certifications made with your other GPG keys are not read.
 
 **Read every draft before you sign it.** `subjectName` comes from the
 subject's own person file, not from your certification; `subjectEmails`
@@ -417,15 +421,16 @@ From this date a GPG-signed tag or pull is not accepted.
 
 ## 4. Late cutoff
 
-Continuity claims against C are accepted until this date. Anyone who
-has not registered by then registers fresh, as `carol` did, and collects
-fresh endorsements. From this date registry maintainers merge no change
-that adds or alters `migratedFrom` or adds a `people/*.json.asc`; a
-branch merged after it is late, whenever it was committed.
+Continuity claims against the freeze commit are accepted until this
+date. Anyone who has not registered by then registers fresh, as `carol`
+did, and collects fresh endorsements. From this date registry
+maintainers merge no change that adds or alters `migratedFrom` or adds a
+`people/*.json.asc`; a branch merged after it is late, whenever it was
+committed.
 
 GPG-signed tags from before the flag day stay valid in history.
-Verifying them uses `gpg` with the archived `pgpkeys.git` at C. There is
-no manifest.
+Verifying them uses `gpg` with the archived `pgpkeys.git` at the freeze
+commit. There is no manifest.
 
 ## Patch signing
 
@@ -463,11 +468,11 @@ cutoff. The commands are in each guide's Patch signing section
 |---|---|---|
 | `git vouch check` fails right after `anchors.json` is committed | It names a handle with no person file | Merge the anchors' person files first, as in the first merge. |
 | gpg will not make your `.asc` | Your key has expired | Extend it locally with `gpg --quick-set-expire` and never publish the new expiry, as `bob` did. |
-| `port` prints `skip <fpr>: revoked` or `skip <fpr>: invalid at C` for your key | The key was revoked or invalid at C | No continuity proof is possible. Register fresh and collect fresh endorsements. |
+| `port` prints `skip <fpr>: revoked` or `skip <fpr>: invalid at the freeze commit` for your key | The key was revoked or invalid at the freeze commit | No continuity proof is possible. Register fresh and collect fresh endorsements. |
 | `port` prints `skip <fpr>: not a person` | It is a kernel.org list key, not yours | Use the draft for your own key, or register fresh. |
 | `port` prints `conflict <fpr>` or `skip <fpr>: no user ID with a usable name and email` for your key | Several keys share your email under different names, or no user ID gives a name or none gives an email | You can still prove continuity, which is all that endorsement drafts need. Copy any draft `port` wrote, set `keys` to `[]`, and put in your own `handle`, `name`, `emails` and `migratedFrom` (`openpgp4fpr:<fingerprint>`), with every email on an unrevoked user ID of that key; then continue with `register --from` and the `.asc` as above. The rehearsal does not cover a hand-written draft. |
 | `port` prints `skip keys/<file>: <reason>` | gpg did not fully import that file: a PGP-2 (v3) key, a revocation certificate whose key is not in keys/, or a partial import | `port` carries on without it. Before the freeze, fix or remove the file in pgpkeys and rerun `port`; after it, the key's holder registers fresh. |
-| `fail <handle>: <fpr> is revoked` | The key was revoked at C | No continuity proof is possible. Register fresh (without `migratedFrom`). |
+| `fail <handle>: <fpr> is revoked` | The key was revoked at the freeze commit | No continuity proof is possible. Register fresh (without `migratedFrom`). |
 | `fail <handle>: <email> is not on an unrevoked user ID of <fpr>` | Your person file has an email your GPG key does not | Before your branch is merged: remove that email from your draft, register again in a fresh registry checkout, and make a new `.asc`. |
 | `fail <handle>: no people/<handle>.json.asc, and no signature by an auth subkey of <fpr>` | No proof submitted, or the auth subkey is listed but another key signed the file | Add the `.asc`, or sign the person file with the auth subkey itself. |
 | `fail <handle>: people/<handle>.json.asc: signed by <X>, not <Y>` | The `.asc` was made with a different GPG key | Sign with the key in `migratedFrom` (`gpg -u <fingerprint>`). |
@@ -482,11 +487,11 @@ cutoff. The commands are in each guide's Patch signing section
 | `b4 am` prints `✓ Signed: openssh/...` with no `(key: vouch:...)` after it | The b4 that runs is not the b4 fork: it ignores `b4.attestation-recheck-hours`, and upstream b4 newer than 0.16 keeps a revoked key's pass for up to 24 hours | Install both forks with the guides' install line, and check that `command -v b4` is the b4 it installed. |
 
 **What continuity cannot catch.** Someone holding a GPG key that was
-stolen and not revoked by C can claim that person's identity, just as
-they can sign tags with it today. The duplicate-claim rule exposes this
-if the real holder also migrates, and the late cutoff ends it. If you
-doubt who holds your GPG key, revoke it in pgpkeys before the freeze and
-register fresh.
+stolen and not revoked by the freeze commit can claim that person's
+identity, just as they can sign tags with it today. The duplicate-claim
+rule exposes this if the real holder also migrates, and the late cutoff
+ends it. If you doubt who holds your GPG key, revoke it in pgpkeys
+before the freeze and register fresh.
 
 ## Scale
 
