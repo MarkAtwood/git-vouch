@@ -184,6 +184,11 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             "rhea": gpg.new_key("Rhea Rivest <rhea@example.org>"),
             "boris": gpg.new_key("Boris Both <boris@example.org>"),
             "tim": gpg.new_key("Tim Tiny <tim@example.org>"),
+            # One person: an older key with an auth subkey, a newer one without.
+            "olga_old": gpg.new_key("Olga Older <olga@example.org>"),
+            "olga_new": gpg.new_key(
+                "Olga Older <olga@example.org>", at="20200201T000000"
+            ),
             # Auth on the primary itself, with no auth subkey.
             "pia": gpg.new_key("Pia Primary <pia@example.org>", usage="sign,auth"),
             "sam1": gpg.new_key("Sam One <sam@example.com>"),
@@ -224,6 +229,7 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         gpg.add_key(fprs["boris"], "rsa2048", "auth")
         gpg.add_key(fprs["boris"], "ed25519", "auth")
         gpg.add_key(fprs["tim"], "rsa1024", "auth")
+        gpg.add_key(fprs["olga_old"], "ed25519", "auth")
         gpg(
             "--quick-add-uid",
             fprs["dave_new"],

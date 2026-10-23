@@ -109,9 +109,9 @@ def test_handles_from_awkward_local_parts(migrate: ModuleType) -> None:
 def test_port_report_counts(ported: Ported) -> None:
     summary = ported.stdout.splitlines()[-1]
     assert summary == (
-        "keys 21, live 16, expired 4, kernel.org list keys 1 (1 live), people 14, "
-        "drafts 14, "
-        "live keys with a reusable auth subkey 5 (5 in drafts)"
+        "keys 23, live 18, expired 4, kernel.org list keys 1 (1 live), people 15, "
+        "drafts 15, "
+        "live keys with a reusable auth subkey 6 (6 in drafts)"
     )
     fprs = ported.pgp.fprs
     assert f"skip {fprs['frank']}: revoked" in ported.stdout
@@ -125,7 +125,7 @@ def test_port_writes_one_draft_per_person(ported: Ported) -> None:
     fprs = ported.pgp.fprs
     got = drafts(ported)
     want = {"signer", "alice", "bob", "carol", "dave_new", "eve", "gina_old"}
-    want |= {"sam1", "sam2", "hank_new", "rhea", "boris", "tim", "pia"}
+    want |= {"sam1", "sam2", "hank_new", "rhea", "boris", "tim", "pia", "olga_old"}
     assert set(got) == {fprs[k] for k in want}
     assert got[fprs["dave_new"]]["handle"] == "dave"
     assert set(got[fprs["dave_new"]]["emails"]) == {
@@ -245,6 +245,17 @@ def test_port_derives_ssh_key_from_auth_capable_primary(ported: Ported) -> None:
     assert key["ssh"].split()[0] == "ssh-ed25519"
     # The point must be the primary's, from gpg's own dump of the key packet.
     assert b"\x40" + ssh_fields(key["ssh"])[-1] == ported.pgp.points[fpr][fpr]
+
+
+def test_port_prefers_key_with_auth_over_newer_key(ported: Ported) -> None:
+    fprs = ported.pgp.fprs
+    got = drafts(ported)
+    assert fprs["olga_new"] not in got
+    (key,) = got[fprs["olga_old"]]["keys"]
+    assert key["ssh"].split()[0] == "ssh-ed25519"
+    assert f"merge {fprs['olga_new']}: same person as {fprs['olga_old']}" in (
+        ported.stdout
+    )
 
 
 def test_port_skips_rsa_auth_subkey_below_2048(ported: Ported) -> None:
