@@ -689,3 +689,71 @@ def test_fresh_proof_after_recovery_survives_a_signed_add_key(
     proc = verify(pgpkeys, registry, "alice")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert f"ok alice: openpgp4fpr:{alice} by .asc" in proc.stdout
+
+
+def test_stale_proof_gate_reads_check_data_not_warning_text(
+    migrate: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    pgpkeys: Pgpkeys,
+    registry: Path,
+    ed25519_key: Any,
+    ecdsa_key: Any,
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # the proof, made for v1
+    commit_all(registry, "v1")
+    write_person(registry, "alice", alice, ["alice@example.org"], [ecdsa_key.pubkey])
+    ssh_sign(path, ecdsa_key.private)
+    commit_all(registry, "v2")
+    head = ["git", "rev-parse", "HEAD"]
+    out = subprocess.run(head, cwd=registry, check=True, capture_output=True)
+    v2 = out.stdout.decode().strip()
+    # A reworded warning must not reopen the gate: drop the text entirely.
+    check = migrate.vouch.check_registry
+    monkeypatch.setattr(
+        migrate.vouch, "check_registry", lambda root: check(root)._replace(warnings=[])
+    )
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    with migrate.keyring() as home:
+        pgp = migrate.Pgpkeys(pgpkeys.repo, pgpkeys.commit, home)
+        found = migrate.verify_continuity(pgp, registry, ["alice"])
+    assert "alice" not in found.proven
+    assert "a version since needs its own" in found.failed["alice"]
+    assert found.check.unchained == {"alice": [v2]}
+
+
+def test_stale_proof_gate_covers_an_uncommitted_change(
+    migrate: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    pgpkeys: Pgpkeys,
+    registry: Path,
+    ed25519_key: Any,
+    ecdsa_key: Any,
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)  # the proof, made for v1
+    commit_all(registry, "v1")
+    # v2 replaces the key without a chain and is left in the working tree.
+    write_person(registry, "alice", alice, ["alice@example.org"], [ecdsa_key.pubkey])
+    ssh_sign(path, ecdsa_key.private)
+    check = migrate.vouch.check_registry
+    monkeypatch.setattr(
+        migrate.vouch, "check_registry", lambda root: check(root)._replace(warnings=[])
+    )
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    with migrate.keyring() as home:
+        pgp = migrate.Pgpkeys(pgpkeys.repo, pgpkeys.commit, home)
+        found = migrate.verify_continuity(pgp, registry, ["alice"])
+    assert "alice" not in found.proven
+    assert "a version since needs its own" in found.failed["alice"]
+    assert found.check.unchained == {"alice": ["the working tree"]}

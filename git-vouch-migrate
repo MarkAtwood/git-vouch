@@ -33,6 +33,9 @@ from typing import NamedTuple, Optional
 
 def _load_vouch() -> ModuleType:
     """Return the git-vouch script next to this one (or else on PATH), loaded as a module."""
+    # ponytail: a ModuleType, so every vouch.* use is Any to a type checker
+    # and a rename in git-vouch breaks migrate only at run time (the tests
+    # catch it). Upgrade path: ship git-vouch as an importable module too.
     path = Path(__file__).resolve().with_name("git-vouch")
     if not path.is_file():
         found = shutil.which("git-vouch")
@@ -54,7 +57,6 @@ vouch = _load_vouch()
 VouchError = vouch.VouchError
 
 FPR_RE = re.compile(r"[0-9A-F]{40}")
-MIGRATED_RE = re.compile(r"openpgp4fpr:([0-9A-Fa-f]{40})")
 # gpg status words that say why a detached signature did not verify.
 GPG_FAILURES = ("NO_PUBKEY", "BADSIG", "REVKEYSIG", "EXPSIG", "ERRSIG")
 # Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts;
@@ -801,19 +803,10 @@ def verify_continuity(
             history cannot be read.
     """
     result = vouch.check_registry(root)
-    claims: dict[str, str] = {}
+    claims = {
+        h: p.migrated_from for h, p in sorted(result.people.items()) if p.migrated_from
+    }
     failed: dict[str, str] = {}
-    for handle in sorted(result.people):
-        obj = json.loads(vouch.read_capped(root, f"people/{handle}.json"))
-        if "migratedFrom" not in obj:
-            continue
-        m = MIGRATED_RE.fullmatch(str(obj["migratedFrom"]))
-        if m is None:
-            failed[handle] = (
-                "migratedFrom: must be openpgp4fpr: and a 40-hex fingerprint"
-            )
-        else:
-            claims[handle] = m.group(1).upper()
     # git-vouch itself rejects a malformed one, leaving the file out of people.
     for problem in result.problems:
         m = re.fullmatch(r"people/(.+)\.json: (migratedFrom: .*)", problem)
@@ -825,7 +818,6 @@ def verify_continuity(
     duplicates = {f: hs for f, hs in sorted(by_fpr.items()) if len(hs) > 1}
     keys = {k.fpr: k for k in pgp.keys()}
     proven: dict[str, Proof] = {}
-    unchained = r"people/%s\.json: WARNING: changed at (.+?) without a signature "
     for handle, fpr in claims.items():
         if handles and handle not in handles:
             continue
@@ -842,11 +834,7 @@ def verify_continuity(
                     handle,
                     keys[fpr],
                     result.revoked,
-                    [
-                        m.group(1)
-                        for w in result.warnings
-                        if (m := re.match(unchained % re.escape(handle), w))
-                    ],
+                    result.unchained.get(handle, []),
                 )
             except VouchError as e:
                 failed[handle] = str(e)

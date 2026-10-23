@@ -1131,6 +1131,9 @@ class CheckResult(NamedTuple):
     ended: dict[str, dict[str, datetime]]
     # (handle, time or None for now) -> what they held then (see check_registry)
     held_at: Callable[[str, Optional[datetime]], Optional[Held]]
+    # handle -> each commit (or "the working tree") where its person file
+    # changed without a signature by a key current in the version before
+    unchained: dict[str, list[str]]
 
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
@@ -1478,6 +1481,7 @@ def check_registry(root: Path) -> CheckResult:
     problems: list[str] = []
     voids: list[str] = []
     warnings: list[str] = []
+    unchained: dict[str, list[str]] = {}
     try:
         anchors = parse_anchors(read_capped(root, "anchors.json"))
     except VouchError as e:
@@ -1817,6 +1821,7 @@ def check_registry(root: Path) -> CheckResult:
             new_dids = (
                 ", ".join(k.did for k in version.keys if k.retired is None) or "none"
             )
+            unchained.setdefault(handle, []).append(history.name(i))
             warnings.append(
                 f"{rel}: WARNING: changed at {history.name(i)} without a signature"
                 " by any unrevoked key current in the previous version; only registry"
@@ -2220,7 +2225,16 @@ def check_registry(root: Path) -> CheckResult:
         f"commit {c}: committer date out of range" for c in sorted(history.far)
     )
     return CheckResult(
-        people, tiers, revoked, emails, problems, voids, warnings, ended, held_at
+        people,
+        tiers,
+        revoked,
+        emails,
+        problems,
+        voids,
+        warnings,
+        ended,
+        held_at,
+        unchained,
     )
 
 
