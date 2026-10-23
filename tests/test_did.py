@@ -250,7 +250,12 @@ def test_rsa_did_carries_ssh_keygen_pkcs1(vouch: ModuleType, rsa_key: Key) -> No
 # kernel's (maintainer-pgp-guide.rst), below OpenSSH's 1024.
 @pytest.mark.parametrize(
     ("bits", "openssh_ok", "accepted"),
-    [(2047, True, False), (2048, True, True), (16384, True, True), (16385, False, False)],
+    [
+        (2047, True, False),
+        (2048, True, True),
+        (16384, True, True),
+        (16385, False, False),
+    ],
 )
 def test_rsa_size_bounds(
     vouch: ModuleType, tmp_path: Path, bits: int, openssh_ok: bool, accepted: bool
@@ -285,10 +290,14 @@ def test_rsa_bad_exponents_rejected(vouch: ModuleType, e: int) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        ssh_line(b"ssh-rsa", b"\x00\x01\x00\x01", b"\x00" + RSA_TEST_N.to_bytes(256, "big")),
+        ssh_line(
+            b"ssh-rsa", b"\x00\x01\x00\x01", b"\x00" + RSA_TEST_N.to_bytes(256, "big")
+        ),
         # The top bit is set, so without its leading zero n is negative.
         rsa_line(RSA_TEST_N, 65537, n_raw=RSA_TEST_N.to_bytes(256, "big")),
-        rsa_line(RSA_TEST_N, 65537, n_raw=b"\x00\x00" + RSA_TEST_N.to_bytes(256, "big")),
+        rsa_line(
+            RSA_TEST_N, 65537, n_raw=b"\x00\x00" + RSA_TEST_N.to_bytes(256, "big")
+        ),
     ],
 )
 def test_rsa_non_minimal_mpint_rejected(vouch: ModuleType, line: str) -> None:
@@ -319,9 +328,11 @@ def _reseq(body: bytes) -> bytes:
         lambda d: _reseq(d[4:-5] + b"\x02\x04\x00\x01\x00\x01"),  # padded e
         lambda d: b"\x31" + d[1:],  # SET, not SEQUENCE
         # A minimal 1024-bit key: well-formed DER, refused for its size.
-        lambda d: b"\x30\x81\x89\x02\x81\x81\x00\x80"
-        + b"\x00" * 126
-        + b"\x01\x02\x03\x01\x00\x01",
+        lambda d: (
+            b"\x30\x81\x89\x02\x81\x81\x00\x80"
+            + b"\x00" * 126
+            + b"\x01\x02\x03\x01\x00\x01"
+        ),
     ],
 )
 def test_rsa_bad_der_dids_rejected(vouch: ModuleType, mutate: object) -> None:
