@@ -612,7 +612,10 @@ itself stays a CLI. Facts about `verify-trust` come from
   for any repository; each project decides whether that suffices. The
   resource is validated against `verify-trust`'s grammar and echoed.
 - **Time:** answers are for now. If a request carries `context.time`,
-  the bridge answers as of that time (`git vouch query --at`).
+  the bridge answers as of that time (`git vouch query --at`), with the
+  tier, automation status and emails held then, read from the registry's
+  git history, less any tier the current history ends at or before then;
+  export answers for now, so the two can differ for past times.
 - **Freshness:** it syncs on a timer and refuses to answer, with an
   error that makes `verify-trust` fail closed, once 24 hours pass
   without a successful sync.

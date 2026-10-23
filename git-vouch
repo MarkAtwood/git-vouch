@@ -17,7 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional, Union
@@ -1056,6 +1056,14 @@ class Void(Exception):
     """A record that is well formed but has no effect, e.g. signed by a key since revoked."""
 
 
+class Held(NamedTuple):
+    """What a person held at a time, as ``query`` reports it."""
+
+    tier: Optional[str]
+    automation: bool
+    emails: tuple[str, ...]  # endorsed, as listed
+
+
 class CheckResult(NamedTuple):
     """What ``check_registry`` found."""
 
@@ -1069,6 +1077,8 @@ class CheckResult(NamedTuple):
     # handle -> tier -> when it ended, for tiers deleted or demoted (see
     # tier_ends) and for anchors dropped from anchors.json
     ended: dict[str, dict[str, datetime]]
+    # (handle, time or None for now) -> what they held then (see check_registry)
+    held_at: Callable[[str, Optional[datetime]], Optional[Held]]
 
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
@@ -1349,6 +1359,17 @@ def check_registry(root: Path) -> CheckResult:
     ``date``, provided the record verified at the parent commit. A record
     that does not verify ends nothing. An anchor ends at the committer date
     of the commit that dropped them from ``anchors.json``.
+
+    ``held_at(handle, when)`` is what a valid person held at ``when``, for
+    ``query --at``: the registry then is the newest commit on HEAD's
+    first-parent line dated at or before ``when``. Their tier there, or a
+    tier that ended after ``when`` as that commit's history has it, whichever
+    ranks highest (a human tier wins over automation); automation if that
+    tier is or that commit's person file names an accountable maintainer;
+    the emails that person file lists and that are endorsed now. None if
+    no person file of theirs parses at that commit. Revocations count at
+    every time, as everywhere. Export answers for now instead, so it can
+    differ for past times.
 
     Raises:
         VouchError: ssh-keygen cannot be run, or the history cannot be read.
@@ -1775,7 +1796,8 @@ def check_registry(root: Path) -> CheckResult:
         # record was added, so stepping down later voids nothing.
         accountables: list[tuple[str, int]] = []
         if t.tier == "automation":
-            require_accountable(parsed[t.subject][0])
+            # The person file at i, so a bot since made human was one then.
+            require_accountable(person_at(t.subject, i) or parsed[t.subject][0])
             for a in added:
                 person = person_at(t.subject, a)
                 accountable = (person.accountable if person else None) or ""
@@ -1841,47 +1863,47 @@ def check_registry(root: Path) -> CheckResult:
         else:
             problems.append(str(result))
 
-    def tier_ends(handle: str) -> dict[str, datetime]:
-        # Walk back from the working tree through every version of the tier
-        # record; a tier held more than once ends at its latest end.
+    stood: dict[tuple[str, int], list[tuple[int, Union[str, Void, None]]]] = {}
+
+    def standing(handle: str, i: int) -> list[tuple[int, Union[str, Void, None]]]:
+        # The versions of the tier record in effect at i: a record that does
+        # not verify changes nothing, so the ones before it stand. Walked,
+        # not recursed, so merges of unverified records cannot blow it up.
+        # ponytail: each position walks its own unverified run, so a long
+        # run costs quadratic time; share the walk if that bites.
         rel = f"tiers/{handle}.json"
+        if (handle, i) not in stood:
+            found: dict[int, Union[str, Void, None]] = {}
+            todo, seen = [i], set()
+            while todo:
+                j = todo.pop()
+                if j in seen:
+                    continue
+                seen.add(j)
+                held = None if history.at(rel, j) is None else judge(handle, j)
+                if isinstance(held, VouchError):
+                    todo += [p for a in adding(rel, j) for p in history.parents[a]]
+                else:
+                    found[j] = held
+            stood[handle, i] = list(found.items())
+        return stood[handle, i]
 
-        stood: dict[int, list[tuple[int, Union[str, Void, None]]]] = {}
-
-        def standing(i: int) -> list[tuple[int, Union[str, Void, None]]]:
-            # The versions in effect at i: a record that does not verify
-            # changes nothing, so the ones before it stand. Walked, not
-            # recursed, so merges of unverified records cannot blow it up.
-            # ponytail: each position walks its own unverified run, so a
-            # long run costs quadratic time; share the walk if that bites.
-            if i not in stood:
-                found: dict[int, Union[str, Void, None]] = {}
-                todo, seen = [i], set()
-                while todo:
-                    j = todo.pop()
-                    if j in seen:
-                        continue
-                    seen.add(j)
-                    held = None if history.at(rel, j) is None else judge(handle, j)
-                    if isinstance(held, VouchError):
-                        todo += [p for a in adding(rel, j) for p in history.parents[a]]
-                    else:
-                        found[j] = held
-                stood[i] = list(found.items())
-            return stood[i]
-
+    def tier_ends(handle: str, start: int) -> dict[str, datetime]:
+        # Walk back from ``start`` through every version of the tier record;
+        # a tier held more than once ends at its latest end.
+        rel = f"tiers/{handle}.json"
         ends: dict[str, datetime] = {}
-        todo, seen = [j for j, _ in standing(final)], set()
+        todo, seen = [j for j, _ in standing(handle, start)], set()
         while todo:
             i = todo.pop()
             if i in seen:
                 continue
             seen.add(i)
-            held = standing(i)[0][1]
+            held = standing(handle, i)[0][1]
             record = record_at(rel, i)
             for a in adding(rel, i):
                 for p in history.parents[a]:
-                    for j, was in standing(p):
+                    for j, was in standing(handle, p):
                         todo.append(j)
                         if not isinstance(was, str):
                             continue
@@ -1896,25 +1918,34 @@ def check_registry(root: Path) -> CheckResult:
                         ends[was] = max(end, ends.get(was, end))
         return ends
 
+    def anchor_ends(start: int) -> dict[str, datetime]:
+        # Like a deleted tier record, an anchor ends at the latest committer
+        # date of a commit at or before ``start`` that dropped them from
+        # anchors.json.
+        # ponytail: an anchors.json version that does not parse lists nobody,
+        # so it ends every anchor its parent listed; review keeps it out.
+        ends: dict[str, datetime] = {}
+        for j, _ in history.versions.get("anchors.json", []):
+            if j != start and not history.before(j, start):
+                continue
+            for a in history.added("anchors.json", j):
+                for p in history.parents[a]:
+                    for handle in set(anchors_at(p)) - set(anchors_at(j)):
+                        end = history.date(a)
+                        ends[handle] = max(end, ends.get(handle, end))
+        return ends
+
     ended: dict[str, dict[str, datetime]] = {}
     for rel in history.versions:
         handle = rel[len("tiers/") : -len(".json")]
         if rel == f"tiers/{handle}.json" and handle in people and handle not in anchors:
-            ends = tier_ends(handle)
+            ends = tier_ends(handle, final)
             if ends:
                 ended[handle] = ends
-    # Like a deleted tier record, an anchor ends at the latest committer date
-    # of a commit that dropped them from anchors.json.
-    # ponytail: an anchors.json version that does not parse lists nobody, so
-    # it ends every anchor its parent listed; review keeps it out.
-    for j, _ in history.versions.get("anchors.json", []):
-        for a in history.added("anchors.json", j):
-            for p in history.parents[a]:
-                for handle in set(anchors_at(p)) - set(anchors_at(j)):
-                    if handle in people and handle not in anchors:
-                        ends = ended.setdefault(handle, {})
-                        end = history.date(a)
-                        ends["anchor"] = max(end, ends.get("anchor", end))
+    for handle, end in anchor_ends(final).items():
+        if handle in people and handle not in anchors:
+            ends = ended.setdefault(handle, {})
+            ends["anchor"] = max(end, ends.get("anchor", end))
 
     claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
@@ -1973,7 +2004,49 @@ def check_registry(root: Path) -> CheckResult:
                 f" is also claimed by {others}"
             )
 
-    return CheckResult(people, tiers, revoked, emails, problems, voids, warnings, ended)
+    def held_at(handle: str, when: Optional[datetime]) -> Optional[Held]:
+        # The registry at ``when`` is the newest commit on HEAD's first-parent
+        # line, the registry's own merges, dated at or before it; None is
+        # now, the working tree.
+        # ponytail: a registry without commits has no history to bound by,
+        # so its files count at every time.
+        i: Optional[int] = final
+        if when is not None and history.commits:
+            while i is not None and history.date(i) > when:
+                i = history.parents[i][0] if history.parents[i] else None
+        person = None if i is None else person_at(handle, i)
+        if i is None or person is None or handle not in people:
+            return None
+        when = when or datetime.now(timezone.utc)
+        held = [t for _, t in standing(handle, i) if isinstance(t, str)]
+        if handle in anchors_at(i):
+            held.append("anchor")
+        ends = {**tier_ends(handle, i), "anchor": anchor_ends(i).get(handle, when)}
+        held += [t for t, end in ends.items() if when < end]
+        # An end committed after ``when`` still counts from its own date, as
+        # in export, so query never grants more than export for ``when``.
+        # ponytail: a tier ended, granted again and ended again keeps only
+        # its latest end, so an earlier end committed after ``when`` is
+        # missed; record every end per tier if that bites.
+        gone = {**tier_ends(handle, final), "anchor": anchor_ends(final).get(handle)}
+        gone = {t for t, end in gone.items() if end is not None and end <= when}
+        held = [t for t in held if t not in gone]
+        humans = [t for t in held if t != "automation"]
+        tier = min(humans, key=RANK.__getitem__) if humans else None
+        tier = tier or ("automation" if held else None)
+        # ponytail: endorsements are judged on the tree alone, so one made
+        # after ``when`` counts at ``when``.
+        ok = endorsed.get(handle, set())
+        return Held(
+            tier,
+            tier == "automation"
+            or (person.accountable is not None and "automation" not in gone),
+            tuple(m for m in person.emails if m.lower() in ok),
+        )
+
+    return CheckResult(
+        people, tiers, revoked, emails, problems, voids, warnings, ended, held_at
+    )
 
 
 def _report(result: CheckResult) -> None:
@@ -2373,31 +2446,15 @@ def _rfc3339(text: str) -> datetime:
     )
 
 
-def tier_at(result: CheckResult, handle: str, when: datetime) -> Optional[str]:
-    """Return the tier ``allowed_signers`` would apply to ``handle`` at ``when``.
-
-    That is the current tier, or a tier that ended after ``when`` (see
-    ``check_registry``), whichever ranks highest; a human tier wins over
-    automation. None means no tier. Tiers have no start bound, as in
-    export: a tier granted after ``when`` counts at ``when``, so this is
-    not the tier held at ``when``.
-    """
-    held = [t for t, end in result.ended.get(handle, {}).items() if when < end]
-    if handle in result.tiers:
-        held.append(result.tiers[handle])
-    humans = [t for t in held if t != "automation"]
-    if humans:
-        return min(humans, key=RANK.__getitem__)
-    return "automation" if held else None
-
-
 def cmd_query(args: argparse.Namespace) -> int:
     """Print as JSON who holds a did:key, their tier and the key's validity at a time.
 
-    The time is ``--at``, else now. A key is valid from ``added`` until
-    ``retired``; a revoked key is never valid. ``automation`` is true for a
-    bot's key. The exit status is 1, with ``handle`` null, if no valid
-    person file lists the key.
+    The time is ``--at``, else now. The tier, ``automation`` (true for a
+    bot's key) and emails are those held then, from the registry's git
+    history (see ``check_registry``). A key is valid from ``added`` until
+    ``retired``; a revoked key is never valid. The exit status is 1, with
+    ``handle`` null, if no valid person file lists the key, or if its
+    person had no person file then.
 
     Raises:
         VouchError: the registry check fails, so nothing is printed.
@@ -2429,14 +2486,14 @@ def cmd_query(args: argparse.Namespace) -> int:
         for key in person.keys
         if key.did == did
     ]
-    if found:
+    held = result.held_at(found[0][0].handle, args.at) if found else None
+    if held is not None:
         person, key = found[0]
-        tier = tier_at(result, person.handle, when)
         answer.update(
             handle=person.handle,
-            tier=tier,
-            automation=tier == "automation" or person.accountable is not None,
-            emails=list(result.emails[person.handle]),
+            tier=held.tier,
+            automation=held.automation,
+            emails=list(held.emails),
             added=key.added.strftime(DATE_FORMAT),
             retired=key.retired and key.retired.strftime(DATE_FORMAT),
             valid=did not in result.revoked
@@ -2444,7 +2501,7 @@ def cmd_query(args: argparse.Namespace) -> int:
             and (key.retired is None or when < key.retired),
         )
     print(json.dumps(answer, indent=2))
-    return 0 if found else 1
+    return 0 if held is not None else 1
 
 
 def cmd_keys(args: argparse.Namespace) -> int:

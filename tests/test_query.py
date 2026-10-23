@@ -182,6 +182,185 @@ def test_tier_at_time_follows_demotion(
     assert answer(r.root, gregkh)["tier"] == "contributor"
 
 
+T0 = "2026-01-01T12:00:00Z"  # after the first commit, before the second
+T1 = "2026-01-02T00:00:00Z"  # the second commit
+
+
+def base(tmp_path: Path, keys: Callable[[str], Key]) -> GitRegistry:  # noqa: F811
+    """Return an uncommitted registry: anchor torvalds and maintainer gregkh."""
+    r = GitRegistry(tmp_path / "registry")
+    r.anchors("torvalds")
+    r.person("torvalds", keys("torvalds"))
+    r.person("gregkh", keys("gregkh"))
+    r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
+    return r
+
+
+def promoted_bot(tmp_path: Path, keys: Callable[[str], Key]) -> GitRegistry:  # noqa: F811
+    """bot is automation with an endorsed email from the first commit until
+    the second, which drops its accountable maintainer and makes it a
+    contributor."""
+    r = base(tmp_path, keys)
+    r.person("bot", keys("bot"), accountable="gregkh")
+    r.tier("bot", "automation", "gregkh", keys("gregkh"))
+    r.endorse("bot", keys("bot"), "gregkh", keys("gregkh"))
+    r.commit()
+    r.person("bot", keys("bot"))
+    r.tier("bot", "contributor", "gregkh", keys("gregkh"), T1)
+    r.commit()
+    return r
+
+
+def test_promoted_after_time_reads_old_tier(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    r = base(tmp_path, keys)
+    r.tier("gregkh", "contributor", "torvalds", keys("torvalds"))
+    r.commit()
+    r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
+    r.commit()
+    gregkh = did(keys("gregkh"))
+    assert answer(r.root, gregkh, "--at", T0)["tier"] == "contributor"
+    assert answer(r.root, gregkh, "--at", T1)["tier"] == "maintainer"
+    assert answer(r.root, gregkh)["tier"] == "maintainer"
+
+
+def test_automation_until_promotion(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    r = promoted_bot(tmp_path, keys)
+    bot = did(keys("bot"))
+    then = answer(r.root, bot, "--at", T0)
+    assert (then["tier"], then["automation"], then["emails"], then["valid"]) == (
+        "automation",
+        True,
+        ["bot@example.org"],
+        True,
+    )
+    now = answer(r.root, bot)
+    assert (now["tier"], now["automation"]) == ("contributor", False)
+
+
+def test_demoted_after_time_reads_old_tier(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    r = base(tmp_path, keys)
+    r.commit()
+    r.tier("gregkh", "contributor", "torvalds", keys("torvalds"), T1)
+    r.commit()
+    gregkh = did(keys("gregkh"))
+    assert answer(r.root, gregkh, "--at", T0)["tier"] == "maintainer"
+    assert answer(r.root, gregkh, "--at", T1)["tier"] == "contributor"
+
+
+def test_demotion_dated_before_its_commit_ends_the_old_tier_at_its_date(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """The contributor record is dated 06:00 on the first day but committed on
+    the second: maintainer ends at 06:00 (DESIGN.md, Demotion), and at T0 the
+    contributor record is not in the history yet, so no tier is held."""
+    r = base(tmp_path, keys)
+    r.commit()
+    r.tier(
+        "gregkh", "contributor", "torvalds", keys("torvalds"), "2026-01-01T06:00:00Z"
+    )
+    r.commit()
+    gregkh = did(keys("gregkh"))
+    assert (
+        answer(r.root, gregkh, "--at", "2026-01-01T05:00:00Z")["tier"] == "maintainer"
+    )
+    assert answer(r.root, gregkh, "--at", T0)["tier"] is None
+    assert answer(r.root, gregkh, "--at", T1)["tier"] == "contributor"
+
+
+def test_dropped_accountable_does_not_revive_an_ended_tier(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """alice, a maintainer, is made automation on the second day (ending
+    maintainer then), drops her accountable maintainer on the third and
+    restores it on the fourth. On the third the automation record does not
+    verify, but maintainer has still ended."""
+    r = base(tmp_path, keys)
+    r.person("alice", keys("alice"))
+    r.tier("alice", "maintainer", "torvalds", keys("torvalds"))
+    r.commit()
+    r.person("alice", keys("alice"), accountable="gregkh")
+    r.tier("alice", "automation", "gregkh", keys("gregkh"), T1)
+    r.commit()
+    r.person("alice", keys("alice"))
+    r.commit()
+    r.person("alice", keys("alice"), accountable="gregkh")
+    r.commit()
+    alice = did(keys("alice"))
+    got = answer(r.root, alice, "--at", "2026-01-03T12:00:00Z")
+    assert (got["tier"], got["automation"]) == (None, False)
+    got = answer(r.root, alice, "--at", "2026-01-04T12:00:00Z")
+    assert (got["tier"], got["automation"]) == ("automation", True)
+
+
+def test_emails_come_from_the_person_file_at_time(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """alice lists a@example.org in the first commit and b@example.org in the
+    second; gregkh endorses each."""
+    r = base(tmp_path, keys)
+    r.person("alice", keys("alice"), emails=("a@example.org",))
+    r.tier("alice", "contributor", "gregkh", keys("gregkh"))
+    r.endorse(
+        "alice", keys("alice"), "gregkh", keys("gregkh"), 1, emails=("a@example.org",)
+    )
+    r.commit()
+    r.person("alice", keys("alice"), emails=("b@example.org",))
+    r.endorse(
+        "alice", keys("alice"), "gregkh", keys("gregkh"), 2, emails=("b@example.org",)
+    )
+    r.commit()
+    alice = did(keys("alice"))
+    assert answer(r.root, alice, "--at", T0)["emails"] == ["a@example.org"]
+    assert answer(r.root, alice)["emails"] == ["b@example.org"]
+
+
+def test_time_before_the_handle_existed_is_unknown(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """gregkh's person file arrives in the second commit; torvalds's in the first."""
+    r = GitRegistry(tmp_path / "registry")
+    r.anchors("torvalds")
+    r.person("torvalds", keys("torvalds"))
+    r.commit()
+    r.person("gregkh", keys("gregkh"))
+    r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
+    r.commit()
+    for name, at in [("gregkh", T0), ("torvalds", "2025-12-31T23:59:59Z")]:
+        proc = query(r.root, did(keys(name)), "--at", at)
+        assert proc.returncode == 1, proc.stderr
+        got = json.loads(proc.stdout)
+        assert (got["handle"], got["tier"], got["emails"]) == (None, None, [])
+    assert answer(r.root, did(keys("gregkh")), "--at", T1)["tier"] == "maintainer"
+    assert answer(r.root, did(keys("torvalds")), "--at", T0)["tier"] == "anchor"
+
+
+def test_later_revocation_voids_a_past_tier(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """alice's tier was approved with the gregkh key that torvalds revokes later."""
+    r = base(tmp_path, keys)
+    r.person("alice", keys("alice"))
+    r.tier("alice", "contributor", "gregkh", keys("gregkh"))
+    r.commit()
+    r.revoke("gregkh", keys("gregkh"), keys("torvalds"))
+    r.commit()
+    assert answer(r.root, did(keys("alice")), "--at", T0)["tier"] is None
+
+
 def test_refuses_on_registry_problem(
     reg: Registry,  # noqa: F811
     keys: Callable[[str], Key],  # noqa: F811

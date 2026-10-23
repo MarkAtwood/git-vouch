@@ -1208,6 +1208,29 @@ def test_automation_replaced_by_human_ends_at_the_new_records_date(
     )
 
 
+def test_bot_made_human_still_ends_automation_at_the_new_records_date(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    """As above, but the person file also drops accountable: the automation
+    record is judged against the person file of its own commit."""
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "gregkh", key("gregkh"))
+    reg.commit()
+    reg.person("bot", key("bot"))
+    reg.tier("bot", "contributor", "gregkh", key("gregkh"), "2026-02-01T00:00:00Z")
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.tiers["bot"] == "contributor"
+    data, sig = sign_file(tmp_path, key("bot"), "file")
+    out = export(reg, tmp_path, "--min-tier", "maintainer", "--include-automation")
+    assert ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260115000000Z"
+    )
+    assert not ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260202000000Z"
+    )
+
+
 def test_bot_switching_accountable_needs_a_new_tier_record(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
 ) -> None:
