@@ -315,13 +315,16 @@ git push -q origin HEAD:demote-alice
 
 <!-- merge demote-alice -->
 
-Her maintainer tier ends at the new record's `date`. A tag she signs
-after it (here as `alice`):
+Her maintainer tier ends at the new record's `date`; the export adds an
+hour to every end, to get around an OpenSSH 9.6 time-zone bug (see
+DESIGN.md). A tag she signs more than an hour after it (here dated two
+hours on, as `alice`):
 
 <!-- as alice -->
 ```sh
 cd linux
-git tag -s -m "for-7.0 from alice" alice-7.0
+GIT_COMMITTER_DATE="$(($(date +%s) + 7200)) +0000" \
+    git tag -s -m "for-7.0 from alice" alice-7.0
 git push -q origin alice-7.0
 ```
 
@@ -339,8 +342,9 @@ git verify-tag alice-7.0    # fails: below maintainer
 
 To remove someone's tier entirely, without suspecting their key, the
 registry maintainer deletes their file under `tiers/` in a reviewed
-merge; their keys then get `valid-before` set to that commit's date. The
-deletion is unsigned, so like `anchors.json` it rests on review alone.
+merge; their keys then get `valid-before` set to that commit's date, plus
+the hour. The deletion is unsigned, so like `anchors.json` it rests on
+review alone.
 
 ### Revoke a compromised key
 
@@ -433,12 +437,10 @@ nothing; only the new warning needs a decision.
 A merger who let a swapped key through would hand its holder alice's
 tier and endorsements, so this check is the only thing standing between
 a lost-key recovery and an account takeover. Her tier carries over.
-Your endorsement of her named the key now revoked, and `check` currently
-reports it void, so her email is not exported until someone endorses
-her again. Whether an endorsement should instead carry over when the key
-it names is revoked is an open design question; until it is decided,
-confirm her new key as `vouching.md` describes and endorse again (here
-as `lena`):
+Your endorsement of her named the key now revoked; it still carries over
+to her new key, as on rotation, so her email stays exported. Confirming
+her new key as `vouching.md` describes and endorsing it again is
+encouraged, not enforced (here as `lena`):
 
 <!-- as lena -->
 ```sh

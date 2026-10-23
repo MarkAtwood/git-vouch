@@ -42,6 +42,10 @@ What follows from the binding:
   evidence. If that key may be lost or stolen, revoke it rather than
   retiring it: the signing time comes from the signer, so whoever holds a
   retired key can backdate endorsements. Then re-endorse with a new key.
+- **Their key's fate matters less.** If the key you endorsed is revoked,
+  your endorsement is not void: it carries over to their later keys, as
+  on rotation. After a compromise, re-confirming that the new key is
+  theirs, and endorsing it, is encouraged but not enforced.
 - **It is public.** The registry, including who endorsed whom and your
   note, is public by design. There are no privacy features.
 

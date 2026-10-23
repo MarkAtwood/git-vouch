@@ -279,10 +279,9 @@ git verify-tag bob-6.99
 ```
 
 OpenSSH 9.6 reads the time git passes it as standard time, an hour
-late while your timezone is on daylight saving time. So under daylight
-saving time, a signature made less than an hour before its key was
-retired fails `verify-commit` and `verify-tag` with
-`No principal matched`; run them with `TZ=UTC`.
+late while your timezone is on daylight saving time. The export allows
+for that by ending every key an hour after its retirement, so a
+signature made just before it still verifies (see DESIGN.md).
 
 Your `.asc` no longer covers the re-signed person file. That matters
 only if you still want endorsement drafts before the late cutoff; make a

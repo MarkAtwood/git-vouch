@@ -384,7 +384,12 @@ def test_revocation_accepted(
     result = check(vouch, tree)
     assert result.problems == [], signer_name
     assert did(keys("alice")) in result.revoked
-    assert has(result.voids, "endorsements/alice/dave-1.json", "revoked")
+    # Revoking the subject's key voids no endorsement of it (DESIGN.md,
+    # Endorsement): they carry over to the person's other keys. Only what
+    # the revoked key itself signed, alice's endorsement of dave, is void.
+    assert not has(result.voids, "endorsements/alice/")
+    assert has(result.voids, "endorsements/dave/alice-1.json", "revoked")
+    assert result.emails["alice"] == ("alice@example.org",)
 
 
 @pytest.mark.parametrize("signer", ["gregkh", "dave"])

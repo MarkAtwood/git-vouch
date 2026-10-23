@@ -1,0 +1,7 @@
+{
+  "id": "1792730298084595119-1",
+  "issue_id": "vouch-faq3.4",
+  "author": "agent",
+  "text": "Implemented (uncommitted): git-vouch-trqp serve --did DID [--bind] [--port]; tests/trqp (117 on 3.12; 3.9: 104 pass + 13 schema tests skip, no jsonschema). Oracle: Trust Task schemas copied verbatim from trustoverip/dtgwg-trust-tasks-tf@9a48a4c (framework 0.5 envelope, registry/authorization 0.1, trust-task-error 0.5) + vgi-core resource.rs test vectors @5d9b9b6. Freshness (B4 24h) left to vouch-faq3.6; did-document subcommand to vouch-faq3.5. Incoming proof member is not verified (no crypto; read-only public answer).",
+  "created_at": "2026-10-23T04:38:18.084595119Z"
+}

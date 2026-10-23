@@ -169,6 +169,14 @@ The signing time comes from the signer, so a retired key's holder can
 backdate a signature. When there is any doubt about who holds a key,
 revoke it rather than retiring it.
 
+The export writes every `valid-before` (retirement, removal, demotion)
+one hour after the end it records. git passes the verify time to
+OpenSSH as local time without a zone, and OpenSSH 9.6 reads it an hour
+off under daylight saving time, which would reject signatures made in
+the last hour before an end. The hour adds no risk: the signer sets the
+signing time and could backdate by any amount anyway. It also means a
+signature in the same second as a retirement is not a special case.
+
 ## The registry
 
 A git repository at a configurable URL: `git vouch setup --registry <url>`
@@ -262,10 +270,14 @@ Two git behaviours address that:
   the committer date of the deleting commit as `valid-before` for that
   person's keys, provided the record verified at the parent commit.
   Earlier signatures stay valid. The deletion is unsigned; review is the
-  gate.
-- **Demotion:** when a record is replaced by a lower tier, the higher
-  tier ends at the new record's own `date`. An export with `--min-tier`
-  above the new tier keeps the key with that `valid-before`.
+  gate. Dropping a handle from `anchors.json` likewise ends the anchor
+  tier at the committer date of the commit that dropped it.
+- **Demotion:** when a record is replaced by a lower tier, or by one
+  across the automation line, the old tier ends at the new record's own
+  `date`. An export with `--min-tier` above the new tier keeps the key
+  with that `valid-before`. A replacement record that does not verify
+  ends nothing: the tier before it stands until a valid record replaces
+  it or the file is deleted.
 
 ### Person file
 
@@ -347,6 +359,16 @@ Two git behaviours address that:
   previous version, so backup tokens can stay in a drawer. The first
   version must be signed by at least one of its own keys. Adding a key
   is therefore signed by an existing key, which is how rotation works.
+  For a merge, a key current in any parent will do. A merge that keeps
+  one parent's version over a concurrent change on another is judged
+  against that change, so keeping a version signed by a key the other
+  side retired gets the WARNING below.
+- **A signature by a revoked key counts as none.** A change whose only
+  signature by a previous key is by a key revoked before it (by
+  ancestry) gets the WARNING below. Pending decision: `check` also
+  warns when the signing key is revoked concurrently or later. A
+  revocation signed by a later-revoked key still counts (see
+  Revocation), so this case may yet be treated the same way.
 - **A change not signed by a previous key** (a lost key, or a swapped
   one) is not refused. Registry review is the gate, as for
   `anchors.json`. `git vouch check` walks the history of `people/` and
@@ -381,6 +403,10 @@ Two git behaviours address that:
   along a chain of signed versions. It also carries over across an
   unsigned, warned change, as the tier does, and there it rests on
   registry review (see Person file).
+- **When the subject's key is revoked**, endorsements that named it are
+  not void: they carry over to the person's later keys, as on rotation.
+  Endorsers are encouraged, not required, to re-confirm after a
+  compromise.
 - **When the endorser retires a key**, endorsements made with it stay
   valid.
 - **When the endorser's key is revoked**, every endorsement made with it
@@ -753,6 +779,10 @@ specification for anyone reviewing an upstream patch.
    a kernel-team decision, not a design one.
 2. **Flag-day dates and anchors:** the anchor list, freeze date, window
    length and late cutoff. Kernel-team decisions.
+3. **Person-file change signed by a key revoked later:** `check` warns,
+   as it does for a key revoked before the change. A revocation signed
+   by a later-revoked key still counts if committed first, so the
+   person-file case might too.
 
 Decided 2026-10-22:
 
@@ -771,7 +801,9 @@ Decided 2026-10-22:
   approver's demotion is void with a warning; mutual concurrent
   revocations both count; a tier record before its person file is
   ignored; removal ends at the
-  deleting commit's committer date, demotion at the new record's date.
+  deleting commit's committer date (leaving `anchors.json` too),
+  demotion at the new record's date; the export adds an hour to every
+  end for an OpenSSH 9.6 DST bug.
 - **Person files:** a change needs one signature from any key current in
   the previous version; a change without one is allowed by review and
   warned about loudly, and lost-key recovery keeps the tier; an
@@ -782,8 +814,9 @@ Decided 2026-10-22:
   is how cross-project vouching works (no foreign-registry lookups, no
   federation); nobody can endorse themselves (void, not an error);
   optional free-text note, no minimum count; they bind
-  name, key and `subjectEmails`, carry over to later keys, and only
-  endorsed emails are exported.
+  name, key and `subjectEmails`, carry over to later keys (also when
+  the subject's key is revoked; only a revoked endorser key voids one),
+  and only endorsed emails are exported.
 - **Patch signing:** a patatt fork with a `vouch:` keyring source asks
   `git vouch keys <email>`; endorsed emails and current keys, any tier,
   bots included; selectors derived from the key; no generated keyring;

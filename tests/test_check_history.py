@@ -391,7 +391,7 @@ def test_automation_keeps_its_tier_after_accountable_steps_down(
     assert ssh_verify(data, sig, out.signers, "bot", "file")
 
 
-def test_automation_grant_concurrent_with_accountable_removal_fails(
+def test_automation_grant_concurrent_with_accountable_removal_is_void(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
 ) -> None:
     reg.git("branch", "side")
@@ -404,8 +404,11 @@ def test_automation_grant_concurrent_with_accountable_removal_fails(
     reg.git("checkout", "-q", "main")
     reg.git("merge", "-q", "--no-edit", "side")
     result = vouch.check_registry(reg.root)
-    assert has(result.problems, "people/bot.json", "gregkh", "concurrent commit")
+    # Like a grant concurrent with its approver's demotion (DESIGN.md, Tier record).
+    assert result.problems == []
+    assert has(result.voids, "tiers/bot.json", "gregkh", "concurrent commit")
     assert "bot" not in result.tiers
+    assert run_script("check", str(reg.root)).returncode == 0
 
 
 def test_automation_accountable_changed_later_voids(
@@ -1125,3 +1128,318 @@ def test_committer_date_out_of_range(reg: GitRegistry) -> None:
     assert proc.returncode == 1
     assert "committer date out of range" in proc.stderr
     assert "Traceback" not in proc.stderr
+
+
+# Round 3 (bead vouch-ey47.19): one test per settled item, on real history.
+
+
+def test_anchor_removal_ends_at_the_removing_commit(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    # Like a deleted tier record: dave's keys end at the committer date of
+    # the commit that dropped him from anchors.json (day 3).
+    reg.anchors("torvalds", "dave")
+    reg.commit()
+    reg.anchors("torvalds")
+    reg.commit(author="2026-01-02T06:00:00Z")
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and "dave" not in result.tiers
+    for min_tier in ("anchor", "contributor"):
+        out = export(reg, tmp_path, "--min-tier", min_tier)
+        assert verifies(repo, tag(repo, f"a-{min_tier}", key("dave"), DAY2_NOON), out)
+        assert not verifies(
+            repo, tag(repo, f"b-{min_tier}", key("dave"), DAY3_NOON), out
+        )
+
+
+@pytest.mark.parametrize("then", ["delete", "demote"])
+def test_tier_record_that_does_not_verify_ends_nothing(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+    then: str,
+) -> None:
+    # Day 2 replaces gregkh's maintainer record with one alice may not
+    # grant; it has no standing, so the maintainer tier runs on until day 3
+    # deletes the record, or until the date of day 3's valid demotion.
+    reg.tier("gregkh", "contributor", "alice", key("alice"))
+    reg.commit()
+    if then == "delete":
+        reg.delete("tiers/gregkh.json")
+        early, late = DAY2_NOON, DAY3_NOON
+    else:
+        reg.tier(
+            "gregkh", "contributor", "torvalds", key("torvalds"), "2026-02-01T00:00:00Z"
+        )
+        early, late = "2026-01-15T00:00:00Z", "2026-02-02T00:00:00Z"
+    reg.commit()
+    assert vouch.check_registry(reg.root).problems == []
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "early", key("gregkh"), early), out)
+    assert not verifies(repo, tag(repo, "late", key("gregkh"), late), out)
+
+
+def test_automation_replaced_by_human_ends_at_the_new_records_date(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "gregkh", key("gregkh"))
+    reg.commit()
+    reg.tier("bot", "contributor", "gregkh", key("gregkh"), "2026-02-01T00:00:00Z")
+    reg.commit()
+    assert vouch.check_registry(reg.root).tiers["bot"] == "contributor"
+    data, sig = sign_file(tmp_path, key("bot"), "file")
+    out = export(reg, tmp_path, "--min-tier", "maintainer", "--include-automation")
+    assert ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260115000000Z"
+    )
+    assert not ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260202000000Z"
+    )
+    out = export(reg, tmp_path)  # the contributor tier covers files too
+    assert ssh_verify(
+        data, sig, out.signers, "bot", "file", "-Overify-time=20260202000000Z"
+    )
+
+
+def test_bot_switching_accountable_needs_a_new_tier_record(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    reg.person("bot", key("bot"), accountable="gregkh")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.person("bot", key("bot"), accountable="torvalds")
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(result.voids, "tiers/bot.json", "torvalds", "new approval")
+    data, sig = sign_file(tmp_path, key("bot"), "file")
+    out = export(reg, tmp_path, "--include-automation")
+    assert not ssh_verify(data, sig, out.signers, "bot", "file")
+    reg.tier("bot", "automation", "torvalds", key("torvalds"), "2026-04-01T00:00:00Z")
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert result.tiers["bot"] == "automation"
+    out = export(reg, tmp_path, "--include-automation")
+    assert ssh_verify(data, sig, out.signers, "bot", "file")
+
+
+def test_record_by_since_revoked_key_is_void_before_any_date_check(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # dave's retired key signs an endorsement dated after its retirement.
+    person_signed_by(
+        reg, "dave", key("dave2"), retired=(key("dave"),), by=(key("dave"),)
+    )
+    rel = reg.endorse(
+        "alice", key("alice"), "dave", key("dave"), date="2026-09-01T00:00:00Z"
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, rel, "outside the validity")
+    reg.revoke("dave", key("dave"), key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert has(result.voids, rel, "revoked")
+
+
+def test_signature_two_hours_after_retirement_fails(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    # RETIRED is 2026-06-01T00:00:00Z; the export ends the key an hour later
+    # (DESIGN.md, Retiring a key versus revoking it). Under DST, OpenSSH 9.6
+    # reads git's verify time an hour late, which the minute-before tag
+    # shows.
+    person_signed_by(
+        reg, "gregkh", key("gregkh2"), retired=(key("gregkh"),), by=(key("gregkh"),)
+    )
+    reg.commit()
+    out = export(reg, tmp_path)
+    assert 'valid-before="20260601010000Z"' in out.signers.read_text()
+    assert verifies(repo, tag(repo, "v1", key("gregkh"), "2026-05-31T23:59:00Z"), out)
+    assert not verifies(
+        repo, tag(repo, "v2", key("gregkh"), "2026-06-01T02:00:00Z"), out
+    )
+
+
+@pytest.mark.parametrize("side_retires", [True, False])
+def test_merge_keeping_a_version_signed_by_a_concurrently_retired_key_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], side_retires: bool
+) -> None:
+    reg.git("checkout", "-q", "-b", "side")
+    if side_retires:  # alice retires her key alice on side
+        person_signed_by(
+            reg, "alice", key("alice2"), retired=(key("alice"),), by=(key("alice2"),)
+        )
+    else:  # side changes only someone else's file
+        person_signed_by(reg, "dave", key("dave"), key("dave2"), by=(key("dave"),))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    person_signed_by(
+        reg, "alice", key("alice"), key("alice2"), key("alice3"), by=(key("alice"),)
+    )
+    reg.commit()
+    reg.git("merge", "-q", "-s", "ours", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    warned = key_change_warnings(result)
+    if side_retires:
+        assert len(warned) == 1
+        assert has(warned, "people/alice.json", head(reg), did(key("alice2")))
+    else:
+        assert warned == []
+
+
+def test_merge_keeping_a_version_signed_by_a_concurrently_revoked_key_warns(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.git("checkout", "-q", "-b", "side")
+    reg.revoke("alice", key("alice"), key("torvalds"))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    person_signed_by(
+        reg, "alice", key("alice"), key("alice2"), key("alice3"), by=(key("alice"),)
+    )
+    reg.commit()
+    change = head(reg)
+    reg.git("merge", "-q", "--no-edit", "side")
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert did(key("alice")) in result.revoked
+    assert has(key_change_warnings(result), "people/alice.json", change)
+
+
+def write_unparseable_person(reg: GitRegistry, handle: str, *listed: Key) -> None:
+    """Write a person file an older git-vouch accepted but this one rejects."""
+    record = {
+        "handle": handle,
+        "name": handle.title(),
+        "emails": [f"{handle}@example.org"],
+        "keys": [{"ssh": k.pubkey, "added": ADDED, "retired": None} for k in listed],
+        "accountable": None,
+        "alsoKnownAs": ["not-a-did"],
+    }
+    reg.write(f"people/{handle}.json", record, listed[0], ns="git-vouch-register")
+
+
+def test_unparseable_older_version_still_chains(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    write_unparseable_person(reg, "alice", key("alice"), key("alice2"))
+    reg.commit()
+    person_signed_by(
+        reg, "alice", key("alice"), key("alice2"), key("alice3"), by=(key("alice"),)
+    )
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert key_change_warnings(result) == []
+
+
+def test_unparseable_first_version_does_not_reset_continuity(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    write_unparseable_person(reg, "erin", key("erin"))
+    reg.commit()
+    person_signed_by(reg, "erin", key("erin2"), by=(key("erin2"),))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    warned = key_change_warnings(result)
+    assert len(warned) == 1
+    assert has(warned, "people/erin.json", head(reg), did(key("erin")))
+
+
+def test_endorsement_survives_revoking_the_subjects_key(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.endorse("alice", key("alice"), "gregkh", key("gregkh"))
+    reg.commit()
+    reg.revoke("alice", key("alice"), key("alice2"))
+    person_signed_by(
+        reg, "alice", key("alice2"), key("alice3"), retired=(key("alice"),),
+        by=(key("alice2"),),
+    )  # fmt: skip
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert result.emails["alice"] == ("alice@example.org",)
+
+
+@pytest.mark.parametrize("restored", [False, True])
+def test_tier_sig_only_change_counts_as_a_change(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+    restored: bool,
+) -> None:
+    # Day 2 replaces only gregkh's .sig with alice's signature, so that
+    # version does not verify and the day 1 record stands behind it; day 3
+    # may put the good .sig back. The last day deletes the record, which
+    # ends the maintainer tier only if the walk sees the .sig-only commits.
+    rel = "tiers/gregkh.json"
+    data = (reg.root / rel).read_bytes()
+    good = (reg.root / (rel + ".sig")).read_bytes()
+    (reg.root / (rel + ".sig")).write_bytes(
+        reg.sign(key("alice"), "git-vouch-tier", data)
+    )
+    reg.commit()
+    if restored:
+        (reg.root / (rel + ".sig")).write_bytes(good)
+        reg.commit()
+    reg.delete(rel)
+    reg.commit()
+    assert vouch.check_registry(reg.root).problems == []
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    early = DAY3_NOON if restored else DAY2_NOON
+    late = "2026-01-04T12:00:00Z" if restored else DAY3_NOON
+    assert verifies(repo, tag(repo, "early", key("gregkh"), early), out)
+    assert not verifies(repo, tag(repo, "late", key("gregkh"), late), out)
+
+
+def test_merged_unverified_tier_records_are_walked_once(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # 20 merges whose sides and result all hold a tier record that does not
+    # verify; walking each path separately would take hours.
+    def commit(n: int) -> None:
+        date = f"2026-01-01T06:{n:02d}:00Z"
+        env = {**os.environ, "GIT_COMMITTER_DATE": date, "GIT_AUTHOR_DATE": date}
+        for args in (["add", "-A"], ["commit", "-q", "-m", date]):
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
+                cwd=reg.root,
+                env=env,
+                check=True,
+            )
+
+    record = reg.root / "tiers/gregkh.json"
+    n = 0
+    for level in range(20):
+        reg.git("checkout", "-q", "-b", f"b{level}")
+        record.write_bytes(b"side %d" % level)
+        commit(n := n + 1)
+        reg.git("checkout", "-q", "main")
+        record.write_bytes(b"main %d" % level)
+        commit(n := n + 1)
+        reg.git("merge", "-q", "--no-commit", "-s", "ours", f"b{level}")
+        record.write_bytes(b"merge %d" % level)
+        commit(n := n + 1)
+    reg.tier("gregkh", "maintainer", "torvalds", key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert result.tiers["gregkh"] == "maintainer"
