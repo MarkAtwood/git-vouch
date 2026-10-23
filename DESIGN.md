@@ -78,7 +78,10 @@ short enough to read in a sitting.
 | `git-vouch-trqp` | Optional TRQP bridge so OpenVTC's `verify-trust` can ask whether a DID may sign for the kernel; a thin shim over `git-vouch` | `git-vouch` |
 
 `git-vouch-migrate` is the only tool that runs `gpg`, and it is retired
-after the late cutoff. Each tool is one file, standard library only.
+after the late cutoff. It ports `pgpkeys.git` and nothing else: its
+layout, its signer, and kernel.org's list-address role keys are built
+in. Another project's keyring needs its own port. Each tool is one
+file, standard library only.
 
 ## How trust maps
 
