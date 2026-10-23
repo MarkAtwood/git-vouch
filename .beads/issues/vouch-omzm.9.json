@@ -3,13 +3,14 @@
   "title": "git-vouch-migrate: continuity hardening",
   "description": "Settled by Claude on implementer recommendation, for Mark's review (round 3): (1) auth-subkey continuity requires that subkey to have actually signed the person-file version (listing a copyable public key is not proof); (2) a continuity proof is judged against the person-file version it was made for, found in git history (METARULE 1), so later add-key/retire-key/email edits do not silently drop the holder from draft runs; (3) the late cutoff is enforced by verify-continuity and drafts via --cutoff DATE, comparing the date the proof's commit landed on the registry's main branch; (4) drafts include certifications that had expired by C (same reasoning as SHA-1: the draft is a reminder); (5) drafts --as needs no continuity proof from the certifier (migratedFrom suffices; the draft is signed with the certifier's own SSH key); certifications made with a certifier's other GPG keys are not read for the flag day; (6) a holder sharing an email with another key under a different name may still prove continuity (drafts only repeat certified UIDs).",
   "acceptance_criteria": "Tests with throwaway GPG keys and real git history for each item; runbook updated for --cutoff.",
+  "notes": "WITHDRAWN item (3) (Mark 2026-10-22, vouch-omzm.8): the late cutoff is policy only. No --cutoff in verify-continuity or drafts; registry maintainers merge no change adding/altering migratedFrom or adding people/*.json.asc after the cutoff (DESIGN.md flag day step 4). Items (1),(2),(4),(5),(6) stand.",
   "status": "open",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-22T23:21:58.630925872Z",
   "created_by": "agent",
-  "updated_at": "2026-10-22T23:21:58.630925872Z",
+  "updated_at": "2026-10-23T04:04:45.97258344Z",
   "dependencies": [
     {
       "issue_id": "vouch-omzm.9",

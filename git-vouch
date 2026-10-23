@@ -2246,6 +2246,95 @@ def cmd_did(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rfc3339(text: str) -> datetime:
+    """Parse ``--at``: an RFC 3339 time with ``Z`` or a numeric offset."""
+    # ponytail: Python 3.9's fromisoformat takes only 3 or 6 fraction digits
+    # and some non-RFC forms; a hand parser is the upgrade if anyone needs more.
+    try:
+        when = datetime.fromisoformat(re.sub("[Zz]$", "+00:00", text))
+        if when.tzinfo is not None:
+            return when.astimezone(timezone.utc)
+    except (ValueError, OverflowError):  # Overflow: the offset leaves year 1-9999
+        pass
+    raise argparse.ArgumentTypeError(
+        f"not an RFC 3339 time like 2026-11-05T00:00:00Z: {text!r:.60}"
+    )
+
+
+def tier_at(result: CheckResult, handle: str, when: datetime) -> Optional[str]:
+    """Return the tier ``allowed_signers`` would apply to ``handle`` at ``when``.
+
+    That is the current tier, or a tier that ended after ``when`` (see
+    ``check_registry``), whichever ranks highest; a human tier wins over
+    automation. None means no tier. Tiers have no start bound, as in
+    export: a tier granted after ``when`` counts at ``when``, so this is
+    not the tier held at ``when``.
+    """
+    held = [t for t, end in result.ended.get(handle, {}).items() if when < end]
+    if handle in result.tiers:
+        held.append(result.tiers[handle])
+    humans = [t for t in held if t != "automation"]
+    if humans:
+        return min(humans, key=RANK.__getitem__)
+    return "automation" if held else None
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    """Print as JSON who holds a did:key, their tier and the key's validity at a time.
+
+    The time is ``--at``, else now. A key is valid from ``added`` until
+    ``retired``; a revoked key is never valid. ``automation`` is true for a
+    bot's key. The exit status is 1, with ``handle`` null, if no valid
+    person file lists the key.
+
+    Raises:
+        VouchError: the registry check fails, so nothing is printed.
+    """
+    when: datetime = args.at or datetime.now(timezone.utc)
+    root = _registry_dir(None)
+    _fetched(root)
+    result = check_registry(root)
+    if result.problems:
+        raise VouchError(f"the registry check failed; run git vouch check {root}")
+    did: str = args.did
+    answer: dict[str, object] = {
+        "did": did,
+        "at": when.strftime(DATE_FORMAT),
+        "handle": None,
+        "tier": None,
+        "automation": False,
+        "emails": [],
+        "added": None,
+        "retired": None,
+        "revoked": did in result.revoked,
+        "valid": False,
+    }
+    # check fails on a key current in two files; a key retired in two is
+    # equally valid in both, so the first is as good as any.
+    found = [
+        (person, key)
+        for _, person in sorted(result.people.items())
+        for key in person.keys
+        if key.did == did
+    ]
+    if found:
+        person, key = found[0]
+        tier = tier_at(result, person.handle, when)
+        answer.update(
+            handle=person.handle,
+            tier=tier,
+            automation=tier == "automation" or person.accountable is not None,
+            emails=list(result.emails[person.handle]),
+            added=key.added.strftime(DATE_FORMAT),
+            retired=key.retired and key.retired.strftime(DATE_FORMAT),
+            valid=did not in result.revoked
+            and key.added <= when
+            and (key.retired is None or when < key.retired),
+        )
+    print(json.dumps(answer, indent=2))
+    return 0 if found else 1
+
+
 class SigningKey(NamedTuple):
     """The key a signing command signs with."""
 
@@ -2808,6 +2897,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("did", "print the did:key for an SSH public key, or the reverse")
     p.add_argument("key", metavar="<.pub file | ssh-pubkey | did:key>")
     p.set_defaults(func=cmd_did)
+    p = add("query", "print a did:key's holder, tier and validity as JSON")
+    p.add_argument("did", metavar="<did:key>")
+    p.add_argument(
+        "--at",
+        type=_rfc3339,
+        metavar="TIME",
+        help="RFC 3339 time to answer for (default: now)",
+    )
+    p.set_defaults(func=cmd_query)
     return parser
 
 
