@@ -189,6 +189,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             "olga_new": gpg.new_key(
                 "Olga Older <olga@example.org>", at="20200201T000000"
             ),
+            # Name and emails in separate user IDs, as some Debian keys have.
+            "nora": gpg.new_key("Nora Nameonly"),
             # Auth on the primary itself, with no auth subkey.
             "pia": gpg.new_key("Pia Primary <pia@example.org>", usage="sign,auth"),
             "sam1": gpg.new_key("Sam One <sam@example.com>"),
@@ -230,6 +232,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         gpg.add_key(fprs["boris"], "ed25519", "auth")
         gpg.add_key(fprs["tim"], "rsa1024", "auth")
         gpg.add_key(fprs["olga_old"], "ed25519", "auth")
+        gpg("--quick-add-uid", fprs["nora"], "<Nora@Example.org>")
+        gpg("--quick-add-uid", fprs["nora"], "nora2@example.org")
         gpg(
             "--quick-add-uid",
             fprs["dave_new"],

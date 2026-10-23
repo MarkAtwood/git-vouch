@@ -109,8 +109,8 @@ def test_handles_from_awkward_local_parts(migrate: ModuleType) -> None:
 def test_port_report_counts(ported: Ported) -> None:
     summary = ported.stdout.splitlines()[-1]
     assert summary == (
-        "keys 23, live 18, expired 4, kernel.org list keys 1 (1 live), people 15, "
-        "drafts 15, "
+        "keys 24, live 19, expired 4, kernel.org list keys 1 (1 live), people 16, "
+        "drafts 16, "
         "live keys with a reusable auth subkey 6 (6 in drafts)"
     )
     fprs = ported.pgp.fprs
@@ -126,6 +126,7 @@ def test_port_writes_one_draft_per_person(ported: Ported) -> None:
     got = drafts(ported)
     want = {"signer", "alice", "bob", "carol", "dave_new", "eve", "gina_old"}
     want |= {"sam1", "sam2", "hank_new", "rhea", "boris", "tim", "pia", "olga_old"}
+    want |= {"nora"}
     assert set(got) == {fprs[k] for k in want}
     assert got[fprs["dave_new"]]["handle"] == "dave"
     assert set(got[fprs["dave_new"]]["emails"]) == {
@@ -256,6 +257,20 @@ def test_port_prefers_key_with_auth_over_newer_key(ported: Ported) -> None:
     assert f"merge {fprs['olga_new']}: same person as {fprs['olga_old']}" in (
         ported.stdout
     )
+
+
+def test_port_joins_name_only_and_email_only_uids(
+    ported: Ported, migrate: ModuleType
+) -> None:
+    fpr = ported.pgp.fprs["nora"]
+    draft = drafts(ported)[fpr]
+    assert draft["name"] == "Nora Nameonly"
+    assert draft["emails"] == ["nora@example.org", "nora2@example.org"]
+    # Continuity checks emails against the same user IDs, so it must see both.
+    (key,) = migrate.parse_listing(
+        ported.pgp.gpg("--with-colons", "--fixed-list-mode", "--list-keys", fpr)
+    )
+    assert set(draft["emails"]) <= migrate._all_emails(key)
 
 
 def test_port_skips_rsa_auth_subkey_below_2048(ported: Ported) -> None:

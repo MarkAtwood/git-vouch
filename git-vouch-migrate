@@ -66,6 +66,7 @@ REUSABLE_CURVES = ("ed25519", "nistp256")
 NOT_LIVE = {"e": "expired at C", "r": "revoked", "i": "invalid at C"}
 SKIPPED = {"r": "revoked", "i": "invalid at C"}
 UID_RE = re.compile(r"(.*?)\s*(?:\([^()]*\))?\s*<([^<>]*)>")
+NAME_ONLY_RE = re.compile(r"([^<>@]*?)\s*(?:\([^()]*\))?")
 # kernel.org remail and security lists: "Flippant Fireant <flippant-fireant@kernel.org>".
 ROLE_RE = re.compile(r"([A-Za-z]+) ([A-Za-z]+) <([a-z]+)-([a-z]+)@kernel\.org>")
 # Stands in for the key the holder adds, so a keyless draft can be checked;
@@ -196,24 +197,36 @@ def is_role_key(key: GpgKey) -> bool:
     return bool(key.uids) and all(is_role(u) for u in key.uids)
 
 
+def _uid_parts(uid: str) -> tuple[Optional[str], Optional[str]]:
+    """Return a user ID's name and lowercased email, each None if absent.
+
+    Besides "Name (comment) <email>", a user ID may be a bare email or a
+    name alone; some keys spread one identity over several of these.
+    """
+    m = UID_RE.fullmatch(uid)
+    if m:
+        return m.group(1) or None, m.group(2).lower()
+    if "@" in uid:
+        return None, uid.strip().lower()
+    m = NAME_ONLY_RE.fullmatch(uid)
+    return (m.group(1) or None) if m else None, None
+
+
 def _name_and_emails(key: GpgKey) -> tuple[Optional[str], list[str]]:
-    """Return the primary user ID's name and every usable email, lowercased, in UID order."""
+    """Return the first name in UID order (primary first) and every usable email, lowercased."""
     name = None
     emails: list[str] = []
     for uid in key.uids:
-        m = UID_RE.fullmatch(uid)
-        if not m:
-            continue
-        if name is None and m.group(1) and m.group(1).isprintable():
-            name = m.group(1)
-        email = m.group(2).lower()
-        if vouch.EMAIL_RE.fullmatch(email) and email not in emails:
+        uid_name, email = _uid_parts(uid)
+        if name is None and uid_name and uid_name.isprintable():
+            name = uid_name
+        if email and vouch.EMAIL_RE.fullmatch(email) and email not in emails:
             emails.append(email)
     return name, emails
 
 
 def _all_emails(key: GpgKey) -> set[str]:
-    return {m.group(2).lower() for m in map(UID_RE.fullmatch, key.uids) if m}
+    return {email for _, email in map(_uid_parts, key.uids) if email}
 
 
 def group_people(keys: Sequence[GpgKey]) -> list[list[GpgKey]]:
