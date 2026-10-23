@@ -28,7 +28,8 @@ What follows from the binding:
   endorsement no longer covers it.
 - **Only the emails you list are endorsed.** An email nobody has endorsed
   stays in their file but is not exported, so git never shows it as a
-  verified signer. `check` warns about it.
+  verified signer. `check` warns about it. An endorsed email is also
+  what makes their patches verify in b4.
 - **Your endorsement follows their key rotations.** It carries over to
   every key added in later versions of their person file. That is sound
   along a chain of signed versions. It also carries over across an

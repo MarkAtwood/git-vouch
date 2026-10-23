@@ -3,7 +3,10 @@
 **Status:** user guide, 2026-10-22. Facts come from `DESIGN.md`. Every
 command block on this page is run, in order, by
 `tests/test_guide_anchors.py` in a throwaway registry, with real `git`
-and `ssh-keygen`. Who runs each block is noted in the text.
+and `ssh-keygen`. The `shell` blocks under
+[Patch signing](#patch-signing) are run by
+`tests/patatt/test_patch_docs.py` with released b4 and the patatt fork,
+mail going to a local sink. Who runs each block is noted in the text.
 
 An anchor is one of the few people `anchors.json` in the registry lists:
 Linus and whoever the kernel team designates. Anchors are the root of
@@ -20,7 +23,9 @@ endorsements you approve on.
 
 - `$REGISTRY` is the registry's URL and `$LINUX` is a kernel tree you
   push tags to. The kernel's registry path on git.kernel.org is for the
-  kernel.org administrators to choose.
+  kernel.org administrators to choose. `$PGPKEYS` and `$FREEZE_COMMIT` are
+  the frozen `pgpkeys.git` and its last commit, the freeze commit, published by kernel.org at
+  the freeze (see [the flag-day runbook](flag-day.md)).
 - `git-vouch` is on `PATH`, so `git vouch` works.
 - Your SSH keys are loaded in an agent. The commands use
   `~/.ssh/id_ed25519` as your signing key and `~/.ssh/backup` as a
@@ -39,6 +44,13 @@ your own handle, name and email in their place.
 
 [The flag-day runbook](flag-day.md) has the full timeline for everyone.
 These are the anchors' steps in it.
+
+Patch signing has a fallback that tags do not. Before the flag day,
+everyone who signs or checks patches installs the patatt fork and lists
+`keyringsrc = vouch:` first and the frozen pgpkeys keyring second, as
+[Patch signing](#patch-signing) shows. Patches signed with a GPG key, or
+a key `patatt genkey` made, then keep verifying through pgpkeys, with a
+warning, for everyone until the late cutoff.
 
 ### Register and merge first
 
@@ -297,6 +309,12 @@ git -c gpg.ssh.allowedSignersFile="$HOME/release-signers" \
     -c gpg.ssh.revocationFile="$HOME/release-revoked" verify-tag v6.99
 ```
 
+If you sign patches, the selector changes with the key: once the
+rotation is merged and synced, run the two lines in
+[Sign with your registry key](#sign-with-your-registry-key) again.
+Patches signed with the retired key stop verifying when the people who
+check them sync.
+
 ### Approve and demote maintainers
 
 Approving is the step under Approve the first maintainers. Demoting
@@ -510,7 +528,10 @@ git push -q origin HEAD:lost-lena
 
 Every tag the revoked key signed also stops verifying, which for an
 anchor can include release tags: one more reason to keep signing keys on
-hardware tokens with a PIN, and the backup in a drawer.
+hardware tokens with a PIN, and the backup in a drawer. So do patches:
+once someone checking them has synced, patatt no longer finds the key.
+b4 remembers a verdict for up to 24 hours, so a series it already
+checked can keep its tick until then.
 
 **Without a backup key,** the only way back is a change no previous key
 signed, as `alice` made above. It rests on the registry maintainer's
@@ -519,4 +540,97 @@ with their own.
 
 ## Patch signing
 
-Patch signing with b4 and patatt is not covered on this page yet.
+Patches are signed with patatt, the signer built into b4: an
+`X-Developer-Signature` header that `b4 am` checks. A fork of patatt
+adds one keyring source, `vouch:`, which asks `git vouch keys` for the
+signer's current keys. A patch verifies when one of the signer's current
+keys signed it and it comes from an endorsed email, whatever the
+signer's tier, automation identities included.
+
+### Install the fork
+
+Install the fork into the Python environment b4 runs from; it replaces
+the patatt that came with b4:
+
+<!-- patch not-run needs-network -->
+```shell
+pip install 'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
+```
+
+If you run b4 from a checkout with `b4.sh`, check out the fork's
+`git-vouch` branch in its `patatt` submodule instead.
+
+### Sign with your registry key
+
+patatt signs with the key git signs with, under the selector
+`git vouch status` prints, which is derived from the key. It signs as
+your `user.email`, so that must be an endorsed email. `b4 send`, or
+`git send-email` after `patatt install-hook`, then signs every patch
+(here as `lena`):
+
+<!-- patch as lena -->
+```shell
+git config --global patatt.signingkey "openssh:$(git config --global user.signingKey)"
+git config --global patatt.selector "$(git vouch status | sed -n 's/^patatt.selector: //p')"
+```
+
+[The regulars guide](guide-regulars.md#send) shows both ways of
+sending.
+
+### Check incoming patches
+
+Tell patatt and b4 where to find keys: the registry first, then the
+frozen pgpkeys keyring, checked out at the freeze commit (here as
+`lena`):
+
+<!-- patch as lena -->
+```shell
+git clone -q "$PGPKEYS" ~/pgpkeys
+git -C ~/pgpkeys checkout -q --detach "$FREEZE_COMMIT"
+git config --global --unset-all b4.keyringsrc || true
+git config --global patatt.keyringsrc vouch:
+git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
+```
+
+patatt reads the keyring as files on disk, so leave that clone at the
+freeze commit: a key added after it would verify too. The checkout
+fails if the clone does not hold the freeze commit.
+
+b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
+documentation suggests, so the block removes `b4.keyringsrc`. Then
+check a series by its message-id, here `$MSGID`, a patch from bob in your
+mailbox; without `-m`, b4 fetches it from lore (here as `lena`):
+
+<!-- patch as lena -->
+```shell
+git vouch sync
+cd linux
+b4 am -m ~/mail.mbox "$MSGID"
+```
+
+[The captains guide](guide-captains.md#check-incoming-patches) lists
+what `b4 am` prints and what to tell a contributor whose patch does not
+verify.
+
+### Kernel-wide settings
+
+Nothing in the kernel tree can set the keyring for people: b4 ignores
+`keyringsrc` in a tree's `.b4-config`. Each developer sets the two
+`keyringsrc` lines in their own git config, so publish them with the
+flag-day announcement, together with the install line and the date
+they stop needing the second one.
+
+### Dropping the GPG fallback
+
+The fallback ends at the late cutoff; that is the anchors' decision,
+announced with the cutoff. No code changes: everyone deletes the
+legacy keyring line (here as `lena`):
+
+<!-- patch as lena -->
+```shell
+git config --global --unset patatt.keyringsrc pgpkeys
+```
+
+From then, GPG-signed patches show `✗ No key`, and patches signed with a
+key `patatt genkey` made show `? (TOFU: new key)` instead of verified.
+Those contributors register an SSH key and sign with it.

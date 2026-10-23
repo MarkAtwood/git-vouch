@@ -4,8 +4,10 @@
 command block on this page but the first is run, in order, by
 `tests/migrate/test_guide_regulars.py` in a throwaway registry, with
 real `git`, `ssh-keygen` and `gpg` and a synthetic `pgpkeys.git`; the
-first needs FIDO tokens, so it is not run. Who runs each block is noted
-in the text.
+first needs FIDO tokens, so it is not run. The `shell` blocks under
+[Patch signing](#patch-signing) are run by `tests/patatt/test_patch_docs.py`
+with released b4 and the patatt fork, mail going to a local sink. Who
+runs each block is noted in the text.
 
 A regular is a contributor: someone a maintainer has approved at the
 `contributor` tier. You sign the commits and tags you ask maintainers to
@@ -22,6 +24,8 @@ endorsement binds and what evidence to ask for.
   to. `$PGPKEYS`, `$C` and `$SIGNER` are the frozen `pgpkeys.git`, its
   last commit and the fingerprint that signed it, all published by
   kernel.org at the freeze (see [the flag-day runbook](flag-day.md)).
+  `$FREEZE_COMMIT`, under Patch signing, is that same last commit,
+  the freeze commit.
 - `git-vouch` and `git-vouch-migrate` are on `PATH`, so `git vouch`
   works. You need `git-vouch-migrate` and `gpg` only on the flag day.
 - Your SSH keys are loaded in an agent: `~/.ssh/id_ed25519` is your
@@ -44,6 +48,13 @@ a record, a commit, a push, and a merge by the registry maintainer once
 [The flag-day runbook](flag-day.md) has the full timeline. Register
 during the window, before the flag day; from the flag day, a GPG-signed
 tag or pull is not accepted.
+
+Patch signing has a fallback that tags do not. Before the flag day,
+install the patatt fork and list `keyringsrc = vouch:` first and the
+frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
+Patches signed with a GPG key, or a key `patatt genkey` made, then keep
+verifying through pgpkeys, with a warning, for everyone until the late
+cutoff.
 
 ### Create your keys
 
@@ -284,6 +295,12 @@ Your `.asc` no longer covers the re-signed person file. That matters
 only if you still want endorsement drafts before the late cutoff; make a
 new one then.
 
+If you sign patches, the selector changes with the key: once the
+rotation is merged and synced, run the two lines in
+[Sign with your registry key](#sign-with-your-registry-key) again.
+Patches signed with the retired key stop verifying when the people who
+check them sync, which matters little once they are merged.
+
 ## Endorsing and approving
 
 Only maintainers approve, but any registered human may endorse, whatever
@@ -314,7 +331,10 @@ git push -q origin HEAD:endorse-carol
 Revoke rather than retire unless you are sure nobody else can use the
 key: the signing time comes from the signer, so whoever holds a retired
 key can backdate signatures. A revoked key's signatures all stop
-verifying, and every endorsement it signed becomes void.
+verifying, and every endorsement it signed becomes void. That includes
+patches: once someone checking your patches has synced, patatt no longer
+finds the key. b4 remembers a verdict for up to 24 hours, so a series
+it already checked can keep its tick until then.
 
 ### With your backup key
 
@@ -381,4 +401,114 @@ has the revocation, and the recovery follows the table in
 
 ## Patch signing
 
-Patch signing with b4 and patatt is not covered on this page yet.
+Patches you email are signed with patatt, the signer built into b4. It
+adds an `X-Developer-Signature` header, and the maintainer's `b4 am`
+checks it. A fork of patatt adds one keyring source, `vouch:`, which
+asks `git vouch keys` for the signer's current keys. Your patch
+verifies when one of your current keys signed it and it comes from an
+email someone has endorsed.
+
+### Install the fork
+
+Install the fork into the Python environment b4 runs from; it replaces
+the patatt that came with b4:
+
+<!-- patch not-run needs-network -->
+```shell
+pip install 'patatt @ git+https://github.com/MarkAtwood/patatt@git-vouch'
+```
+
+If you run b4 from a checkout with `b4.sh`, check out the fork's
+`git-vouch` branch in its `patatt` submodule instead.
+
+### Sign with your registry key
+
+patatt signs with the key git signs with, under the selector
+`git vouch status` prints, which is derived from the key. It signs as
+your `user.email`, so that must be an endorsed email (here as `bob`):
+
+<!-- patch as bob -->
+```shell
+git config --global patatt.signingkey "openssh:$(git config --global user.signingKey)"
+git config --global patatt.selector "$(git vouch status | sed -n 's/^patatt.selector: //p')"
+```
+
+### Check other people's patches
+
+Tell patatt and b4 where to find keys: the registry first, then the
+frozen pgpkeys keyring you cloned on the flag day, checked out at the freeze commit
+(here as `bob`):
+
+<!-- patch as bob -->
+```shell
+git -C ~/pgpkeys checkout -q --detach "$FREEZE_COMMIT"
+git config --global --unset-all b4.keyringsrc || true
+git config --global patatt.keyringsrc vouch:
+git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
+```
+
+patatt reads the keyring as files on disk, so leave that clone at the
+freeze commit: a key added after it would verify too. The checkout
+fails if the clone does not hold the freeze commit.
+
+b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
+documentation suggests, so the second line removes `b4.keyringsrc`.
+
+### Send
+
+`b4 send` signs every message before it sends it, through git's
+`sendemail.*` settings or a b4 web endpoint. Press Enter when it asks
+(here as `bob`):
+
+<!-- patch as bob -->
+```shell
+cd linux
+b4 prep -n readme-line -f HEAD
+echo "Another line." >>README
+git commit -q -a -s -m "README: add another line"
+b4 send --to alice@example.org
+```
+
+With `git send-email`, install patatt's hook once in each tree; it signs
+each message as it goes out (here as `bob`):
+
+<!-- patch as bob -->
+```shell
+cd linux
+patatt install-hook
+git send-email --to alice@example.org -1
+```
+
+### What recipients see
+
+`b4 am` ticks the patch and names the signer:
+
+```console
+  ✓ [PATCH] README: add another line
+  ✓ Signed: openssh/bob@example.org
+```
+
+`✗ No key: openssh/bob@example.org` means your email is not endorsed,
+the key is not current in the registry, `patatt.selector` is not the
+selector of the key that signed, or the checker's registry copy predates
+your key and needs `git vouch sync`.
+
+### Keys `patatt genkey` made
+
+The registry holds SSH keys only, and `vouch:` serves nothing else. A
+key `patatt genkey` made (`patatt.signingkey = ed25519:...`) verifies
+only through the pgpkeys keyring, with the warning, until the late
+cutoff. After it, b4 marks such patches `? (TOFU: new key)` instead of
+verified. Register an SSH key and switch patatt to it with the lines in
+[Sign with your registry key](#sign-with-your-registry-key).
+
+### After the late cutoff
+
+Delete the legacy keyring line; nothing else changes (here as `bob`):
+
+<!-- patch as bob -->
+```shell
+git config --global --unset patatt.keyringsrc pgpkeys
+```
+
+GPG-signed patches then show `✗ No key`.

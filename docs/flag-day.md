@@ -19,9 +19,9 @@ holder who still signs registers an SSH key; after it, nothing new needs
 | Phase | When | Who acts | What happens |
 |---|---|---|---|
 | 1. Freeze | _freeze date_ | kernel.org | `pgpkeys.git` gets one last signed commit, C, and becomes read-only. C's hash, the flag-day date and the late cutoff are published together. |
-| 2. Window | freeze to flag day (_window length_) | anchors first, then everyone | The first registry merge holds the anchors' person files and `anchors.json`. Everyone else registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and gets approved. |
+| 2. Window | freeze to flag day (_window length_) | anchors first, then everyone | The first registry merge holds the anchors' person files and `anchors.json`. Everyone else registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and gets approved. Everyone who signs or checks patches installs the patatt fork and sets its keyring sources. |
 | 3. Flag day | _flag-day date_ | Linus, release tooling, every developer | Linus and the release tooling switch to files from `git vouch export`. GPG-signed tags and pulls stop being accepted. |
-| 4. Late cutoff | _late-cutoff date_ | nobody | Continuity claims against C are accepted until this date. After it, people register as newcomers. |
+| 4. Late cutoff | _late-cutoff date_ | nobody; every patch checker deletes one config line | Continuity claims against C are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
 
 ## Kernel-team calls
 
@@ -428,6 +428,33 @@ GPG-signed tags from before the flag day stay valid in history.
 Verifying them uses `gpg` with the archived `pgpkeys.git` at C. There is
 no manifest.
 
+## Patch signing
+
+Patches are signed with patatt and checked with `b4 am`. A fork of
+patatt adds the keyring source `vouch:`, which reads the registry
+through `git vouch keys`. Unlike tags, patches get a fallback: the
+frozen pgpkeys keyring keeps working, with a warning, until the late
+cutoff. The commands are in each guide's Patch signing section
+([regulars](guide-regulars.md#patch-signing),
+[captains](guide-captains.md#patch-signing),
+[anchors](guide-anchors.md#patch-signing)).
+
+- **Before the flag day:** everyone who signs or checks patches installs
+  the fork in the Python environment b4 runs from, sets
+  `patatt.signingkey` to their registry SSH key and `patatt.selector` to
+  what `git vouch status` prints, and lists `keyringsrc = vouch:` first
+  and their clone of the frozen pgpkeys keyring, checked out at the
+  freeze commit, second. b4 ignores those sources while
+  `b4.keyringsrc` is set, so they remove it.
+- **From the flag day to the late cutoff:** patches signed with a
+  registry key verify through `vouch:`. Patches signed with a GPG key,
+  or with a key `patatt genkey` made, verify through pgpkeys, for
+  everyone, registered or not, and b4 prints a warning naming the legacy
+  keyring the first time it checks them.
+- **After the late cutoff:** everyone deletes the legacy keyring line.
+  No code changes. GPG-signed patches then show `No key`, and patches
+  signed with a key `patatt genkey` made show `TOFU: new key`.
+
 ## What breaks and how to recover
 
 | Symptom | Cause | Recovery |
@@ -448,6 +475,8 @@ no manifest.
 | `git verify-tag` says "No principal matched" | The signer has no tier at or above the export's minimum, has not been approved yet, or your registry copy is stale | Have them approved, or run `git vouch sync`. |
 | A GPG-signed tag after the flag day | GPG is no longer accepted | Re-sign the tag with `git tag -s` after `git vouch setup`. |
 | Missed the late cutoff | Continuity claims have ended | Register fresh and collect fresh endorsements. |
+| `b4 am` prints `W: ... verified via legacy keyring ...` | The patch is signed with a GPG key or a key `patatt genkey` made | Register an SSH key and sign patches with it before the late cutoff. |
+| `b4 am` prints `No key` for every registered signer | The patatt installed is not the fork, so `vouch:` finds nothing; `b4.keyringsrc` is set, so b4 ignores `patatt.keyringsrc`; or your registry copy is stale | Install the fork in b4's Python environment; run `git config --global --unset-all b4.keyringsrc`; run `git vouch sync`. |
 
 **What continuity cannot catch.** Someone holding a GPG key that was
 stolen and not revoked by C can claim that person's identity, just as
@@ -466,5 +495,4 @@ no GPG key and register fresh.
 ## Out of scope
 
 Encryption keys for the remail and security lists: kernel.org keeps a
-small encryption-only GPG keyring. Patch signing with b4 and patatt is
-not covered on this page.
+small encryption-only GPG keyring.

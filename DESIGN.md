@@ -569,11 +569,12 @@ small and in upstream style so it could be offered upstream. The rules
   fork when it is installed in place of patatt. Stock patatt still works
   with its existing keyrings, but does not see the registry.
 - **GPG fallback for the flag day:** the fork's recommended config lists
-  `vouch:` first and the legacy GPG keyring second, and patatt tries
-  sources in order. A patch that verifies through anything other than
-  `vouch:` gets a warning that the legacy keyring stops after the late
-  cutoff. The fallback applies to everyone, registered or not. After the
-  late cutoff people delete the legacy line; no code changes.
+  `vouch:` first and the legacy GPG keyring, a clone checked out at
+  the freeze commit, second, and patatt tries sources in order. A patch that verifies
+  through anything other than `vouch:` gets a warning that the legacy
+  keyring stops after the late cutoff. The fallback applies to
+  everyone, registered or not. After the late cutoff people delete the
+  legacy line; no code changes.
 - **Limits** (`docs/patatt-interop.md`): patatt cannot enforce FIDO
   touch or PIN, nor key validity dates beyond what `git vouch keys`
   returns. b4 caches verdicts for up to 24 hours, so a revoked key can
