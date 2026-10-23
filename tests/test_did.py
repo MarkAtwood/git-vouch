@@ -371,6 +371,8 @@ def test_cli_rejects_unsupported_real_keys(
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr.startswith(f"git-vouch: error: {error}")
+    hint = "make a new key with: ssh-keygen -t ed25519-sk"
+    assert result.stderr.rstrip().endswith(hint)
 
 
 def test_cli_rejects_dsa() -> None:

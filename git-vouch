@@ -46,6 +46,7 @@ P256_CODEC = b"\x80\x24"  # multicodec p256-pub (0x1200) as a varint
 RSA_CODEC = b"\x85\x24"  # multicodec rsa-pub (0x1205) as a varint
 # The kernel's floor (maintainer-pgp-guide.rst) and OpenSSH's ceiling.
 RSA_MIN_BITS, RSA_MAX_BITS = 2048, 16384
+NEW_KEY_HINT = "make a new key with: ssh-keygen -t ed25519-sk"
 P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
 P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
 # Number of SSH wire strings in each accepted key blob; sk- keys add an application.
@@ -431,7 +432,7 @@ def _check_rsa(n: int, e: int) -> None:
     if not RSA_MIN_BITS <= n.bit_length() <= RSA_MAX_BITS:
         raise VouchError(
             f"RSA key is {n.bit_length()} bits:"
-            f" {RSA_MIN_BITS} to {RSA_MAX_BITS} are accepted"
+            f" {RSA_MIN_BITS} to {RSA_MAX_BITS} are accepted; {NEW_KEY_HINT}"
         )
     if not (3 <= e < n and e & 1):
         raise VouchError("RSA exponent must be odd, at least 3 and less than n")
@@ -458,7 +459,7 @@ def ssh_to_did(pubkey: str) -> str:
         raise VouchError(
             f"unsupported key type {key_type!r}: only ed25519,"
             " ecdsa-sha2-nistp256 (and their sk- variants) and ssh-rsa keys"
-            " are accepted"
+            f" are accepted; {NEW_KEY_HINT}"
         )
     try:
         parts = _ssh_strings(base64.b64decode(fields[1], validate=True))
