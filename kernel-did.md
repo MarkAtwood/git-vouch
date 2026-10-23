@@ -1,5 +1,7 @@
 # Linux Kernel DID Identity and Signing System
 
+> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384, importing GPG secret keys) and status do not describe git-vouch.
+
 **Replaces:** GPG web of trust, kernel.org keyserver, `gpg --sign-key` ceremonies  
 **Status:** Adopted by the Linux Foundation  
 **Part of:** LF DID Infrastructure (see `lf-did-architecture.md` for the full picture)  

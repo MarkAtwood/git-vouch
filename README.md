@@ -16,7 +16,14 @@ already have:
   `allowed_signers` and revocation files that git reads.
 
 Using it needs no service, no agent, and no new place to keep keys. Your
-SSH key, YubiKey or gpg-agent works as it is.
+SSH key, YubiKey or gpg-agent works as it is, if the key is ed25519 or
+P-256.
+
+**RSA is not accepted,** at any size or on any hardware. 93% of the keys
+in `pgpkeys.git` are RSA, so most maintainers need a new key. Make it
+`ed25519-sk` on a hardware token, as kernel.org issues (`ecdsa-sk` if
+the token has no ed25519), not a bigger RSA key. A GPG key that already
+has an ed25519 or P-256 authentication subkey can keep using it.
 
 There will also be an agent daemon that bridges this to an OpenVTC
 instance, so OpenVTC's verifiers can check signers in the registry. It is

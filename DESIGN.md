@@ -475,7 +475,7 @@ code.
 -Y sign`, which uses the SSH agent or a key file, so any agent-backed
 store works: YubiKey (FIDO or PIV), Secure Enclave, 1Password, TPM, a
 cloud KMS, or gpg-agent with `enable-ssh-support` for people keeping an
-existing GPG key.
+existing GPG key that has an ed25519 or P-256 authentication subkey.
 
 **Hardware is recommended, not required.** Maintainers and anchors
 should keep their keys on a hardware token, but any supported key type is

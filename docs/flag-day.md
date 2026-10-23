@@ -144,6 +144,14 @@ Pick your route:
 | An ed25519 or P-256 authentication subkey on your pgpkeys key | Use it as your SSH key | The subkey signs your person file |
 | No pgpkeys key, or one revoked by C | Register fresh | None |
 
+Every route needs an ed25519 or P-256 SSH key; RSA is refused at any
+size or on any hardware. In `pgpkeys.git` at af88128 (2026-10-20), 602
+of 645 unexpired keys are RSA and 4 are DSA, and 93 have a reusable
+ed25519 or P-256 authentication subkey, so most holders make a new key:
+`ed25519-sk` on a token, or `ecdsa-sk` if the token has no ed25519. An
+RSA or DSA GPG key still signs the continuity proof; only the SSH key
+must be new.
+
 The continuity proof is needed only to receive endorsement drafts ported
 from GPG certifications. It grants no tier. Registering without it works;
 you then collect fresh endorsements.

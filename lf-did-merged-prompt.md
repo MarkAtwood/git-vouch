@@ -1,5 +1,7 @@
 # lf-did: Full Python Implementation — Agentic Build Prompt
 
+> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384, importing GPG secret keys) and status do not describe git-vouch.
+
 ## PREAMBLE FOR ORCHESTRATOR AGENT
 
 You are the **Orchestrator Agent** for this build. You will spawn and coordinate a fleet of subagents. Each subagent receives an explicit handoff packet (defined below) and returns an explicit result packet. You must not proceed to the next phase until the current phase's subagent returns `STATUS: COMPLETE` and all acceptance criteria pass. If a subagent returns `STATUS: BLOCKED` or `STATUS: FAILED`, you must resolve the blocker before continuing.
