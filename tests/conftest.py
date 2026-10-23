@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import os
 import subprocess
 import sys
+import time
+from collections.abc import Collection, Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import NamedTuple
@@ -13,6 +16,7 @@ from typing import NamedTuple
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "git-vouch"
+DAEMONS = {"gpg-agent", "scdaemon", "keyboxd", "dirmngr"}
 
 
 class Key(NamedTuple):
@@ -45,6 +49,43 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
     monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
     monkeypatch.delenv("GIT_DIR", raising=False)
+
+
+def agents_under(root: Path) -> list[str]:
+    """Return the command lines of gpg daemons whose homedir is under ``root``.
+
+    ponytail: reads Linux /proc; another platform would need ps.
+    """
+    found = []
+    for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            argv = cmdline.read_bytes().decode(errors="replace").split("\0")
+        except OSError:  # the process exited, or is not ours to read
+            continue
+        if Path(argv[0]).name in DAEMONS and any(
+            a.startswith(f"{root}{os.sep}") for a in argv[1:]
+        ):
+            found.append(" ".join(argv))
+    return found
+
+
+def wait_no_agents(root: Path, before: Collection[str] = ()) -> list[str]:
+    """Return the gpg daemons under ``root``, other than ``before``, still running 5s on."""
+    deadline = time.monotonic() + 5
+    while True:
+        left = [a for a in agents_under(root) if a not in before]
+        if not left or time.monotonic() > deadline:
+            return left
+        time.sleep(0.1)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def no_leaked_agents(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Fail a module whose fixtures leave a gpg daemon running in a test homedir."""
+    base = tmp_path_factory.getbasetemp()
+    before = agents_under(base)
+    yield
+    assert wait_no_agents(base, before) == []
 
 
 def make_key(directory: Path, name: str, keygen_args: list[str]) -> Key:

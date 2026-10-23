@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import importlib.machinery
 import importlib.util
 import json
@@ -23,7 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -1033,6 +1034,31 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
     return len(written)
 
 
+@contextlib.contextmanager
+def keyring() -> Iterator[Path]:
+    """Yield a new temporary gpg home; on exit, stop its gpg daemons and remove it."""
+    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
+        try:
+            yield Path(home)
+        finally:
+            # gpg starts gpg-agent on demand, and it outlives gpg and its homedir.
+            # A warning, not an error, so it cannot hide why the command failed.
+            try:
+                proc = subprocess.run(
+                    ["gpgconf", "--homedir", home, "--kill", "all"],
+                    capture_output=True,
+                )
+            except OSError as e:
+                print(f"git-vouch-migrate: warning: {e}", file=sys.stderr)
+            else:
+                if proc.returncode != 0:
+                    why = gpg_error(proc.stderr) or proc.returncode
+                    print(
+                        f"git-vouch-migrate: warning: gpgconf --kill all: {why}",
+                        file=sys.stderr,
+                    )
+
+
 def _open_pgpkeys(args: argparse.Namespace, home: Path) -> Pgpkeys:
     """Return the pgpkeys keyring at ``args.commit``, after checking its signature."""
     pgp = Pgpkeys(Path(args.pgpkeys), args.commit, home)
@@ -1057,8 +1083,8 @@ def cmd_port(args: argparse.Namespace) -> int:
         raise VouchError(
             f"{out}: already exists; drafts are only written to a new directory"
         )
-    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
-        port(_open_pgpkeys(args, Path(home)), out)
+    with keyring() as home:
+        port(_open_pgpkeys(args, home), out)
     return 0
 
 
@@ -1070,8 +1096,8 @@ def cmd_verify_continuity(args: argparse.Namespace) -> int:
     _check_signer(args)
     for handle in args.handles:
         vouch.validate_handle(handle)
-    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
-        pgp = _open_pgpkeys(args, Path(home))
+    with keyring() as home:
+        pgp = _open_pgpkeys(args, home)
         found = verify_continuity(pgp, Path(args.registry), args.handles)
     for fpr, handles in found.duplicates.items():
         print(f"duplicate {fpr}: {', '.join(handles)}")
@@ -1093,8 +1119,8 @@ def cmd_drafts(args: argparse.Namespace) -> int:
         raise VouchError(
             f"{out}: already exists; drafts are only written to a new directory"
         )
-    with tempfile.TemporaryDirectory(prefix="git-vouch-migrate.") as home:
-        drafts(_open_pgpkeys(args, Path(home)), Path(args.registry), args.handle, out)
+    with keyring() as home:
+        drafts(_open_pgpkeys(args, home), Path(args.registry), args.handle, out)
     return 0
 
 

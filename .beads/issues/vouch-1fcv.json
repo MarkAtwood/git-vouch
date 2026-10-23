@@ -4,11 +4,15 @@
   "description": "Observed 2026-10-23: ~100 gpg-agent/scdaemon processes left running from pytest homedirs under /tmp/pytest-of-mark (e.g. regulars0/*/gnupg, captains0/verifier), some 40+ minutes old. Fixtures that create GNUPGHOME must kill their agents at teardown (gpgconf --homedir X --kill all) or run gpg with --no-autostart where possible. Applies to tests/migrate and doc tests.",
   "acceptance_criteria": "After a full test run, no gpg-agent/scdaemon remains with a pytest homedir; a test or conftest check enforces it.",
   "notes": "Also git-vouch-migrate itself leaks: gpg-agent processes with --homedir /tmp/mig-ring.* (its own temp keyrings) stay running after the tool exits; the tool must kill its agent (gpgconf --homedir --kill all) in a finally block. Session scratchpad keyrings also leaked. Mark asked 2026-10-23 to kill them all; cleaned by hand (age \u003e 15 min).",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "bug",
+  "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T17:54:24.533445147Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T17:55:09.410542551Z"
+  "updated_at": "2026-10-23T21:28:00.783545556Z",
+  "started_at": "2026-10-23T20:38:50.045541064Z",
+  "closed_at": "2026-10-23T21:28:00.783545556Z",
+  "close_reason": "git-vouch-migrate keyring() kills its gpg daemons in a finally (warns if gpgconf fails); guide fixtures also kill the verifier home; tests/conftest.py autouse no_leaked_agents fails any module leaving a gpg daemon under the basetemp. Tests: test_hygiene.py::test_port_leaves_no_agent, test_keyring_kills_its_agent_on_error, test_keyring_warns_when_gpgconf_fails; mutation-checked (also patatt kill loop removal caught)"
 }

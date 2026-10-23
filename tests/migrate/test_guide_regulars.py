@@ -297,7 +297,8 @@ def guide(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Guide]:
                 break
         yield Guide(world, fprs, ran)
     finally:
-        for home in world.glob("*/gnupg"):
+        # The verifier home is made by a test, after the steps ran.
+        for home in [*world.glob("*/gnupg"), world / "verifier"]:
             subprocess.run(
                 ["gpgconf", "--homedir", str(home), "--kill", "all"], check=False
             )
