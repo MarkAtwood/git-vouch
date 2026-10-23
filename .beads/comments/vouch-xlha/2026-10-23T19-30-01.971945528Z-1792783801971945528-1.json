@@ -1,0 +1,7 @@
+{
+  "id": "1792783801971945528-1",
+  "issue_id": "vouch-xlha",
+  "author": "agent",
+  "text": "Agent C (efficiency/elegance/readability) calibration. Review confidence: 25% chance of a missed efficiency or structural issue of S2 or worse; correctness was not this agent's brief. Least confident areas: exact ssh-keygen count per check at kernel scale (xlha.3 is estimated from code paths, not measured), History.at/_nearest cost on many-version files such as anchors.json (judged small, not measured), git-vouch-attest internals (skimmed only). Would raise confidence if: someone runs check on a synthetic 606-person/1,800-endorsement registry with merge commits and counts subprocesses via strace -f -e execve; and someone checks the combined-log rewrite in xlha.2 for per-path equivalence on branched histories. Measured: per-path file_history about 100 ms at 3,000 commits vs 0.53 s for one combined log; ssh-keygen -Y verify about 9 ms; suite 443 s. Out of real issues beyond what is filed; test-helper duplication and attest's small parser copies judged not worth filing.",
+  "created_at": "2026-10-23T19:30:01.971945528Z"
+}

@@ -7,8 +7,9 @@ answers each from ``git vouch query``, which stays the only judge of who
 holds which key. Stateless and unauthenticated: the registry is public.
 TLS is left to a reverse proxy, which must also buffer each whole request
 and bound how long it may take: the server limits each socket read, not a
-request, and starts a thread per connection. See DESIGN.md, TRQP bridge, and
-docs/trqp-interop.md.
+request, and starts a thread per connection. ``did-document`` prints the
+registry's DID document, which advertises the bridge to verify-trust. See
+DESIGN.md, TRQP bridge, and docs/trqp-interop.md.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
+from urllib.parse import urlsplit
 
 TASK_TYPE = "https://trusttasks.org/spec/registry/authorization/0.1"
 TASK_FAMILY = "https://trusttasks.org/spec/registry/authorization/"
@@ -59,6 +61,8 @@ DID_KEY = re.compile(r"did:key:z[1-9A-HJ-NP-Za-km-z]{1,2048}")
 SERVED_DID = re.compile(r"did:web(?:vh)?:[!-~]+")
 HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 SEGMENT = re.compile(r"[a-z0-9._-]+")
+DID_WEB_HOST = re.compile(r"([a-z0-9.-]{1,253})(?:%3A[0-9]{1,5})?")
+DID_WEB_PATH = re.compile(r"[A-Za-z0-9._~-]+")
 EXT_NAMESPACE = re.compile(r"[a-z][a-z0-9-]*(\.[a-z0-9-]+)+")
 ENVELOPE_STRINGS = ("id", "threadId", "parentThreadId", "issuer", "recipient")
 PAYLOAD_KEYS = {"entity_id", "authority_id", "action", "resource", "context", "ext"}
@@ -379,6 +383,98 @@ def serve(did: str, bind: str, port: int) -> int:
     return 0
 
 
+def check_endpoint(endpoint: str) -> None:
+    """Check that ``endpoint`` is a base URL verify-trust can POST trust tasks to.
+
+    trql-client appends ``/trust-tasks`` to the base, so a query or fragment
+    would swallow the path.
+
+    Raises:
+        ValueError: ``endpoint`` is not an https:// URL with a host, or has a
+            query, fragment, userinfo, backslash, or a character outside
+            printable ASCII.
+    """
+    if not (endpoint.isascii() and endpoint.isprintable()) or " " in endpoint:
+        raise ValueError("it must be printable ASCII without spaces")
+    try:
+        url = urlsplit(endpoint)
+        url.port  # noqa: B018 (raises ValueError on a bad port)
+    except ValueError as e:
+        raise ValueError("it is not a URL") from e
+    if url.scheme != "https" or not url.hostname:
+        raise ValueError("it must be an https:// URL with a host")
+    if "?" in endpoint or "#" in endpoint:
+        raise ValueError("it must have no query or fragment")
+    # A WHATWG parser (verify-trust's url crate) ends the host at a backslash
+    # where urlsplit does not, and userinfo would be published in the document.
+    if "\\" in endpoint or url.username is not None:
+        raise ValueError("it must have no backslash or user@")
+
+
+def did_document(did: str, endpoint: str) -> dict[str, object]:
+    """Return ``did``'s DID document advertising the bridge at base URL ``endpoint``.
+
+    One ``TRQPRest`` service and nothing else: verify-trust prefers TSP and
+    DIDComm over HTTPS without fallback (docs/trqp-interop.md section 2). The
+    service id is absolute because the resolver parses it as a URL.
+    """
+    return {
+        "@context": ["https://www.w3.org/ns/did/v1"],
+        "id": did,
+        "service": [
+            {"id": f"{did}#rest", "type": "TRQPRest", "serviceEndpoint": endpoint}
+        ],
+    }
+
+
+def is_did_web(did: str) -> bool:
+    """Return whether ``did`` is a did:web, or did:webvh, the bridge can publish.
+
+    The host is DNS labels with an optional ``%3A`` port; each path part is
+    unreserved characters, so nothing in it needs percent-decoding.
+    ponytail: stricter than did:web (no IDNs or encoded path characters);
+    widen if a registry ever needs them.
+    """
+    if did.startswith("did:webvh:"):
+        scid, _, rest = did[len("did:webvh:") :].partition(":")
+        if not scid.isalnum():
+            return False
+    elif did.startswith("did:web:"):
+        rest = did[len("did:web:") :]
+    else:
+        return False
+    host, *path = rest.split(":")
+    m = DID_WEB_HOST.fullmatch(host)
+    return (
+        m is not None
+        and all(HOST_LABEL.fullmatch(label) for label in m[1].split("."))
+        and all(DID_WEB_PATH.fullmatch(s) and s not in (".", "..") for s in path)
+    )
+
+
+def did_web_url(did: str) -> str:
+    """Return the URL a did:web resolver fetches ``did``'s document from (did:web 2.5.2).
+
+    ``did`` must pass ``is_did_web``.
+    """
+    host, *path = did[len("did:web:") :].split(":")
+    host = host.replace("%3A", ":")
+    if not path:
+        return f"https://{host}/.well-known/did.json"
+    return "/".join([f"https://{host}", *path, "did.json"])
+
+
+def print_did_document(did: str, endpoint: str) -> int:
+    """Print ``did``'s DID document on stdout and where it goes on stderr."""
+    print(json.dumps(did_document(did, endpoint), indent=2))
+    if did.startswith("did:web:"):
+        where = f"serve it at {did_web_url(did)}"
+    else:
+        where = "sign it into the did:webvh log with a webvh tool"
+    print(f"git-vouch-trqp: {where}", file=sys.stderr)
+    return 0
+
+
 def main(argv: Sequence[str]) -> int:
     """Run the command line; return the exit status."""
     parser = argparse.ArgumentParser(
@@ -394,9 +490,26 @@ def main(argv: Sequence[str]) -> int:
         help="address (default 127.0.0.1); put a buffering reverse proxy in front",
     )
     run.add_argument("--port", type=int, default=8080, help="port (default 8080)")
+    doc = commands.add_parser(
+        "did-document", help="print the registry's DID document with its TRQP service"
+    )
+    doc.add_argument("--did", required=True, help="the registry's did:web or did:webvh")
+    doc.add_argument(
+        "--endpoint",
+        required=True,
+        help="the bridge's public https:// base URL, without /trust-tasks",
+    )
     args = parser.parse_args(argv)
     if not SERVED_DID.fullmatch(args.did):
         parser.error(f"--did must be a did:web or did:webvh: {args.did!r:.80}")
+    if args.command == "did-document":
+        if not is_did_web(args.did):
+            parser.error(f"--did must be a did:web or did:webvh: {args.did!r:.80}")
+        try:
+            check_endpoint(args.endpoint)
+        except ValueError as e:
+            parser.error(f"--endpoint {args.endpoint!r:.80}: {e}")
+        return print_did_document(args.did, args.endpoint)
     return serve(args.did, args.bind, args.port)
 
 
