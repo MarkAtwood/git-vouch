@@ -8,9 +8,11 @@ directory with no history, which must reach the snapshot verdict instead.
 
 from __future__ import annotations
 
+import inspect
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -18,7 +20,7 @@ from types import ModuleType
 import pytest
 
 from conftest import Key, run_script
-from test_check import ADDED, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
+from test_check import ADDED, AFTER, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
 from test_export import export, repo, sign_file, ssh_verify, tag, verifies  # noqa: F401 (repo is a fixture)
 
 
@@ -1464,5 +1466,163 @@ def test_merged_unverified_tier_records_are_walked_once(
     reg.tier("gregkh", "maintainer", "torvalds", key("torvalds"))
     reg.commit()
     result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert result.tiers["gregkh"] == "maintainer"
+
+
+def test_replayed_tier_record_does_not_undo_a_demotion(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # torvalds demotes gregkh; anyone can copy the old signed maintainer
+    # record back, and that must not restore the tier torvalds withdrew.
+    old = {
+        rel: (reg.root / rel).read_bytes()
+        for rel in ("tiers/gregkh.json", "tiers/gregkh.json.sig")
+    }
+    reg.tier("gregkh", "contributor", "torvalds", key("torvalds"), AFTER)
+    reg.commit()
+    for rel, data in old.items():
+        (reg.root / rel).write_bytes(data)
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "tiers/gregkh.json", "restores an earlier record")
+    assert "gregkh" not in result.tiers
+    cli = run_script("check", str(reg.root))
+    assert cli.returncode != 0
+    assert "gregkh maintainer" not in cli.stdout
+
+
+def test_record_restored_over_one_that_does_not_verify_stands(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # alice may not grant, so her record changed nothing; putting back the
+    # maintainer record it displaced undoes no valid record.
+    old = {
+        rel: (reg.root / rel).read_bytes()
+        for rel in ("tiers/gregkh.json", "tiers/gregkh.json.sig")
+    }
+    reg.tier("gregkh", "contributor", "alice", key("alice"))
+    reg.commit()
+    for rel, data in old.items():
+        (reg.root / rel).write_bytes(data)
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert result.tiers["gregkh"] == "maintainer"
+
+
+def test_revocation_dropped_by_merge_ours_still_holds(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], tmp_path: Path
+) -> None:
+    # The revoking commit is an ancestor of HEAD even though the merge kept
+    # main's tree, so the revocation holds like one deleted later.
+    reg.git("checkout", "-q", "-b", "side")
+    reg.revoke("alice", key("alice"), key("torvalds"))
+    reg.commit()
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "-s", "ours", "--no-edit", "side")
+    assert not (reg.root / "revocations").exists()
+    result = vouch.check_registry(reg.root)
+    assert set(result.revoked) == {did(key("alice"))}
+    revocations = tmp_path / "revoked"
+    cli = run_script(
+        "export",
+        str(reg.root),
+        "--allowed-signers",
+        str(tmp_path / "allowed"),
+        "--revocation-file",
+        str(revocations),
+    )
+    assert cli.returncode == 0, cli.stderr
+    assert revocations.read_text().split() == key("alice").pubkey.split()[:2]
+
+
+@pytest.mark.parametrize("how", ["delete first", "merge --no-ff", "merge -s ours"])
+def test_old_tier_record_brought_back_does_not_undo_a_demotion(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], how: str
+) -> None:
+    # Deleting the demotion first, or merging a branch that still holds the
+    # old record, hides nothing: the demotion is still an ancestor of HEAD.
+    old = {
+        rel: (reg.root / rel).read_bytes()
+        for rel in ("tiers/gregkh.json", "tiers/gregkh.json.sig")
+    }
+    reg.git("branch", "old")
+    reg.tier("gregkh", "contributor", "torvalds", key("torvalds"), AFTER)
+    reg.commit()
+    if how == "delete first":
+        reg.delete("tiers/gregkh.json")
+        reg.commit()
+        for rel, data in old.items():
+            (reg.root / rel).write_bytes(data)
+        reg.commit()
+    else:
+        reg.git("checkout", "-q", "old")
+        (reg.root / "README").write_text("unrelated\n")
+        reg.commit()
+        if how == "merge --no-ff":  # resolved to the old side
+            reg.git("checkout", "-q", "main")
+            reg.git("merge", "-q", "--no-ff", "--no-commit", "old")
+            reg.git("checkout", "old", "--", "tiers")
+            reg.commit()
+        else:  # the old branch keeps its tree, and main fast-forwards to it
+            reg.git("merge", "-q", "-s", "ours", "--no-edit", "main")
+            reg.git("checkout", "-q", "main")
+            reg.git("merge", "-q", "--ff-only", "old")
+    assert (reg.root / "tiers/gregkh.json").read_bytes() == old["tiers/gregkh.json"]
+    result = vouch.check_registry(reg.root)
+    assert has(result.problems, "tiers/gregkh.json", "restores an earlier record")
+    assert "gregkh" not in result.tiers
+
+
+def test_lower_tier_record_brought_back_over_a_promotion_stands(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # Undoing a promotion takes authority away, like deleting a tier record;
+    # it is review's call, not a signature's.
+    old = {
+        rel: (reg.root / rel).read_bytes()
+        for rel in ("tiers/alice.json", "tiers/alice.json.sig")
+    }
+    reg.tier("alice", "maintainer", "torvalds", key("torvalds"), AFTER)
+    reg.commit()
+    for rel, data in old.items():
+        (reg.root / rel).write_bytes(data)
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == [] and result.voids == []
+    assert result.tiers["alice"] == "contributor"
+
+
+def test_many_versions_of_a_record_do_not_deepen_the_recursion(
+    vouch: ModuleType, reg: GitRegistry
+) -> None:
+    # Anyone can commit as many versions of a record as they like; here the
+    # signed one alternates with a copy plus a newline, which does not verify.
+    rel = "tiers/gregkh.json"
+    signed = (reg.root / rel).read_bytes()
+    stream = b""
+    for n in range(1, 201):
+        data = signed + b"\n" if n % 2 else signed
+        stream += (
+            (
+                f"commit refs/heads/main\ncommitter t <t@example.org>"
+                f" {1767225600 + 86400 * n} +0000\ndata 0\n"
+                + ("from refs/heads/main^0\n" if n == 1 else "")
+                + f"M 100644 inline {rel}\ndata {len(data)}\n"
+            ).encode()
+            + data
+            + b"\n"
+        )
+    subprocess.run(
+        ["git", "fast-import", "--quiet"], input=stream, cwd=reg.root, check=True
+    )
+    reg.git("reset", "-q", "--hard")
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(len(inspect.stack(0)) + 150)
+    try:
+        result = vouch.check_registry(reg.root)
+    finally:
+        sys.setrecursionlimit(limit)
     assert result.problems == []
     assert result.tiers["gregkh"] == "maintainer"

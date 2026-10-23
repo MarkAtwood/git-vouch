@@ -1083,6 +1083,13 @@ class CheckResult(NamedTuple):
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
 RANK = {"anchor": 0, "maintainer": 1, "contributor": 2, "automation": 2}
+
+
+def demotes(old: str, new: str) -> bool:
+    """Return whether a record of tier ``new`` replacing ``old`` ends ``old`` (a demotion)."""
+    return (old == "automation") != (new == "automation") or RANK[old] < RANK[new]
+
+
 # The paths whose history check reads; endorsements are judged on the tree alone.
 HISTORY_RE = re.compile(
     r"anchors\.json|(?:people|tiers|revocations)/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
@@ -1231,7 +1238,17 @@ def registry_history(
     kept: dict[str, list[tuple[str, str, str]]] = {}  # rel -> [(merge, mode, blob)]
     if commits:
         log = run(
-            [*GIT_LOG, "log", "--format=", "--name-only", "-z", "--no-renames"],
+            # --full-history: a side branch's files count even where a merge
+            # dropped them, so a revocation merged with -s ours still holds.
+            [
+                *GIT_LOG,
+                "log",
+                "--full-history",
+                "--format=",
+                "--name-only",
+                "-z",
+                "--no-renames",
+            ],
             values=sources,
             cwd=root,
         )
@@ -1804,6 +1821,38 @@ def check_registry(root: Path) -> CheckResult:
                     f"{rel}: {t.approver} ({claimed_at(t.approver, a) or 'no tier'})"
                     f" may not grant {t.tier}"
                 )
+        # These bytes may not come back, by a commit or a merge, over a
+        # demotion committed after them: the signature covers the bytes, so
+        # only the approver can make a newer record. Judged by ancestry from
+        # i, so deleting the demotion first or merging hides nothing.
+        # Ascending, so each judge below finds the earlier ones judged.
+        same = 0
+        for v, d in history.versions[rel]:
+            if d == data and history.before(v, i):
+                same |= 1 << v
+        tier_of: dict[bytes, Optional[str]] = {}  # each content parsed once
+        for w, d in history.versions[rel]:
+            if d is None or d == data or not history.before(w, i):
+                continue
+            if not history.ancestors[w] & same:
+                continue
+            if d not in tier_of:
+                try:
+                    was = parse_record(rel, d)
+                except VouchError:
+                    was = None
+                tier_of[d] = was.tier if isinstance(was, Tier) else None
+            was_tier = tier_of[d]
+            if (
+                was_tier is not None
+                and demotes(t.tier, was_tier)
+                and not isinstance(judge(handle, w), VouchError)
+            ):
+                raise VouchError(
+                    f"{rel}: restores an earlier record at {history.name(i)},"
+                    f" undoing the {was_tier} record at {history.name(w)};"
+                    " needs a new approval"
+                )
         if any(history.at(f"people/{t.subject}.json", a) is None for a in added):
             raise Void(f"{rel}: void: committed before people/{t.subject}.json existed")
         # Like the approver, the accountable maintainer is judged where the
@@ -1859,24 +1908,6 @@ def check_registry(root: Path) -> CheckResult:
             )
         return t.tier
 
-    tiers: dict[str, str] = {}
-    for a in anchors:
-        if a not in parsed:
-            problems.append(f"anchors.json: no person file for {a}")
-        elif a in people:
-            tiers[a] = "anchor"
-    for rel, t, _, _ in tier_records:
-        if t.subject in anchors:
-            problems.append(f"{rel}: {t.subject} is an anchor")
-            continue
-        result = judge(t.subject, final)
-        if isinstance(result, str):
-            tiers[t.subject] = result
-        elif isinstance(result, Void):
-            voids.append(str(result))
-        else:
-            problems.append(str(result))
-
     stood: dict[tuple[str, int], list[tuple[int, Union[str, Void, None]]]] = {}
 
     def standing(handle: str, i: int) -> list[tuple[int, Union[str, Void, None]]]:
@@ -1902,6 +1933,24 @@ def check_registry(root: Path) -> CheckResult:
             stood[handle, i] = list(found.items())
         return stood[handle, i]
 
+    tiers: dict[str, str] = {}
+    for a in anchors:
+        if a not in parsed:
+            problems.append(f"anchors.json: no person file for {a}")
+        elif a in people:
+            tiers[a] = "anchor"
+    for rel, t, _, _ in tier_records:
+        if t.subject in anchors:
+            problems.append(f"{rel}: {t.subject} is an anchor")
+            continue
+        result = judge(t.subject, final)
+        if isinstance(result, str):
+            tiers[t.subject] = result
+        elif isinstance(result, Void):
+            voids.append(str(result))
+        else:
+            problems.append(str(result))
+
     def tier_ends(handle: str, start: int) -> dict[str, datetime]:
         # Walk back from ``start`` through every version of the tier record;
         # a tier held more than once ends at its latest end.
@@ -1923,9 +1972,7 @@ def check_registry(root: Path) -> CheckResult:
                             continue
                         if not (isinstance(held, str) and isinstance(record, Tier)):
                             end = history.date(a)  # deleted, or replaced without effect
-                        elif (held == "automation") != (was == "automation") or (
-                            RANK[was] < RANK[held]
-                        ):
+                        elif demotes(was, held):
                             end = record.date
                         else:
                             continue
