@@ -611,7 +611,11 @@ SSH key. After it, nothing new needs `gpg`.
 3. **Flag day.** Linus and the release tooling switch to files from
    `git vouch export`, and GPG-signed tags and pulls stop being accepted.
 4. **Late cutoff.** Continuity claims against C are accepted until this
-   date. After it, people register as newcomers.
+   date. After it, people register as newcomers. No tool enforces it:
+   after the cutoff, registry maintainers do not merge any change that
+   adds or alters a `migratedFrom` field or adds a `people/*.json.asc`.
+   That covers both proof routes, since reusing an auth subkey also
+   needs `migratedFrom`. The merge date counts, not the commit date.
 
 **Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at C, after
 verifying C's signature. For each unrevoked person key it writes an unsigned

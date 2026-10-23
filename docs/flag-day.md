@@ -36,10 +36,9 @@ values:
   administrators), and how people submit branches to it. The rehearsal
   pushes a branch to the registry; a merge request works the same way.
 
-**Not yet decided:** nothing in the tools rejects a continuity claim
-made after the late cutoff, and which date would count (commit or merge)
-is open. Until that is settled, the registry maintainers' review is the
-only gate.
+**The late cutoff is policy, not code.** After it, registry maintainers
+do not merge any change that adds or alters a `migratedFrom` field or
+adds a `people/*.json.asc`. The merge date counts, not the commit date.
 
 ## Who does what
 
@@ -412,7 +411,9 @@ From this date a GPG-signed tag or pull is not accepted.
 
 Continuity claims against C are accepted until this date. Anyone who
 has not registered by then registers fresh, as `carol` did, and collects
-fresh endorsements.
+fresh endorsements. From this date registry maintainers merge no change
+that adds or alters `migratedFrom` or adds a `people/*.json.asc`; a
+branch merged after it is late, whenever it was committed.
 
 GPG-signed tags from before the flag day stay valid in history.
 Verifying them uses `gpg` with the archived `pgpkeys.git` at C. There is

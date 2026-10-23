@@ -98,7 +98,9 @@ the same merge deletes their `tiers/<handle>.json`, and a tier record
 granted on a branch concurrent with removing its approver from
 `anchors.json` is void, with a warning, until someone re-approves it.
 Who the registry maintainers are is a kernel-team decision, and it
-matters as much as the anchor list.
+matters as much as the anchor list. Registry maintainers also enforce
+the late cutoff, which no tool checks: after it they merge no change
+that adds or alters `migratedFrom` or adds a `people/*.json.asc`.
 
 ### Approve the first maintainers
 
