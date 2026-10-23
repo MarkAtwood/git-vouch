@@ -1,0 +1,23 @@
+{
+  "id": "vouch-omzm.11",
+  "title": "State the 6-month late cutoff in docs and the patatt warning",
+  "description": "Mark 2026-10-23: late cutoff = six months after flag day (vouch-omzm.8 notes). Update DESIGN.md Flag day, docs/flag-day.md and guides; make the patatt fork's legacy-keyring warning say 'six months after flag day' (one-line string change, ~/PROJECT/patatt branch git-vouch).",
+  "acceptance_criteria": "grep finds the six-month rule in DESIGN, flag-day.md and the patatt warning; patatt ci.sh and git-vouch tests pass.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T15:20:08.462729515Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T15:20:08.462729515Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.11",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-23T15:20:08.484788519Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

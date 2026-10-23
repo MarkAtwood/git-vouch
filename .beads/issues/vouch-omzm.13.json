@@ -1,0 +1,23 @@
+{
+  "id": "vouch-omzm.13",
+  "title": "Rehearsal and runbook: sign drafts with endorse --from",
+  "description": "vouch-ey47.20 added git vouch endorse --from DRAFT. tests/migrate/rehearsal.sh and the docs/flag-day.md endorsement loop still use 'ssh-keygen -Y sign ... -n git-vouch-endorse'. Switch both, in the same change, to 'git vouch endorse --from \"$f\"'.",
+  "acceptance_criteria": "rehearsal.sh runs green using endorse --from; flag-day.md loop matches it exactly; no remaining raw -n git-vouch-endorse signing in docs or rehearsal.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T15:25:44.622823663Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T15:25:44.622823663Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-omzm.13",
+      "depends_on_id": "vouch-omzm",
+      "type": "parent-child",
+      "created_at": "2026-10-23T15:25:44.642731192Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

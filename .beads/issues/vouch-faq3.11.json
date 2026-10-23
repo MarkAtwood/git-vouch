@@ -1,0 +1,23 @@
+{
+  "id": "vouch-faq3.11",
+  "title": "query --at: tiers held at TIME from git history",
+  "description": "Implements Mark's decision (b) on vouch-faq3.10 (closed). git vouch query --at TIME derives the tier, automation status and endorsed emails a handle held at TIME from the registry's git history (the tier-record and person-file versions committed at or before TIME, the same history check_registry walks), not from the current files. query only; export unchanged. Fixes: promotion after TIME counted backwards; a handle that was automation until T1 read as human at T0\u003cT1 (bridge would authorize a bot-era signature); demotion. tier_at docstring currently says it is not the tier held at when; fix that. DESIGN.md TRQP bridge / query: one line that query and export can differ for past times.",
+  "acceptance_criteria": "Hand-written tests in tests/test_query.py: promoted after TIME -\u003e old tier at TIME; automation until T1 -\u003e automation=true at T0; demoted after TIME -\u003e old tier at TIME; time before the handle existed -\u003e unknown. tests/trqp: bot-era signature by since-promoted handle -\u003e authorized=false. 3.12 and 3.9 pass, ruff clean.",
+  "status": "open",
+  "priority": 1,
+  "issue_type": "feature",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T15:25:44.467866675Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T15:25:44.467866675Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-faq3.11",
+      "depends_on_id": "vouch-faq3",
+      "type": "parent-child",
+      "created_at": "2026-10-23T15:25:44.487313857Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

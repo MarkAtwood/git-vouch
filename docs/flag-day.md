@@ -288,9 +288,10 @@ accepted), every email in the person file is on an unrevoked user ID of
 that key, and no other person file claims the same fingerprint. The
 proof is judged against the version of your person file it was made
 for, found in the registry's history, so a later `add-key`,
-`retire-key` or email change does not undo it. A change no current key
-signed, such as lost-key recovery or registering a deleted handle again,
-does: the current version then needs its own proof.
+`retire-key` or email change does not undo it, provided every version
+since was signed by a key current in the version before it (the change
+`git vouch check` warns about otherwise, such as lost-key recovery or
+registering a deleted handle again, means you make a fresh `.asc`).
 
 ### Endorsements from GPG certifications
 

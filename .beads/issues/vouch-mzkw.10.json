@@ -1,0 +1,23 @@
+{
+  "id": "vouch-mzkw.10",
+  "title": "Docs: install b4 from the MarkAtwood/b4 fork",
+  "description": "Mark 2026-10-23: b4 fork created at github.com/MarkAtwood/b4, branch git-vouch (bfba0af: configurable patatt recheck window, keyring label, misc/vouch-check.sh). Guides should install b4 from the fork next to the patatt fork (pip install 'b4 @ git+https://github.com/MarkAtwood/b4@git-vouch'), recommend b4.attestation-recheck-hours = 0 as fork config (not released b4), and point to misc/vouch-check.sh. Upstream submission stays held (vouch-mzkw.9). Doc test: like test_the_install_line_installs_the_tested_fork, assert the b4 install line resolves to the tested fork commit; run the guides' blocks against the fork (B4 fork clone) so revocation is immediate with recheck-hours = 0.",
+  "acceptance_criteria": "Guides' b4 install line and config tested against origin/git-vouch of MarkAtwood/b4; revocation test shows no cached pass with recheck-hours = 0; tests pass on 3.12 and 3.9; ruff clean.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T15:25:20.509244118Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T15:25:20.509244118Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-mzkw.10",
+      "depends_on_id": "vouch-mzkw",
+      "type": "parent-child",
+      "created_at": "2026-10-23T15:25:20.530279972Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

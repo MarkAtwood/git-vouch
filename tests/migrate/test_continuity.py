@@ -633,6 +633,7 @@ def test_earlier_proof_does_not_survive_an_unsigned_key_replacement(
     proc = verify(pgpkeys, registry, "alice")
     assert proc.returncode == 1
     assert "fail alice: people/alice.json.asc: gpg reports BADSIG" in proc.stdout
+    assert "a version since needs its own (a fresh .asc" in proc.stdout
 
 
 def test_earlier_proof_does_not_survive_re_registration(
@@ -655,3 +656,31 @@ def test_earlier_proof_does_not_survive_re_registration(
     proc = verify(pgpkeys, registry, "alice")
     assert proc.returncode == 1
     assert "fail alice: no people/alice.json.asc" in proc.stdout
+    assert "a version since needs its own (a fresh .asc" in proc.stdout
+
+
+def test_fresh_proof_after_recovery_survives_a_signed_add_key(
+    pgpkeys: Pgpkeys, registry: Path, ed25519_key: Any, ecdsa_key: Any, rsa_key: Any
+) -> None:
+    alice = pgpkeys.fprs["alice"]
+    path = write_person(
+        registry, "alice", alice, ["alice@example.org"], [ed25519_key.pubkey]
+    )
+    ssh_sign(path, ed25519_key.private)
+    gpg_sign(pgpkeys, path, alice)
+    commit_all(registry, "v1")
+    # v2 is a lost-key recovery with its own fresh proof.
+    write_person(registry, "alice", alice, ["alice@example.org"], [ecdsa_key.pubkey])
+    ssh_sign(path, ecdsa_key.private)
+    gpg_sign(pgpkeys, path, alice)
+    commit_all(registry, "v2")
+    # v3 adds a key, signed by v2's key: the v2 proof still counts.
+    write_person(
+        registry, "alice", alice, ["alice@example.org"],
+        [ecdsa_key.pubkey, rsa_key.pubkey],
+    )  # fmt: skip
+    ssh_sign(path, ecdsa_key.private)
+    commit_all(registry, "v3")
+    proc = verify(pgpkeys, registry, "alice")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"ok alice: openpgp4fpr:{alice} by .asc" in proc.stdout

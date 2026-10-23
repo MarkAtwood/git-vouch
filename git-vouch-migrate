@@ -641,15 +641,28 @@ def _prove_version(
     raise VouchError(errors[0])
 
 
-def _committed(root: Path, rel: str) -> list[bytes]:
-    """Return every committed content of ``rel`` in the registry, newest first.
+def _committed(root: Path, rel: str, since: Collection[str] = ()) -> list[bytes]:
+    """Return committed contents of ``rel`` in the registry, newest first.
+
+    Only versions at or descended from every commit in ``since`` count.
 
     Raises:
         VouchError: The registry's history cannot be read.
     """
     if not vouch._is_repo_top(root):
         return []
-    return [v.data for v in reversed(vouch.file_history(root, rel)) if v.data]
+    allowed = None
+    for commit in since:
+        out = vouch.run(
+            [*vouch.GIT, "rev-list", "--ancestry-path", f"{commit}..HEAD"], cwd=root
+        )
+        after = {commit, *out.decode().split()}
+        allowed = after if allowed is None else allowed & after
+    return [
+        v.data
+        for v in reversed(vouch.file_history(root, rel))
+        if v.data and (allowed is None or v.commit in allowed)
+    ]
 
 
 def _prove(
@@ -658,16 +671,18 @@ def _prove(
     handle: str,
     key: GpgKey,
     revoked: Collection[str],
-    chained: bool,
+    unchained: Collection[str],
 ) -> str:
     """Return how the holder of GPG ``key`` proved that ``people/<handle>.json`` is theirs.
 
     The proof is judged against the version of the person file it was made
     for, found in the registry's history, so a later add-key, retire-key or
     email change does not undo it. That version must claim ``key`` and pass
-    the email check itself. Only the current version counts unless
-    ``chained``: a change that only review let through, such as a lost-key
-    recovery or a handle registered again after deletion, needs a new proof.
+    the email check itself. ``unchained`` names where ``git vouch check``
+    warns the file changed without a signature by a key current in the
+    version before (a commit, or "the working tree"): a lost-key recovery or
+    a handle registered again after deletion. Only versions at or after
+    every such change count.
 
     Raises:
         VouchError: No version proves it; the reason given is the current
@@ -685,13 +700,19 @@ def _prove(
         return _prove_version(pgp, rel, data, sigs, ascs, key, revoked)
     except VouchError as e:
         why = e
-    if not chained:
+    if unchained:
+        why = VouchError(
+            f"{why}; a proof for a version before the last change only registry"
+            " review let through does not count: a version since needs its own"
+            " (a fresh .asc or an auth-subkey signature)"
+        )
+    if "the working tree" in unchained:
         raise why
     # ponytail: every version against every signature, one verifier run per
     # pair; fine for the few edits a person file sees.
     sigs += _committed(root, rel + ".sig")
     ascs += _committed(root, rel + ".asc")
-    for old in _committed(root, rel):
+    for old in _committed(root, rel, unchained):
         try:
             return _prove_version(pgp, rel, old, sigs, ascs, key, revoked)
         except VouchError:
@@ -748,9 +769,7 @@ def verify_continuity(
     duplicates = {f: hs for f, hs in sorted(by_fpr.items()) if len(hs) > 1}
     keys = {k.fpr: k for k in pgp.keys()}
     proven: dict[str, Proof] = {}
-    # ponytail: any unchained change in the file's history, even one before
-    # the proven version, drops the history fallback; failing closed is fine.
-    unchained = "people/%s.json: WARNING: changed at "
+    unchained = r"people/%s\.json: WARNING: changed at (.+?) without a signature "
     for handle, fpr in claims.items():
         if handles and handle not in handles:
             continue
@@ -767,7 +786,11 @@ def verify_continuity(
                     handle,
                     keys[fpr],
                     result.revoked,
-                    not any(w.startswith(unchained % handle) for w in result.warnings),
+                    [
+                        m.group(1)
+                        for w in result.warnings
+                        if (m := re.match(unchained % re.escape(handle), w))
+                    ],
                 )
             except VouchError as e:
                 failed[handle] = str(e)
