@@ -33,7 +33,9 @@ class Gpg:
         cmd += ["--faked-system-time", at, *args]
         return subprocess.run(cmd, check=True, capture_output=True).stdout
 
-    def new_key(self, uid: str, expire: str = "never", at: str = T0) -> str:
+    def new_key(
+        self, uid: str, expire: str = "never", at: str = T0, usage: str = "sign"
+    ) -> str:
         """Make an ed25519 primary key with one user ID; return its fingerprint."""
         out = self(
             "--status-fd",
@@ -42,7 +44,7 @@ class Gpg:
             "--quick-gen-key",
             uid,
             "ed25519",
-            "sign",
+            usage,
             expire,
             at=at,
         )
@@ -182,6 +184,8 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             "rhea": gpg.new_key("Rhea Rivest <rhea@example.org>"),
             "boris": gpg.new_key("Boris Both <boris@example.org>"),
             "tim": gpg.new_key("Tim Tiny <tim@example.org>"),
+            # Auth on the primary itself, with no auth subkey.
+            "pia": gpg.new_key("Pia Primary <pia@example.org>", usage="sign,auth"),
             "sam1": gpg.new_key("Sam One <sam@example.com>"),
             "sam2": gpg.new_key("Sam Two <sam@example.org>"),
             "victor": gpg.new_key("Victor Victim <victor@example.com>"),

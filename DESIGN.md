@@ -652,7 +652,7 @@ they can sign tags with it today. The duplicate-claim rule exposes this
 if the real holder also migrates, and the late cutoff ends it.
 
 **Scale** (pgpkeys at research time): 645 live keys for about 606
-people; 93 can reuse an authentication subkey as an accepted SSH key;
+people; 188 can reuse an authentication key as an accepted SSH key;
 about 1,784 verified certification pairs become drafts; about 80% of
 maintainers have no GPG key and register fresh.
 

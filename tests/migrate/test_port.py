@@ -109,9 +109,9 @@ def test_handles_from_awkward_local_parts(migrate: ModuleType) -> None:
 def test_port_report_counts(ported: Ported) -> None:
     summary = ported.stdout.splitlines()[-1]
     assert summary == (
-        "keys 20, live 15, expired 4, kernel.org list keys 1 (1 live), people 13, "
-        "drafts 13, "
-        "live keys with a reusable auth subkey 4 (4 in drafts)"
+        "keys 21, live 16, expired 4, kernel.org list keys 1 (1 live), people 14, "
+        "drafts 14, "
+        "live keys with a reusable auth subkey 5 (5 in drafts)"
     )
     fprs = ported.pgp.fprs
     assert f"skip {fprs['frank']}: revoked" in ported.stdout
@@ -125,7 +125,7 @@ def test_port_writes_one_draft_per_person(ported: Ported) -> None:
     fprs = ported.pgp.fprs
     got = drafts(ported)
     want = {"signer", "alice", "bob", "carol", "dave_new", "eve", "gina_old"}
-    want |= {"sam1", "sam2", "hank_new", "rhea", "boris", "tim"}
+    want |= {"sam1", "sam2", "hank_new", "rhea", "boris", "tim", "pia"}
     assert set(got) == {fprs[k] for k in want}
     assert got[fprs["dave_new"]]["handle"] == "dave"
     assert set(got[fprs["dave_new"]]["emails"]) == {
@@ -237,6 +237,14 @@ def test_port_derives_ssh_key_from_rsa_auth_subkey(
 def test_port_prefers_ed25519_over_rsa_auth_subkey(ported: Ported) -> None:
     (key,) = drafts(ported)[ported.pgp.fprs["boris"]]["keys"]
     assert key["ssh"].split()[0] == "ssh-ed25519"
+
+
+def test_port_derives_ssh_key_from_auth_capable_primary(ported: Ported) -> None:
+    fpr = ported.pgp.fprs["pia"]
+    (key,) = drafts(ported)[fpr]["keys"]
+    assert key["ssh"].split()[0] == "ssh-ed25519"
+    # The point must be the primary's, from gpg's own dump of the key packet.
+    assert b"\x40" + ssh_fields(key["ssh"])[-1] == ported.pgp.points[fpr][fpr]
 
 
 def test_port_skips_rsa_auth_subkey_below_2048(ported: Ported) -> None:

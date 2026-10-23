@@ -141,13 +141,13 @@ Pick your route:
 |---|---|---|
 | A pgpkeys key, not revoked by C | Complete your draft | `people/<handle>.json.asc` |
 | A pgpkeys key that expired (but was not revoked) by C | Extend it locally, then the same | `people/<handle>.json.asc` |
-| An ed25519, P-256 or RSA (2048+) authentication subkey on your pgpkeys key | Use it as your SSH key | The subkey signs your person file |
+| An ed25519, P-256 or RSA (2048+) authentication key or subkey on your pgpkeys key | Use it as your SSH key | The subkey signs your person file |
 | No pgpkeys key, or one revoked by C | Register fresh | None |
 
 Every route needs an SSH key: ed25519, P-256, or RSA of 2048 to 16384
 bits. In `pgpkeys.git` at af88128 (2026-10-20), 602 of 645 unexpired
-keys are RSA and 4 are DSA; 182 have a reusable authentication subkey
-(89 of them RSA only), so most holders make a new key. If you do, or if
+keys are RSA and 4 are DSA; 188 have a reusable authentication key, so
+most holders make a new key. If you do, or if
 yours is RSA, now is a good time to upgrade: `ed25519-sk` on a token,
 or `ecdsa-sk` if the token has no ed25519. Any GPG key, RSA and DSA
 included, still signs the continuity proof.
@@ -448,8 +448,8 @@ register fresh.
 
 ## Scale
 
-At research time pgpkeys held 645 live keys for about 606 people. 93 can
-reuse an authentication subkey as an accepted SSH key; about 1,784
+At research time pgpkeys held 645 live keys for about 606 people. 188 can
+reuse an authentication key as an accepted SSH key; about 1,784
 verified certification pairs become drafts; about 80% of maintainers have
 no GPG key and register fresh.
 

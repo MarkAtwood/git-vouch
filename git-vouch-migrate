@@ -83,7 +83,7 @@ class GpgKey(NamedTuple):
     created: int
     validity: str
     uids: tuple[str, ...]  # unrevoked user IDs, primary first
-    auth: tuple[str, ...]  # fingerprints of live auth subkeys git-vouch accepts
+    auth: tuple[str, ...]  # fingerprints of live auth keys git-vouch accepts, primary first
 
 
 class Proof(NamedTuple):
@@ -130,6 +130,23 @@ def _unescape(field: bytes) -> str:
         return raw.decode("latin-1")
 
 
+def _is_reusable_auth(f: list[bytes]) -> bool:
+    """Return whether a ``pub`` or ``sub`` colon line is a live auth key git-vouch accepts.
+
+    Lowercase ``a`` is the key's own capability; on a ``pub`` line the
+    uppercase letters are the whole key's.
+    """
+    return (
+        f[1].decode() not in NOT_LIVE
+        and b"a" in f[11]
+        and (
+            f[16].decode() in REUSABLE_CURVES
+            or f[3] == b"1"
+            and vouch.RSA_MIN_BITS <= int(f[2]) <= vouch.RSA_MAX_BITS
+        )
+    )
+
+
 def parse_listing(colons: bytes) -> list[GpgKey]:
     """Return the keys in ``gpg --with-colons --fixed-list-mode --list-keys`` output."""
     keys: list[GpgKey] = []
@@ -153,16 +170,10 @@ def parse_listing(colons: bytes) -> list[GpgKey]:
         elif f[0] == b"fpr" and pub is not None:
             if not fpr:
                 fpr = f[9].decode()
+                if _is_reusable_auth(pub):
+                    auth.append(fpr)
             elif sub is not None:
-                if (
-                    sub[1].decode() not in NOT_LIVE
-                    and b"a" in sub[11]
-                    and (
-                        sub[16].decode() in REUSABLE_CURVES
-                        or sub[3] == b"1"
-                        and vouch.RSA_MIN_BITS <= int(sub[2]) <= vouch.RSA_MAX_BITS
-                    )
-                ):
+                if _is_reusable_auth(sub):
                     auth.append(f[9].decode())
                 sub = None
         elif f[0] == b"sub":
@@ -413,7 +424,7 @@ class Pgpkeys:
         )
 
     def ssh_key(self, subkey: str) -> str:
-        """Return the SSH public key line ("type base64") for one authentication subkey."""
+        """Return the SSH public key line ("type base64") for one authentication key."""
         line = self.gpg("--export-ssh-key", values=[subkey + "!"]).decode()
         return " ".join(line.split()[:2])
 
@@ -560,8 +571,9 @@ def verify_continuity(
     its ``migratedFrom`` key in pgpkeys at C not revoked (an expired key is
     accepted, D9), with every email in the file on an unrevoked user ID of
     that key. The proof is a signature on the file by a live ed25519, P-256
-    or RSA authentication subkey of that key, or ``people/<handle>.json.asc``,
-    a detached signature by the key over the file's exact bytes. A
+    or RSA authentication key (the primary or a subkey), or
+    ``people/<handle>.json.asc``, a detached signature by the key over the
+    file's exact bytes. A
     fingerprint claimed by two or more handles proves none of them (D3).
 
     Args:
@@ -863,8 +875,8 @@ def build_parser() -> argparse.ArgumentParser:
             "not; keys sharing an email are one person, drafted from the newest "
             "unexpired key (else the newest key), if "
             "their primary names match, and otherwise none is drafted. Emails "
-            "come from unrevoked user IDs. An ed25519 or P-256 authentication "
-            "subkey is pre-filled as the SSH key, else an RSA one of 2048 to "
+            "come from unrevoked user IDs. An ed25519 or P-256 authentication key "
+            "or subkey is pre-filled as the SSH key, else an RSA one of 2048 to "
             "16384 bits."
         ),
     )
@@ -884,7 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
             "continuity proof against the keys in pgpkeys.git at C: the GPG key "
             "must not be revoked at C (expired is accepted), every email in the "
             "file must be on an unrevoked user ID of it, and either an ed25519, "
-            "P-256 or RSA authentication subkey of it signed the person file, or "
+            "P-256 or RSA authentication key or subkey of it signed the person file, or "
             "people/<handle>.json.asc is its detached signature over the file's "
             "exact bytes. A fingerprint claimed by two handles proves neither. "
             "Prints 'ok' or 'fail' per handle, and exits 1 if any fails."
