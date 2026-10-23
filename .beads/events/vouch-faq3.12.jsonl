@@ -1,1 +1,2 @@
 {"id":"01a169e6-5255-7eb5-9408-fbd9fe6e1cee","issue_id":"vouch-faq3.12","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T17:54:24.469965048Z"}
+{"id":"01a16a23-2ce1-794c-b71d-a34c87972d99","issue_id":"vouch-faq3.12","event_type":"closed","actor":"agent","old_value":"","new_value":"Merged as 7487613 + c0c86cc (history walk per query only; fails closed; 8 new tests; reviewed)","created_at":"2026-10-23T19:00:52.577610974Z"}

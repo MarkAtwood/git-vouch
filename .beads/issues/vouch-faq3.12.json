@@ -3,13 +3,15 @@
   "title": "query --at: endorsed emails held at TIME from git history",
   "description": "Mark 2026-10-23 chose (a): git vouch query --at TIME judges the person's endorsed emails as of TIME from the registry's git history, as faq3.11 already does for tiers (held_at, git-vouch ~2037 ponytail). Today an endorsement added after TIME counts at TIME: carol endorsed after T0 -\u003e bridge authorized=true at T0. DESIGN TRQP Time says 'emails held then'. An endorsement counts at TIME only if its record was committed at or before TIME and was not removed/revoked by TIME; also respect endorser key validity at TIME consistently with how tiers are judged. Blocks committing vouch-faq3.4.",
   "acceptance_criteria": "Hand-written tests (tests/test_query.py and tests/trqp): carol endorsed after T0 -\u003e no endorsed email and authorized=false at T0, true now; endorsement removed after T0 -\u003e counts at T0, not now; existing tests unchanged and green on 3.12 and 3.9; ruff clean; DESIGN line consistent.",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "issue_type": "bug",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T17:54:24.465759095Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T17:54:24.465759095Z",
+  "updated_at": "2026-10-23T19:00:52.566968759Z",
+  "closed_at": "2026-10-23T19:00:52.566968759Z",
+  "close_reason": "Merged as 7487613 + c0c86cc (history walk per query only; fails closed; 8 new tests; reviewed)",
   "dependencies": [
     {
       "issue_id": "vouch-faq3.12",

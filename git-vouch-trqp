@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""git-vouch-trqp: answer OpenVTC verify-trust's TRQP queries from a git-vouch registry.
+
+Serves ``POST /trust-tasks`` with Trust Task documents of type
+``registry/authorization/0.1`` (the HTTPS binding verify-trust speaks) and
+answers each from ``git vouch query``, which stays the only judge of who
+holds which key. Stateless and unauthenticated: the registry is public.
+TLS is left to a reverse proxy, which must also buffer each whole request
+and bound how long it may take: the server limits each socket read, not a
+request, and starts a thread per connection. See DESIGN.md, TRQP bridge, and
+docs/trqp-interop.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import threading
+import traceback
+import uuid
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
+
+TASK_TYPE = "https://trusttasks.org/spec/registry/authorization/0.1"
+TASK_FAMILY = "https://trusttasks.org/spec/registry/authorization/"
+ERROR_TYPE = "https://trusttasks.org/spec/trust-task-error/0.5"
+ACTION = "git.commit.sign"
+PATH = "/trust-tasks"
+MAX_BODY = 64 * 1024
+CLOCK_SKEW = timedelta(minutes=5)
+QUERY_TIMEOUT = 30  # seconds for one git vouch query
+# ponytail: a fixed cap on concurrent registry checks; past it a request gets
+# a retryable 503. Each query re-checks the whole registry, so the ceiling is
+# QUERY_SLOTS checks per QUERY_TIMEOUT; caching a checked registry (vouch-faq3.6)
+# is the upgrade path.
+QUERY_SLOTS = threading.BoundedSemaphore(4)
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+# HTTPS binding 0.3, section 4: the error code is authoritative, the status informative.
+STATUS = {
+    "malformedRequest": 400,
+    "unsupportedType": 422,
+    "unsupportedVersion": 422,
+    "expired": 422,
+    "proofInvalid": 422,
+    "wrongRecipient": 422,
+    "unavailable": 503,
+    "internalError": 500,
+}
+RFC3339 = re.compile(
+    r"(\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2})",
+    re.ASCII,  # int() and strptime take any Unicode digit; the wire takes 0-9 only
+)
+DID_KEY = re.compile(r"did:key:z[1-9A-HJ-NP-Za-km-z]{1,2048}")
+SERVED_DID = re.compile(r"did:web(?:vh)?:[!-~]+")
+HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+SEGMENT = re.compile(r"[a-z0-9._-]+")
+EXT_NAMESPACE = re.compile(r"[a-z][a-z0-9-]*(\.[a-z0-9-]+)+")
+ENVELOPE_STRINGS = ("id", "threadId", "parentThreadId", "issuer", "recipient")
+PAYLOAD_KEYS = {"entity_id", "authority_id", "action", "resource", "context", "ext"}
+
+
+class TaskError(Exception):
+    """A request the bridge refuses with a trust-task-error document."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """Refuse with framework error ``code`` and a short operator ``message``."""
+        super().__init__(message)
+        self.code = code
+
+
+def parse_time(text: object, what: str) -> datetime:
+    """Return the RFC 3339 date-time ``text`` in UTC.
+
+    Raises:
+        TaskError: malformedRequest if ``text`` is not an RFC 3339 date-time.
+    """
+    match = RFC3339.fullmatch(text) if isinstance(text, str) else None
+    try:
+        if match is None:
+            raise ValueError(text)
+        base, fraction, zone = match.groups()
+        when = datetime.strptime(base.upper(), "%Y-%m-%dT%H:%M:%S")
+        when = when.replace(microsecond=int((fraction or "0")[:6].ljust(6, "0")))
+        offset = timedelta()
+        if zone not in ("Z", "z"):
+            offset = timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
+            offset = -offset if zone[0] == "-" else offset
+        return when.replace(tzinfo=timezone(offset)).astimezone(timezone.utc)
+    except (ValueError, OverflowError) as e:
+        raise TaskError(
+            "malformedRequest", f"{what} is not an RFC 3339 date-time"
+        ) from e
+
+
+def is_resource(resource: str) -> bool:
+    """Return whether ``resource`` is a forge-qualified resource verify-trust accepts.
+
+    A port of VGI vgi-core/src/resource.rs ``normalize_resource``: a dotted
+    DNS host or localhost, then 1 to 21 segments of ``[a-z0-9._-]``, never
+    ``.`` or ``..``, at most 512 bytes; ASCII case is folded first.
+    """
+    if len(resource) > 512 or not resource.isascii():
+        return False
+    host, *path = resource.lower().split("/")
+    return (
+        len(host) <= 253
+        and ("." in host or host == "localhost")
+        and all(HOST_LABEL.fullmatch(label) for label in host.split("."))
+        and 1 <= len(path) <= 21
+        and all(SEGMENT.fullmatch(s) and s not in (".", "..") for s in path)
+    )
+
+
+def check_envelope(doc: object, did: str, now: datetime) -> dict[str, object]:
+    """Return the request payload after checking the Trust Task envelope around it.
+
+    Applies the framework 0.5 envelope schema and SPEC.md section 7.2 items
+    3, 4, 5, 7 and 13.
+
+    Raises:
+        TaskError: the document is refused.
+    """
+    if not isinstance(doc, dict):
+        raise TaskError("malformedRequest", "the body is not a JSON object")
+    for name in ("id", "type"):
+        if not isinstance(doc.get(name), str) or not doc[name]:
+            raise TaskError("malformedRequest", f"{name} must be a non-empty string")
+    for name in ENVELOPE_STRINGS:
+        if name in doc and (not isinstance(doc[name], str) or not doc[name]):
+            raise TaskError("malformedRequest", f"{name} must be a non-empty string")
+    if not isinstance(doc.get("payload"), dict):
+        raise TaskError("malformedRequest", "payload must be an object")
+    issued = parse_time(doc["issuedAt"], "issuedAt") if "issuedAt" in doc else None
+    expires = parse_time(doc["expiresAt"], "expiresAt") if "expiresAt" in doc else None
+    kind = doc["type"]
+    if kind not in (TASK_TYPE, TASK_TYPE + "#request"):
+        if kind.startswith(TASK_FAMILY):
+            raise TaskError("unsupportedVersion", f"only {TASK_TYPE} is served")
+        raise TaskError("unsupportedType", f"only {TASK_TYPE} is served")
+    if "recipient" not in doc:
+        raise TaskError("malformedRequest", "recipient is required")
+    if doc["recipient"] != did:
+        raise TaskError("wrongRecipient", f"this registry is {did}")
+    if issued is not None and issued > now + CLOCK_SKEW:
+        raise TaskError("malformedRequest", "issuedAt is in the future")
+    if expires is not None and issued is not None and expires <= issued:
+        raise TaskError("malformedRequest", "expiresAt is not after issuedAt")
+    if expires is not None and now >= expires:
+        raise TaskError("expired", "the request has expired")
+    if "proof" in doc:
+        # SPEC.md 4.7: a suite the consumer cannot check is proofInvalid, never
+        # treated as absent. The bridge checks none; verify-trust sends none.
+        raise TaskError("proofInvalid", "this registry verifies no proof")
+    payload: dict[str, object] = doc["payload"]
+    return payload
+
+
+def check_payload(payload: Mapping[str, object]) -> Optional[str]:
+    """Check ``payload`` against the registry/authorization 0.1 schema.
+
+    Returns:
+        The request's ``context.time``, or None if it has none.
+
+    Raises:
+        TaskError: malformedRequest if the payload does not match the schema
+            or its resource is not one verify-trust would send.
+    """
+    extra = sorted(set(payload) - PAYLOAD_KEYS)
+    if extra:
+        raise TaskError("malformedRequest", f"unknown payload member {extra[0]!r:.60}")
+    for name in ("entity_id", "authority_id", "action", "resource"):
+        if not isinstance(payload.get(name), str):
+            raise TaskError("malformedRequest", f"payload.{name} must be a string")
+    if "ext" in payload:
+        ext = payload["ext"]
+        if not isinstance(ext, dict) or not ext:
+            raise TaskError(
+                "malformedRequest", "payload.ext must be a non-empty object"
+            )
+        if not all(EXT_NAMESPACE.fullmatch(name) for name in ext):
+            raise TaskError("malformedRequest", "payload.ext keys must be reverse-DNS")
+    time = None
+    if "context" in payload:
+        context = payload["context"]
+        if not isinstance(context, dict) or not all(
+            isinstance(v, str) for v in context.values()
+        ):
+            raise TaskError("malformedRequest", "payload.context must map to strings")
+        if context.get("time"):  # the registry schema: blank means now
+            time = context["time"]
+            parse_time(time, "payload.context.time")
+    if not is_resource(str(payload["resource"])):
+        raise TaskError("malformedRequest", "payload.resource is not host/path")
+    return time
+
+
+def query(entity: str, at: Optional[datetime]) -> dict[str, object]:
+    """Return ``git vouch query``'s answer for the did:key ``entity``.
+
+    Raises:
+        TaskError: unavailable if the registry cannot be read or checked.
+    """
+    command = ["git", "vouch", "query", entity]
+    if at is not None:
+        # Truncating to whole seconds is exact: every registry date is whole seconds.
+        # The year is padded by hand: strftime's %Y leaves years before 1000 short.
+        command += ["--at", f"{at.year:04d}" + at.strftime("-%m-%dT%H:%M:%SZ")]
+    if not QUERY_SLOTS.acquire(blocking=False):
+        raise TaskError("unavailable", "the registry is busy")
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, text=True, timeout=QUERY_TIMEOUT
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise TaskError("unavailable", "the registry cannot be queried") from e
+    finally:
+        QUERY_SLOTS.release()
+    # Exit 1 with an answer means an unknown key; with none, a failed registry check.
+    if proc.returncode in (0, 1):
+        try:
+            answer = json.loads(proc.stdout)
+        except ValueError:
+            answer = None
+        if isinstance(answer, dict):
+            return answer
+    raise TaskError("unavailable", "the registry cannot be checked")
+
+
+def decide(
+    payload: Mapping[str, object], did: str, at: Optional[datetime]
+) -> tuple[bool, str]:
+    """Return whether the queried entity is authorized, and why (DESIGN.md, TRQP bridge)."""
+    entity = str(payload["entity_id"])
+    if payload["authority_id"] != did:
+        return False, f"this registry answers only for {did}"
+    if payload["action"] != ACTION:
+        return False, f"this registry answers only {ACTION}"
+    if not DID_KEY.fullmatch(entity):
+        return False, "the entity is not a did:key"
+    answer = query(entity, at)
+    if answer.get("handle") is None:
+        return False, "no registered person holds this key"
+    if answer.get("valid") is not True:
+        return False, "the key is retired, revoked or not yet added"
+    if answer.get("automation") is not False:
+        return False, "automation identities do not sign commits"
+    if not answer.get("emails"):
+        return False, "the person has no endorsed email"
+    return True, f"a current key of registry-vouched person {answer['handle']}"
+
+
+def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object]]:
+    """Return the HTTP status and Trust Task document answering the request ``body``."""
+    doc: object = None
+    stamp = now.strftime(DATE_FORMAT)
+    try:
+        try:
+            doc = json.loads(body)
+        except (ValueError, RecursionError) as e:
+            raise TaskError("malformedRequest", "the body is not JSON") from e
+        payload = check_envelope(doc, did, now)
+        time = check_payload(payload)
+        at = None if time is None else parse_time(time, "payload.context.time")
+        authorized, message = decide(payload, did, at)
+    except TaskError as e:
+        return STATUS[e.code], error_document(doc, did, now, e.code, str(e))
+    answer: dict[str, object] = {
+        name: payload[name]
+        for name in ("entity_id", "authority_id", "action", "resource")
+    }
+    answer.update(authorized=authorized, time_evaluated=stamp, message=message)
+    if time is not None:
+        answer["time_requested"] = time
+    reply = envelope(doc, did, stamp, TASK_TYPE + "#response", answer)
+    return 200, reply
+
+
+def envelope(
+    request: object, did: str, stamp: str, kind: str, payload: dict[str, object]
+) -> dict[str, object]:
+    """Return a reply document to ``request`` from ``did``, as trust-tasks-rs respond_with builds."""
+    doc: dict[str, object] = {"id": f"urn:uuid:{uuid.uuid4()}", "type": kind}
+    if isinstance(request, dict):
+        if isinstance(request.get("id"), str) and request["id"]:
+            doc["threadId"] = request["id"]
+        if isinstance(request.get("issuer"), str) and request["issuer"]:
+            doc["recipient"] = request["issuer"]
+    doc.update(issuer=did, issuedAt=stamp, payload=payload)
+    return doc
+
+
+def error_document(
+    request: object, did: str, now: datetime, code: str, message: str
+) -> dict[str, object]:
+    """Return the trust-task-error/0.5 document refusing ``request``."""
+    payload: dict[str, object] = {
+        "code": code,
+        "retryable": code == "unavailable",
+        "message": message[:1024],
+    }
+    if (
+        isinstance(request, dict)
+        and isinstance(request.get("type"), str)
+        and request["type"]
+    ):
+        payload["inResponseTo"] = {"typeUri": request["type"]}
+        if isinstance(request.get("id"), str) and request["id"]:
+            payload["inResponseTo"]["id"] = request["id"]
+    return envelope(request, did, now.strftime(DATE_FORMAT), ERROR_TYPE, payload)
+
+
+class Handler(BaseHTTPRequestHandler):
+    """Serve POST /trust-tasks; any other method or path gets a bare 404 or 405."""
+
+    server_version = "git-vouch-trqp"
+    # ponytail: seconds one socket read may wait, not a whole-request limit,
+    # so a client trickling bytes holds a thread; the reverse proxy bounds
+    # requests (module docstring). The upgrade path is a per-request deadline
+    # plus a connection cap.
+    timeout = 30
+    did = ""  # the served DID, set by serve()
+
+    def do_POST(self) -> None:
+        """Answer one Trust Task document."""
+        if self.path != PATH:
+            self.send_error(404)
+            return
+        now = datetime.now(timezone.utc)
+        length = self.headers.get("Content-Length", "")
+        if not (length.isascii() and length.isdigit()) or int(length) > MAX_BODY:
+            self.close_connection = True  # the body, if any, is left unread
+            message = f"Content-Length must be at most {MAX_BODY}"
+            self._send(
+                400, error_document(None, self.did, now, "malformedRequest", message)
+            )
+            return
+        body = self.rfile.read(int(length))
+        try:
+            status, doc = respond(body, self.did, now)
+        except Exception:  # the boundary: log the trace, never send it
+            self.log_error("internal error:\n%s", traceback.format_exc())
+            status = STATUS["internalError"]
+            doc = error_document(None, self.did, now, "internalError", "internal error")
+        self._send(status, doc)
+
+    def _not_post(self) -> None:
+        self.send_error(405 if self.path == PATH else 404)
+
+    do_GET = do_HEAD = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _not_post
+
+    def _send(self, status: int, doc: Mapping[str, object]) -> None:
+        data = json.dumps(doc).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def serve(did: str, bind: str, port: int) -> int:
+    """Serve ``did``'s answers on ``bind``:``port`` until interrupted."""
+    handler = type("BoundHandler", (Handler,), {"did": did})
+    with ThreadingHTTPServer((bind, port), handler) as server:
+        host, real_port = server.server_address[:2]
+        print(
+            f"git-vouch-trqp: serving {did} at http://{host}:{real_port}{PATH}",
+            flush=True,
+        )
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
+def main(argv: Sequence[str]) -> int:
+    """Run the command line; return the exit status."""
+    parser = argparse.ArgumentParser(
+        prog="git-vouch-trqp",
+        description="Answer OpenVTC verify-trust's TRQP queries from git vouch query.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("serve", help="serve POST /trust-tasks over plain HTTP")
+    run.add_argument("--did", required=True, help="the registry's did:web or did:webvh")
+    run.add_argument(
+        "--bind",
+        default="127.0.0.1",
+        help="address (default 127.0.0.1); put a buffering reverse proxy in front",
+    )
+    run.add_argument("--port", type=int, default=8080, help="port (default 8080)")
+    args = parser.parse_args(argv)
+    if not SERVED_DID.fullmatch(args.did):
+        parser.error(f"--did must be a did:web or did:webvh: {args.did!r:.80}")
+    return serve(args.did, args.bind, args.port)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
