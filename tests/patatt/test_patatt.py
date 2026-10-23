@@ -7,6 +7,7 @@ is the independent oracle for the signature format. See conftest.py.
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 from .conftest import (
@@ -119,6 +120,8 @@ def test_retired_key_fails(reg: Registry) -> None:
     )
     reg.vouch("retire-key", "--sign-with", alice, old_pub)
     reg.sync()
+    # A key is valid through its retirement second (vouch-ey47.24).
+    time.sleep(1)
     assert_nokey(validate(FORK, reg.tmp, msg), "alice@example.org")
 
 
