@@ -93,7 +93,12 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             "ivan": gpg.new_key("Ivan Forged <ivan@example.org>"),
             "judy": gpg.new_key("Judy Revoked <judy@example.org>"),
             "kim": gpg.new_key("Kim Tied <kim@example.org>"),
+            "nell": gpg.new_key("Nell Split"),
         }
+        # Only nell's bare-address user ID is certified.
+        gpg("--quick-add-uid", fprs["nell"], "nell@example.org")
+        gpg("-u", cora + "!", "--quick-sign-key", fprs["nell"], "nell@example.org",
+            at="20200102T000000")  # fmt: skip
         gpg("--quick-add-uid", fprs["alice"], "Alice Example <alice@kernel.org>")
         gpg("--quick-add-uid", fprs["frank"], "Frank Twice <frank@kernel.org>")
         # Only alice's first user ID is certified.
@@ -165,6 +170,7 @@ def certified(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Certified]:
             ("ivan", "ivan", ["ivan@example.org"], True),
             ("judy", "judy", ["judy@example.org"], True),
             ("kim", "kim", ["kim@example.org"], True),
+            ("nell", "nell", ["nell@example.org"], True),
         ]
         for handle, owner, emails, has_proof in people:
             private = base / f"{handle}.ssh"
@@ -225,6 +231,7 @@ def test_drafts_only_for_certified_subjects_with_proven_continuity(
         "endorsements/bob/cora-1.json",
         "endorsements/dave/cora-1.json",
         "endorsements/judy/cora-1.json",
+        "endorsements/nell/cora-1.json",
     }
 
 
@@ -253,6 +260,14 @@ def _cora_sigs(c: Certified, subject: str) -> list[list[str]]:
     out = c.gpg("--with-colons", "--fixed-list-mode", "--list-sigs", c.fprs[subject])
     rows = [ln.split(":") for ln in out.decode().splitlines()]
     return [f for f in rows if f[0] in ("sig", "rev") and f[4] == c.fprs["cora"][-16:]]
+
+
+def test_bare_address_certification_is_drafted(
+    certified: Certified, cora_drafts: Path
+) -> None:
+    # nell's other user ID has no email, so only the bare one can yield a draft.
+    draft = json.loads((cora_drafts / "endorsements/nell/cora-1.json").read_text())
+    assert draft["subjectEmails"] == ["nell@example.org"]
 
 
 def test_sha1_certification_is_drafted(certified: Certified, cora_drafts: Path) -> None:
@@ -397,4 +412,5 @@ def test_drafts_signed_as_endorsements_pass_check(
         "endorsements/bob/cora-2.json",
         "endorsements/dave/cora-2.json",
         "endorsements/judy/cora-2.json",
+        "endorsements/nell/cora-2.json",
     }

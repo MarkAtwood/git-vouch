@@ -786,8 +786,7 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
         except VouchError as e:
             print(f"skip {handle}: {e}")
             continue
-        uids = [UID_RE.fullmatch(c.uid) for c in certs[fpr]]
-        certified = {m.group(2).lower() for m in uids if m}
+        certified = {e for _, e in (_uid_parts(c.uid) for c in certs[fpr]) if e}
         draft = {
             "@context": [vouch.CONTEXT],
             "endorser": certifier,
