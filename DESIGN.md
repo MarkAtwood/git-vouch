@@ -579,7 +579,7 @@ small and in upstream style so it could be offered upstream. The rules
   `vouch:` first and the legacy GPG keyring, a clone checked out at
   the freeze commit, second, and patatt tries sources in order. A patch that verifies
   through anything other than `vouch:` gets a warning that the legacy
-  keyring stops after the late cutoff. The fallback applies to
+  keyring stops six months after the flag day, at the late cutoff. The fallback applies to
   everyone, registered or not. After the late cutoff people delete the
   legacy line; no code changes.
 - **Limits** (`docs/patatt-interop.md`): patatt cannot enforce FIDO
@@ -652,8 +652,9 @@ SSH key. After it, nothing new needs `gpg`.
    anchors' person files. Everyone else then registers.
 3. **Flag day.** Linus and the release tooling switch to files from
    `git vouch export`, and GPG-signed tags and pulls stop being accepted.
-4. **Late cutoff.** Continuity claims against the freeze commit are
-   accepted until this date. After it, people register as newcomers. No
+4. **Late cutoff.** Six months after the flag day; the anchors may
+   extend it by announcement. Continuity claims against the freeze
+   commit are accepted until this date. After it, people register as newcomers. No
    tool enforces it: after the cutoff, registry maintainers do not merge
    any change that adds or alters a `migratedFrom` field or adds a
    `people/*.json.asc`. That covers both proof routes, since reusing an
@@ -723,8 +724,8 @@ covered separately (see Patch signing): the patatt fork reads the
 registry, with the frozen GPG keyring as a warned fallback until the late
 cutoff.
 
-**Kernel-team calls, not design:** the anchor list, the freeze date, the
-window length and the late cutoff.
+**Kernel-team calls, not design:** the anchor list, the freeze date and
+the window length. The late cutoff is six months after the flag day.
 
 ## Implementation
 
@@ -802,8 +803,8 @@ specification for anyone reviewing an upstream patch.
    git.kernel.org. Given the accepted risks (anchors, unsigned key
    changes, tier-record deletions), this choice matters as much as choosing the anchors. It is
    a kernel-team decision, not a design one.
-2. **Flag-day dates and anchors:** the anchor list, freeze date, window
-   length and late cutoff. Kernel-team decisions.
+2. **Flag-day dates and anchors:** the anchor list, freeze date and
+   window length. Kernel-team decisions.
 3. **Person-file change signed by a key revoked later:** `check` warns,
    as it does for a key revoked before the change. A revocation signed
    by a later-revoked key still counts if committed first, so the
@@ -846,7 +847,7 @@ Decided 2026-10-22:
   `git vouch keys <email>`; endorsed emails and current keys, any tier,
   bots included; selectors derived from the key; no generated keyring;
   the legacy GPG keyring stays as a warned fallback for everyone until
-  the late cutoff.
+  the late cutoff, six months after the flag day.
 - **TRQP bridge:** optional `git-vouch-trqp` daemon speaking Trust
   Task envelopes; authority DID configured (`did:web` or `did:webvh`);
   `git.commit.sign` authorized for current keys of anyone with an

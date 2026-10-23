@@ -59,7 +59,7 @@ install the patatt fork and list `keyringsrc = vouch:` first and the
 frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
 Patches signed with a GPG key, or a key `patatt genkey` made, then keep
 verifying through pgpkeys, with a warning, for everyone until the late
-cutoff.
+cutoff, six months after the flag day.
 
 ### Register with your pgpkeys key
 
@@ -601,7 +601,7 @@ b4 am -m ~/mail.mbox "$MSGID"
 
 ```console
   ✓ Signed: openssh/bob@example.org (key: vouch:bob@example.org/...)
-W: dave@example.org/default verified via legacy keyring .../.keyring/openpgp/example.org/dave/default, not the vouch registry; legacy keyrings stop working after the flag day late cutoff
+W: dave@example.org/default verified via legacy keyring .../.keyring/openpgp/example.org/dave/default, not the vouch registry; legacy keyrings stop working six months after flag day
   ✓ Signed: openpgp/dave@example.org (key: .../pgpkeys/.keyring)
   ✗ BADSIG: openssh/bob@example.org
   ✗ No key: openssh/carol@example.org

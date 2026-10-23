@@ -21,7 +21,7 @@ holder who still signs registers an SSH key; after it, nothing new needs
 | 1. Freeze | _freeze date_ | kernel.org | `pgpkeys.git` gets one last signed commit, the freeze commit, and becomes read-only. Its hash, the flag-day date and the late cutoff are published together. |
 | 2. Window | freeze to flag day (_window length_) | anchors first, then everyone | The first registry merge holds the anchors' person files and `anchors.json`. Everyone else registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and gets approved. Everyone who signs or checks patches installs the patatt fork and sets its keyring sources. |
 | 3. Flag day | _flag-day date_ | Linus, release tooling, every developer | Linus and the release tooling switch to files from `git vouch export`. GPG-signed tags and pulls stop being accepted. |
-| 4. Late cutoff | _late-cutoff date_ | nobody; every patch checker deletes one config line | Continuity claims against the freeze commit are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
+| 4. Late cutoff | six months after the flag day | nobody; every patch checker deletes one config line | Continuity claims against the freeze commit are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
 
 ## Kernel-team calls
 
@@ -29,14 +29,15 @@ These are decisions, not design, and nothing below depends on their
 values:
 
 - the anchor list;
-- the freeze date, the window length and the late cutoff;
+- the freeze date and the window length;
 - who the registry maintainers are, who may merge into the registry
   (`DESIGN.md`, Open questions);
 - the registry's repository path on git.kernel.org (kernel.org
   administrators), and how people submit branches to it. The rehearsal
   pushes a branch to the registry; a merge request works the same way.
 
-**The late cutoff is policy, not code.** After it, registry maintainers
+**The late cutoff is six months after the flag day, and it is policy,
+not code.** The anchors may extend it by announcement. After it, registry maintainers
 do not merge any change that adds or alters a `migratedFrom` field or
 adds a `people/*.json.asc`. The merge date counts, not the commit date.
 
@@ -421,7 +422,7 @@ From this date a GPG-signed tag or pull is not accepted.
 
 ## 4. Late cutoff
 
-Continuity claims against the freeze commit are accepted until this
+Six months after the flag day. Continuity claims against the freeze commit are accepted until this
 date. Anyone who has not registered by then registers fresh, as `carol`
 did, and collects fresh endorsements. From this date registry
 maintainers merge no change that adds or alters `migratedFrom` or adds a
@@ -438,7 +439,7 @@ Patches are signed with patatt and checked with `b4 am`. A fork of
 patatt adds the keyring source `vouch:`, which reads the registry
 through `git vouch keys`. Unlike tags, patches get a fallback: the
 frozen pgpkeys keyring keeps working, with a warning, until the late
-cutoff. The commands are in each guide's Patch signing section
+cutoff, six months after the flag day. The commands are in each guide's Patch signing section
 ([regulars](guide-regulars.md#patch-signing),
 [captains](guide-captains.md#patch-signing),
 [anchors](guide-anchors.md#patch-signing)).

@@ -50,7 +50,8 @@ everyone who signs or checks patches installs the patatt fork and lists
 `keyringsrc = vouch:` first and the frozen pgpkeys keyring second, as
 [Patch signing](#patch-signing) shows. Patches signed with a GPG key, or
 a key `patatt genkey` made, then keep verifying through pgpkeys, with a
-warning, for everyone until the late cutoff.
+warning, for everyone until the late cutoff, six months after the flag
+day.
 
 ### Register and merge first
 
@@ -650,9 +651,9 @@ line.
 
 ### Dropping the GPG fallback
 
-The fallback ends at the late cutoff; that is the anchors' decision,
-announced with the cutoff. No code changes: everyone deletes the
-legacy keyring line (here as `lena`):
+The fallback ends at the late cutoff, six months after the flag day
+(the anchors may extend it by announcement). No code changes: everyone
+deletes the legacy keyring line (here as `lena`):
 
 <!-- patch as lena -->
 ```shell

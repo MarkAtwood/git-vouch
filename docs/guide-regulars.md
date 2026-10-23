@@ -53,7 +53,7 @@ install the patatt fork and list `keyringsrc = vouch:` first and the
 frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
 Patches signed with a GPG key, or a key `patatt genkey` made, then keep
 verifying through pgpkeys, with a warning, for everyone until the late
-cutoff.
+cutoff, six months after the flag day.
 
 ### Create your keys
 
