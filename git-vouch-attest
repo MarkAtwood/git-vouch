@@ -33,6 +33,8 @@ FLAG_ED = 0x80  # extension data included
 SK_ED25519 = "sk-ssh-ed25519@openssh.com"
 SK_ECDSA = "sk-ecdsa-sha2-nistp256@openssh.com"
 AAGUID_OID = bytes.fromhex("2b0601040182e51c010104")  # 1.3.6.1.4.1.45724.1.1.4
+OU_OID = bytes.fromhex("55040b")  # 2.5.4.11 organizationalUnitName
+BASIC_CONSTRAINTS_OID = bytes.fromhex("551d13")  # 2.5.29.19
 
 CborValue = Union[int, bytes, list, dict]
 
@@ -142,7 +144,7 @@ def parse_sk_key(text: str) -> SkKey:
         raise AttestError("not an sk-ssh-ed25519 or sk-ecdsa-sha2-nistp256 key")
     try:
         wire = base64.b64decode(fields[1], validate=True)
-    except binascii.Error as exc:
+    except ValueError as exc:  # binascii.Error, or a non-ASCII character
         raise AttestError("SSH key is not valid base64") from exc
     parts = []
     pos = 0
@@ -214,33 +216,78 @@ def take_der(buf: bytes, pos: int) -> tuple[int, bytes, int]:
     return tag, buf[pos : pos + length], pos + length
 
 
-def cert_aaguid(der: bytes) -> bytes | None:
-    """Return the certificate's id-fido-gen-ce-aaguid extension value, if any.
+def check_cert_profile(der: bytes, aaguid: bytes) -> None:
+    """Enforce the packed attestation certificate profile.
 
-    The extension is OBJECT, optional critical BOOLEAN, then an OCTET STRING
-    that wraps a 16-byte OCTET STRING (WebAuthn 8.2.1).
+    WebAuthn 8.2.1 requires X.509 v3, subject OU "Authenticator Attestation"
+    and basicConstraints with CA false; when the id-fido-gen-ce-aaguid
+    extension is present it must be non-critical and equal the authData
+    AAGUID. WebAuthn requires the extension only under roots shared by
+    several models; this tool requires it always, because without it the
+    AAGUID would rest on authData alone, which whoever holds the
+    certificate's key wrote.
+
+    Raises:
+        AttestError: naming the first requirement the certificate fails.
     """
     _, cert, _ = take_der(der, 0)
     _, tbs, _ = take_der(cert, 0)
-    pos, extensions = 0, b""
+    fields = []
+    pos = 0
     while pos < len(tbs):
         tag, value, pos = take_der(tbs, pos)
-        if tag == 0xA3:  # [3] EXPLICIT Extensions
-            _, extensions, _ = take_der(value, 0)
+        fields.append((tag, value))
+    # v3 is [0] EXPLICIT INTEGER 2; then serial, signature, issuer, validity, subject.
+    if len(fields) < 7 or fields[0] != (0xA0, b"\x02\x01\x02"):
+        raise AttestError("attestation certificate is not X.509 v3")
+    ous = []
+    rdns = fields[5][1]
     pos = 0
-    while pos < len(extensions):
-        _, extension, pos = take_der(extensions, pos)
-        _, oid, at = take_der(extension, 0)
-        if oid != AAGUID_OID:
+    while pos < len(rdns):
+        _, rdn, pos = take_der(rdns, pos)
+        at = 0
+        while at < len(rdn):
+            _, attribute, at = take_der(rdn, at)
+            _, oid, value_at = take_der(attribute, 0)
+            if oid == OU_OID:
+                ous.append(take_der(attribute, value_at)[1])
+    if b"Authenticator Attestation" not in ous:
+        raise AttestError(
+            'attestation certificate subject lacks OU "Authenticator Attestation"'
+        )
+    extensions: dict[bytes, tuple[bool, bytes]] = {}
+    for tag, value in fields:
+        if tag != 0xA3:  # [3] EXPLICIT Extensions
             continue
-        tag, value, at = take_der(extension, at)
-        if tag == 0x01:
+        _, sequence, _ = take_der(value, 0)
+        pos = 0
+        while pos < len(sequence):
+            _, extension, pos = take_der(sequence, pos)
+            _, oid, at = take_der(extension, 0)
             tag, value, at = take_der(extension, at)
-        inner_tag, inner, end = take_der(value, 0) if tag == 0x04 else (0, b"", 0)
-        if inner_tag != 0x04 or len(inner) != 16 or end != len(value):
-            raise AttestError("malformed AAGUID extension in attestation certificate")
-        return inner
-    return None
+            is_critical = False
+            if tag == 0x01:
+                is_critical = value != b"\x00"
+                tag, value, at = take_der(extension, at)
+            if tag != 0x04 or at != len(extension) or oid in extensions:
+                raise AttestError("malformed extension in attestation certificate")
+            extensions[oid] = (is_critical, value)
+    if BASIC_CONSTRAINTS_OID not in extensions:
+        raise AttestError("attestation certificate has no basicConstraints")
+    # BasicConstraints is SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLen ... }.
+    _, constraints, _ = take_der(extensions[BASIC_CONSTRAINTS_OID][1], 0)
+    if constraints[:1] == b"\x01" and take_der(constraints, 0)[1] != b"\x00":
+        raise AttestError("attestation certificate is a CA certificate")
+    if AAGUID_OID not in extensions:
+        raise AttestError("attestation certificate has no AAGUID extension")
+    is_critical, value = extensions[AAGUID_OID]
+    if is_critical:
+        raise AttestError("AAGUID extension in attestation certificate is critical")
+    inner_tag, inner, end = take_der(value, 0)
+    if inner_tag != 0x04 or len(inner) != 16 or end != len(value):
+        raise AttestError("malformed AAGUID extension in attestation certificate")
+    if inner != aaguid:
+        raise AttestError("AAGUID differs from the attestation certificate's")
 
 
 def openssl(args: Sequence[str]) -> subprocess.CompletedProcess:
@@ -301,6 +348,7 @@ def verify(key_text: str, challenge: bytes, blob: bytes, ca: Path) -> str:
         )
         if result.returncode != 0:
             raise AttestError("attestation signature does not verify")
+        check_cert_profile(parts.cert, aaguid)
         # -no-CApath -no-CAstore: trust --ca only, never the system store.
         result = openssl(
             [
@@ -318,12 +366,17 @@ def verify(key_text: str, challenge: bytes, blob: bytes, ca: Path) -> str:
                 for line in (result.stdout + result.stderr).splitlines()
                 if "lookup: " in line
             ]
+            if not reasons:
+                # No verdict on the chain: a usage error, such as -no-CAstore
+                # on an openssl older than 3.0. main() has already checked --ca.
+                detail = result.stderr.strip().splitlines()[:1] or ["no output"]
+                raise AttestError(
+                    f"openssl verify gave no chain verdict: {detail[0]} "
+                    "(git-vouch-attest needs OpenSSL 3.0 or later)"
+                )
             raise AttestError(
-                "attestation certificate does not chain to --ca: "
-                + (reasons[0] if reasons else "openssl verify failed")
+                "attestation certificate does not chain to --ca: " + reasons[0]
             )
-        if cert_aaguid(parts.cert) not in (None, aaguid):
-            raise AttestError("AAGUID differs from the attestation certificate's")
         result = openssl(["x509", "-in", str(cert_pem), "-noout", "-subject"])
         if result.returncode != 0:
             raise AttestError("attestation certificate does not parse")
@@ -380,7 +433,8 @@ def main(argv: Sequence[str]) -> int:
         prog="git-vouch-attest",
         description="Verify FIDO key attestations against a vendor root you supply. "
         "Give either a person file (every key with an attestation is checked) "
-        "or PUBKEY CHALLENGE ATTESTATION files as written by ssh-keygen.",
+        "or PUBKEY CHALLENGE ATTESTATION files as written by ssh-keygen. "
+        "Needs the openssl CLI, OpenSSL 3.0 or later.",
     )
     parser.add_argument(
         "--ca", required=True, type=Path, help="trusted vendor certificates, PEM"
@@ -393,6 +447,13 @@ def main(argv: Sequence[str]) -> int:
         parser.error("give one person file, or PUBKEY CHALLENGE ATTESTATION")
     status = 0
     try:
+        # x509 reads only the first certificate; crl2pkcs7 parses them all.
+        if (
+            openssl(["x509", "-in", str(args.ca), "-noout"]).returncode != 0
+            or openssl(["crl2pkcs7", "-nocrl", "-certfile", str(args.ca)]).returncode
+            != 0
+        ):
+            raise AttestError(f"--ca {args.ca}: no readable PEM certificate")
         if len(args.files) == 1:
             items = person_attestations(args.files[0])
         else:

@@ -50,7 +50,45 @@ basicConstraints = critical,CA:FALSE
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
 {AAGUID_EXT}0f:{AAGUID[:15].hex()}
+[leaf_no_aaguid]
+basicConstraints = critical,CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+[leaf_aaguid_critical]
+basicConstraints = critical,CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+1.3.6.1.4.1.45724.1.1.4 = critical,DER:04:10:{AAGUID.hex()}
+[leaf_ca_true]
+basicConstraints = critical,CA:TRUE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+{AAGUID_EXT}10:{AAGUID.hex()}
+[leaf_no_basic_constraints]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+{AAGUID_EXT}10:{AAGUID.hex()}
+[tls]
+basicConstraints = critical,CA:FALSE
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:www.example.com
 """
+LEAF_SUBJECT = "/O=Test Vendor/OU=Authenticator Attestation/CN=Test Key"
+# name -> (subject, openssl.cnf extension section or None for an X.509 v1 cert)
+LEAVES = {
+    "leaf": (LEAF_SUBJECT, "leaf"),
+    "leaf_other": (LEAF_SUBJECT + " other", "leaf_other"),
+    "leaf_bad": (LEAF_SUBJECT + " bad", "leaf_bad"),
+    "leaf_no_aaguid": (LEAF_SUBJECT + " no aaguid", "leaf_no_aaguid"),
+    "leaf_aaguid_critical": (LEAF_SUBJECT + " critical", "leaf_aaguid_critical"),
+    "leaf_ca_true": (LEAF_SUBJECT + " ca", "leaf_ca_true"),
+    "leaf_no_basic_constraints": (LEAF_SUBJECT + " no bc", "leaf_no_basic_constraints"),
+    "leaf_no_ou": ("/O=Test Vendor/CN=Test Key no ou", "leaf"),
+    "leaf_v1": (LEAF_SUBJECT + " v1", None),
+    "leaf_v2": (LEAF_SUBJECT + " v2", "leaf"),  # version patched by as_v2()
+    # A TLS server certificate under the same root (review vouch-xlha.11).
+    "tls": ("/CN=www.example.com", "tls"),
+}
 
 
 def run(*args: str) -> bytes:
@@ -90,8 +128,13 @@ def cbor_map(items: list[tuple[int, int | bytes]]) -> bytes:
     return out
 
 
-def make_cert(tmp: Path, name: str, subject: str, issuer: str | None, ext: str) -> None:
-    """Make an EC P-256 key and a certificate for it, self-signed when issuer is None."""
+def make_cert(
+    tmp: Path, name: str, subject: str, issuer: str | None, ext: str | None
+) -> None:
+    """Make an EC P-256 key and a certificate for it, self-signed when issuer is None.
+
+    With ext None the certificate has no extensions, so openssl makes it v1.
+    """
     key, csr, pem = tmp / f"{name}.key", tmp / f"{name}.csr", tmp / f"{name}.pem"
     cnf = tmp / "openssl.cnf"
     run(
@@ -134,13 +177,51 @@ def make_cert(tmp: Path, name: str, subject: str, issuer: str | None, ext: str) 
         "-sha256",
         "-set_serial",
         "0x" + os.urandom(8).hex(),
-        "-extfile",
-        str(cnf),
-        "-extensions",
-        ext,
+        *([] if ext is None else ["-extfile", str(cnf), "-extensions", ext]),
         "-out",
         str(pem),
     )
+
+
+def der_tlv(tag: int, value: bytes) -> bytes:
+    """Encode one DER TLV (definite length)."""
+    if len(value) < 0x80:
+        return bytes([tag, len(value)]) + value
+    size = (len(value).bit_length() + 7) // 8
+    return bytes([tag, 0x80 | size]) + len(value).to_bytes(size, "big") + value
+
+
+def der_split(tlv: bytes) -> tuple[bytes, bytes]:
+    """Split one DER TLV at the start of tlv into (header, contents)."""
+    length, start = tlv[1], 2
+    if length & 0x80:
+        start += length & 0x7F
+        length = int.from_bytes(tlv[2:start], "big")
+    return tlv[:start], tlv[start : start + length]
+
+
+def der_items(contents: bytes) -> list[bytes]:
+    """Split the contents of a DER SEQUENCE into its encoded elements."""
+    items = []
+    while contents:
+        header, value = der_split(contents)
+        items.append(header + value)
+        contents = contents[len(header) + len(value) :]
+    return items
+
+
+def as_v2(tmp: Path, cert: bytes, issuer_key: Path) -> bytes:
+    """Return cert with its version field set to v2, re-signed by issuer_key.
+
+    The result still chains, so only the version check can reject it.
+    """
+    tbs, algorithm, _ = der_items(der_split(cert)[1])
+    header, fields = der_split(tbs)
+    if not fields.startswith(b"\xa0\x03\x02\x01\x02"):  # [0] INTEGER 2
+        raise SystemExit("leaf certificate is not v3")
+    tbs = der_tlv(0x30, b"\xa0\x03\x02\x01\x01" + fields[5:])
+    sig = sign(tmp, issuer_key, tbs)
+    return der_tlv(0x30, tbs + algorithm + der_tlv(0x03, b"\x00" + sig))
 
 
 def credential(
@@ -215,28 +296,22 @@ def main() -> None:
         (tmp / "openssl.cnf").write_text(CNF)
         make_cert(tmp, "root", "/O=Test Vendor/CN=Test Attestation Root", None, "ca")
         make_cert(tmp, "inter", "/O=Test Vendor/CN=Test Attestation CA 1", "root", "ca")
-        make_cert(
-            tmp,
-            "leaf",
-            "/O=Test Vendor/OU=Authenticator Attestation/CN=Test Key",
-            "inter",
-            "leaf",
-        )
-        for leaf in ("leaf_other", "leaf_bad"):
-            make_cert(tmp, leaf, f"/O=Test Vendor/CN=Test Key {leaf}", "inter", leaf)
+        for leaf, (subject, ext) in LEAVES.items():
+            make_cert(tmp, leaf, subject, "inter", ext)
         make_cert(tmp, "other", "/O=Other Vendor/CN=Other Root", None, "ca")
         root, inter = (tmp / "root.pem").read_bytes(), (tmp / "inter.pem").read_bytes()
         (OUT / "root.pem").write_bytes(root)
         (OUT / "ca.pem").write_bytes(inter + root)
         (OUT / "other-ca.pem").write_bytes((tmp / "other.pem").read_bytes())
-        leaf_der = run(
-            "openssl", "x509", "-in", str(tmp / "leaf.pem"), "-outform", "DER"
-        )
+        der = {
+            leaf: run(
+                "openssl", "x509", "-in", str(tmp / f"{leaf}.pem"), "-outform", "DER"
+            )
+            for leaf in LEAVES
+        }
+        der["leaf_v2"] = as_v2(tmp, der["leaf_v2"], tmp / "inter.key")
+        leaf_der = der["leaf"]
         leaf_key = tmp / "leaf.key"
-        other_leaf, bad_leaf = (
-            run("openssl", "x509", "-in", str(tmp / f"{n}.pem"), "-outform", "DER")
-            for n in ("leaf_other", "leaf_bad")
-        )
 
         ec_args = ["-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"]
         ec_key, ec_pub = credential(tmp, "ecdsa", ec_args, 65)
@@ -292,18 +367,21 @@ def main() -> None:
         attest("no-up", authdata(0x40, ec_cose))
         attest("self", authdata(0x41, ec_cose), cert=b"", key=ec_key)
         attest("no-at", authdata(0x01, ec_cose))
-        attest(
-            "aaguid-mismatch",
-            authdata(0x41, ec_cose),
-            cert=other_leaf,
-            key=tmp / "leaf_other.key",
-        )
-        attest(
-            "aaguid-malformed",
-            authdata(0x41, ec_cose),
-            cert=bad_leaf,
-            key=tmp / "leaf_bad.key",
-        )
+        for name, leaf in [
+            ("aaguid-mismatch", "leaf_other"),
+            ("aaguid-malformed", "leaf_bad"),
+            ("no-aaguid", "leaf_no_aaguid"),
+            ("aaguid-critical", "leaf_aaguid_critical"),
+            ("ca-true", "leaf_ca_true"),
+            ("no-basic-constraints", "leaf_no_basic_constraints"),
+            ("no-ou", "leaf_no_ou"),
+            ("v1", "leaf_v1"),
+            ("v2", "leaf_v2"),
+            ("tls-leaf", "tls"),
+        ]:
+            attest(
+                name, authdata(0x41, ec_cose), cert=der[leaf], key=tmp / f"{leaf}.key"
+            )
 
 
 if __name__ == "__main__":
