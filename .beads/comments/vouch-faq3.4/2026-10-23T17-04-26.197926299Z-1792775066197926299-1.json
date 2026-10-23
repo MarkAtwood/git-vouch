@@ -1,0 +1,7 @@
+{
+  "id": "1792775066197926299-1",
+  "issue_id": "vouch-faq3.4",
+  "author": "agent",
+  "text": "Correction to the 16:59 comment: query --at takes tier and automation from git history, but emails come from endorsements in the current tree (held_at ponytail). Reproduced as authorized=true at T0 for an endorsement made after T0. Open question for Mark; see notes.",
+  "created_at": "2026-10-23T17:04:26.197926299Z"
+}

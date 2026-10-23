@@ -1,0 +1,7 @@
+{
+  "id": "1792774753512047290-1",
+  "issue_id": "vouch-faq3.4",
+  "author": "agent",
+  "text": "Verified after vouch-faq3.11: decide() reads handle/valid/automation/emails from query, which cmd_query now takes from held_at(handle, --at) (git history at TIME). DESIGN.md: any tier authorizes, automation never, so promotion-after-TIME bridge case = test_bot_era_signature_of_since_promoted_handle (present; bot at T0 -\u003e authorized=false 'automation identities do not sign commits', now -\u003e true). Gates: tests/trqp 131 passed on 3.12 and 3.9 (schema oracle mandatory, jsonschema+referencing); ruff check/format clean. No code changes this run. Not committed, not closed (later stage).",
+  "created_at": "2026-10-23T16:59:13.51204729Z"
+}

@@ -225,6 +225,24 @@ def test_registry_holds_the_signed_records(rehearsal: Rehearsal) -> None:
     assert "people/carol.json.asc" not in files
 
 
+def test_registry_holds_the_reviewed_drafts(
+    rehearsal: Rehearsal, tmp_path: Path
+) -> None:
+    lena = rehearsal.world / "lena"
+    drafts = lena / "endorsement-drafts" / "endorsements"
+    signers = tmp_path / "allowed_signers"
+    signers.write_text("lena " + (lena / ".ssh" / "id_ed25519.pub").read_text())
+    for subject in ("alice", "bob", "dave"):
+        signed = rehearsal.world / "korg" / "registry" / "endorsements" / subject
+        draft = drafts / subject / "lena-1.json"
+        assert (signed / "lena-1.json").read_bytes() == draft.read_bytes()
+        subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", str(signers), "-I", "lena",
+             "-n", "git-vouch-endorse", "-s", str(signed / "lena-1.json.sig")],
+            input=draft.read_bytes(), check=True, capture_output=True,
+        )  # fmt: skip
+
+
 def test_check_computes_the_tiers(rehearsal: Rehearsal) -> None:
     tier_lines = [
         ln for ln in rehearsal.proc.stdout.splitlines() if TIER_RE.fullmatch(ln)

@@ -172,9 +172,8 @@ merge register-carol
         --out ~/endorsement-drafts
     for f in ~/endorsement-drafts/endorsements/*/*.json; do
         cat "$f"
-        ssh-keygen -q -Y sign -f ~/.ssh/id_ed25519.pub -n git-vouch-endorse "$f"
+        git vouch endorse --from "$f"
     done
-    cp -R ~/endorsement-drafts/endorsements .
     git vouch approve alice maintainer
     git add endorsements tiers
     git commit -q -m "lena: endorsements from GPG certifications; approve alice"
