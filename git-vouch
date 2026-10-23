@@ -1322,7 +1322,9 @@ def _record_paths(root: Path, problems: list[str]) -> list[str]:
 
 
 def _in_validity(rel: str, key: PersonKey, date: datetime) -> None:
-    if date < key.added or (key.retired is not None and date >= key.retired):
+    # Both ends inclusive, as OpenSSH treats valid-after and valid-before: a
+    # record dated in its key's retirement second is valid.
+    if date < key.added or (key.retired is not None and date > key.retired):
         raise VouchError(f"{rel}: dated outside the validity of {key.did}")
 
 

@@ -1,0 +1,22 @@
+{
+  "id": "vouch-ey47.24",
+  "title": "query/keys: inclusive retirement second like check?",
+  "description": "Question for Mark. vouch-ey47.22 made check accept a record dated in its key's retirement second (inclusive, as OpenSSH valid-before). query --at (git-vouch cmd_query, when \u003c key.retired) and keys (now \u003c key.retired) still treat the retirement second as invalid, and tests/test_query.py pins that ('retired is exclusive'). git-vouch-trqp reads validity from query --at, so for T == retired check/OpenSSH say valid while query/bridge say invalid (fails closed). Options: (a) make query/keys inclusive (when \u003c= key.retired) and update DESIGN and test_query; (b) keep query strict and leave the documented split as DESIGN now states it. Needs the core and docs locks.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T18:25:37.167043914Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T18:25:37.167043914Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-ey47.24",
+      "depends_on_id": "vouch-ey47",
+      "type": "parent-child",
+      "created_at": "2026-10-23T18:25:37.181679667Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

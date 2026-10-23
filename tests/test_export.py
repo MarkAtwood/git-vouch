@@ -15,7 +15,14 @@ from pathlib import Path
 import pytest
 
 from conftest import Key, run_script
-from test_check import AFTER, BEFORE, Registry, keys  # noqa: F401 (keys is a fixture)
+from test_check import (  # noqa: F401 (keys is a fixture)
+    AFTER,
+    BEFORE,
+    RETIRED,
+    RETIRED_PLUS_1,
+    Registry,
+    keys,
+)
 
 BEFORE_ADDED = "2025-06-01T00:00:00Z"
 
@@ -267,6 +274,39 @@ def test_retired_key_keeps_earlier_signatures(
     assert not verifies(repo, tag(repo, "v2", old, date=AFTER), out)
     assert not verifies(repo, tag(repo, "v3", old, date=BEFORE_ADDED), out)
     assert verifies(repo, tag(repo, "v4", keys("gregkh"), date=AFTER), out)
+
+
+def test_retirement_second_matches_openssh(
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """check accepts a record dated in its key's retirement second and rejects
+    the next second, as OpenSSH does at a hand-written valid-before."""
+    old = keys("gregkh-old")
+    data, sig = sign_file(tmp_path, old, "git")
+    at_t, at_t1 = "verify-time=20260601000000Z", "verify-time=20260601000001Z"
+    hand = tmp_path / "hand_signers"
+    hand.write_text(f'gregkh valid-before="20260601000000Z" {old.pubkey}\n')
+    assert ssh_verify(data, sig, hand, "gregkh", "git", "-O", at_t)
+    assert not ssh_verify(data, sig, hand, "gregkh", "git", "-O", at_t1)
+
+    reg.endorse("alice", keys("alice"), "gregkh", old, n=2, date=RETIRED)
+    out = export(reg, tmp_path, "--min-tier", "maintainer")  # runs check
+    assert ssh_verify(data, sig, out.signers, "gregkh@example.org", "git", "-O", at_t)
+
+    reg.endorse("alice", keys("alice"), "gregkh", old, n=3, date=RETIRED_PLUS_1)
+    late = Exported(tmp_path / "late")
+    proc = run_script(
+        "export",
+        str(reg.root),
+        "--allowed-signers",
+        str(late.signers),
+        "--revocation-file",
+        str(late.revocations),
+    )
+    assert proc.returncode != 0
+    assert "gregkh-3.json: dated outside the validity" in proc.stderr
 
 
 def test_refuses_to_export_on_problem(

@@ -177,6 +177,13 @@ the last hour before an end. The hour adds no risk: the signer sets the
 signing time and could backdate by any amount anyway. It also means a
 signature in the same second as a retirement is not a special case.
 
+`git vouch check` judges a record's date the same way, without the hour:
+it accepts a record dated from its key's `added` second through its
+`retired` second, both included, as OpenSSH treats `valid-after` and
+`valid-before`. A record dated in its key's retirement second passes;
+one dated a second later does not. `git vouch query` and `git vouch
+keys` still treat the retirement second as outside the key's validity.
+
 ## The registry
 
 A git repository at a configurable URL: `git vouch setup --registry <url>`

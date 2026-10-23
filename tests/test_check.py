@@ -23,6 +23,7 @@ from conftest import SCRIPT, Key, make_key, run_script
 CONTEXT = "https://w3id.org/git-vouch/v1"
 ADDED = "2026-01-01T00:00:00Z"
 RETIRED = "2026-06-01T00:00:00Z"
+RETIRED_PLUS_1 = "2026-06-01T00:00:01Z"
 BEFORE = "2026-03-01T00:00:00Z"
 AFTER = "2026-09-01T00:00:00Z"
 
@@ -510,6 +511,26 @@ def test_symlinked_directory_rejected(vouch: ModuleType, tree: Registry) -> None
 def test_missing_anchors_file(vouch: ModuleType, tmp_path: Path) -> None:
     result = vouch.check_registry(tmp_path)
     assert has(result.problems, "anchors.json: cannot read")
+
+
+def test_record_in_retirement_second(
+    vouch: ModuleType, tree: Registry, keys: Callable[[str], Key]
+) -> None:
+    tree.person("dave", keys("dave2"), retired=(keys("dave"),))
+    tree.endorse("alice", keys("alice"), "dave", keys("dave"), n=2, date=RETIRED)
+    result = check(vouch, tree)
+    assert result.problems == []
+    assert result.voids == []
+
+
+def test_record_a_second_after_retirement(
+    vouch: ModuleType, tree: Registry, keys: Callable[[str], Key]
+) -> None:
+    tree.person("dave", keys("dave2"), retired=(keys("dave"),))
+    rel = tree.endorse(
+        "alice", keys("alice"), "dave", keys("dave"), n=2, date=RETIRED_PLUS_1
+    )
+    assert has(check(vouch, tree).problems, rel, "outside the validity")
 
 
 def test_record_dated_before_key_added(
