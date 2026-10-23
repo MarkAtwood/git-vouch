@@ -9,6 +9,8 @@ Every expected answer is stated by hand from the fixture's dates
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -359,6 +361,145 @@ def test_endorsement_removed_after_time_counts_then(
     assert answer(r.root, carol, "--at", T0)["emails"] == ["carol@example.org"]
     assert answer(r.root, carol, "--at", T1)["emails"] == []
     assert answer(r.root, carol)["emails"] == []
+
+
+def carol(tmp_path: Path, keys: Callable[[str], Key], *emails: str) -> GitRegistry:  # noqa: F811
+    """Return ``base`` plus carol, a contributor listing ``emails`` too, uncommitted."""
+    r = base(tmp_path, keys)
+    r.person("carol", keys("carol"), emails=emails)
+    r.tier("carol", "contributor", "torvalds", keys("torvalds"))
+    return r
+
+
+def test_endorsement_edited_after_time_reads_the_old_version(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """gregkh endorses carol@ in the first commit and re-signs it adding x@ in the second."""
+    r = carol(tmp_path, keys, "x@example.org")
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    both = ("carol@example.org", "x@example.org")
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"), emails=both)
+    r.commit()
+    who = did(keys("carol"))
+    assert answer(r.root, who, "--at", T0)["emails"] == ["carol@example.org"]
+    assert answer(r.root, who, "--at", T1)["emails"] == list(both)
+    assert answer(r.root, who)["emails"] == list(both)
+
+
+def test_endorsement_on_a_branch_counts_from_the_merge(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """carol is endorsed on a side branch committed 2026-01-02, merged 2026-01-03."""
+    r = carol(tmp_path, keys)
+    r.commit()
+    r.git("checkout", "-q", "-b", "side")
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    r.git("checkout", "-q", "main")
+    merged = "2026-01-03T00:00:00Z"
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.org"]
+        + ["merge", "-q", "--no-ff", "--no-edit", "side"],
+        cwd=r.root,
+        env={**os.environ, "GIT_COMMITTER_DATE": merged, "GIT_AUTHOR_DATE": merged},
+        check=True,
+    )
+    who = did(keys("carol"))
+    assert answer(r.root, who, "--at", "2026-01-02T12:00:00Z")["emails"] == []
+    assert answer(r.root, who, "--at", merged)["emails"] == ["carol@example.org"]
+    assert answer(r.root, who)["emails"] == ["carol@example.org"]
+
+
+def test_endorser_key_revoked_after_time_voids_it_then(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """gregkh endorses carol in the first commit; torvalds revokes that key in the second."""
+    r = carol(tmp_path, keys)
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    r.revoke("gregkh", keys("gregkh"), keys("torvalds"))
+    r.commit()
+    assert answer(r.root, did(keys("carol")), "--at", T0)["emails"] == []
+
+
+def test_person_emails_changed_after_time_read_the_old_list(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """One endorsement covers all three addresses; carol lists old@ first, then new@."""
+    r = carol(tmp_path, keys, "old@example.org")
+    every = ("carol@example.org", "old@example.org", "new@example.org")
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"), emails=every)
+    r.commit()
+    r.person("carol", keys("carol"), emails=("new@example.org",))
+    r.commit()
+    who = did(keys("carol"))
+    then = ["carol@example.org", "old@example.org"]
+    assert answer(r.root, who, "--at", T0)["emails"] == then
+    assert answer(r.root, who)["emails"] == ["carol@example.org", "new@example.org"]
+
+
+def test_unreadable_past_endorsement_fails_the_query_closed(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """The first commit has a 70,000-byte endorsement (over git-vouch's 64 KiB
+    cap); the second replaces it with a valid one. Check judges the tree."""
+    r = carol(tmp_path, keys)
+    rel = "endorsements/carol/gregkh-1.json"
+    (r.root / "endorsements/carol").mkdir(parents=True)
+    for name in (rel, rel + ".sig"):
+        (r.root / name).write_bytes(b" " * 70_000)
+    r.commit()
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    proc = query(r.root, did(keys("carol")), "--at", T0)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["emails"] == []
+    assert "65536 bytes" in proc.stderr and "endorsed" in proc.stderr
+    assert answer(r.root, did(keys("carol")))["emails"] == ["carol@example.org"]
+    check = subprocess.run(
+        [sys.executable, str(SCRIPT), "check", str(r.root)],
+        capture_output=True,
+        text=True,
+    )
+    assert check.returncode == 0, check.stderr
+
+
+def test_check_does_not_read_endorsement_history(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """A git on PATH logs its arguments: check never names endorsements; query --at does."""
+    r = carol(tmp_path, keys)
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    shim, log = tmp_path / "bin", tmp_path / "git.log"
+    shim.mkdir()
+    real = shutil.which("git")
+    (shim / "git").write_text(f'#!/bin/sh\necho "$*" >> "{log}"\nexec "{real}" "$@"\n')
+    (shim / "git").chmod(0o755)
+    env = {**os.environ, "PATH": f"{shim}{os.pathsep}{os.environ['PATH']}"}
+
+    def logged(*args: str) -> str:
+        log.write_text("")
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), *args],
+            cwd=r.root,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return log.read_text()
+
+    assert "log" in logged("check", str(r.root))
+    assert "endorsements" not in logged("check", str(r.root))
+    assert "endorsements/carol" in logged("query", did(keys("carol")), "--at", T0)
 
 
 def test_time_before_the_handle_existed_is_unknown(

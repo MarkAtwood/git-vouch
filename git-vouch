@@ -1083,10 +1083,13 @@ class CheckResult(NamedTuple):
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
 RANK = {"anchor": 0, "maintainer": 1, "contributor": 2, "automation": 2}
-# The paths whose history check reads; endorsements only for query --at.
+# The paths whose history check reads; endorsements are judged on the tree alone.
 HISTORY_RE = re.compile(
-    r"anchors\.json|(?:people|tiers|revocations|endorsements/[a-z0-9][a-z0-9_-]*)"
-    r"/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
+    r"anchors\.json|(?:people|tiers|revocations)/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
+)
+# The endorsement paths whose history only ``query --at`` reads, one subject at a time.
+ENDORSEMENT_RE = re.compile(
+    r"endorsements/[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
 )
 
 
@@ -1184,12 +1187,19 @@ def _is_repo_top(root: Path) -> bool:
     return Path(top).resolve() == root.resolve()
 
 
-def registry_history(root: Path, paths: Iterable[str]) -> History:
-    """Return the history of ``anchors.json`` and of every other record file.
+def registry_history(
+    root: Path,
+    paths: Iterable[str],
+    sources: Sequence[str] = ("anchors.json", "people", "tiers", "revocations"),
+    pattern: re.Pattern[str] = HISTORY_RE,
+) -> History:
+    """Return the history of ``anchors.json`` and of every person, tier and revocation file.
 
     Args:
         root: Registry checkout.
         paths: Record paths in the working tree, as from ``_record_paths``.
+        sources: The paths below ``root`` whose logs list the files to read.
+        pattern: Of the files found, those to read; the rest are ignored.
 
     Raises:
         VouchError: git fails, or a version cannot be read (see ``file_history``).
@@ -1217,7 +1227,6 @@ def registry_history(root: Path, paths: Iterable[str]) -> History:
         for p in ps:
             bits |= ancestors[p] | 1 << p
         ancestors.append(bits)
-    sources = ["anchors.json", "people", "tiers", "revocations", "endorsements"]
     names = {"anchors.json", *paths, *(f"{p}.sig" for p in paths)}
     kept: dict[str, list[tuple[str, str, str]]] = {}  # rel -> [(merge, mode, blob)]
     if commits:
@@ -1255,12 +1264,12 @@ def registry_history(root: Path, paths: Iterable[str]) -> History:
                 continue
             fields = token[1:].decode().split()
             rel = next(tokens, b"").decode(errors="replace")
-            if HISTORY_RE.fullmatch(rel):
+            if pattern.fullmatch(rel):
                 kept.setdefault(rel, []).append((merge, fields[1], fields[3]))
     versions: dict[str, list[tuple[int, Optional[bytes]]]] = {}
     # ponytail: one file_history (four git runs) per path, so a registry of
     # thousands of files takes seconds; one combined git log would be faster.
-    for rel in sorted(n for n in names if HISTORY_RE.fullmatch(n)):
+    for rel in sorted(n for n in names if pattern.fullmatch(n)):
         found = (
             {order[v.commit]: v.data for v in file_history(root, rel)}
             if commits
@@ -1370,7 +1379,8 @@ def check_registry(root: Path) -> CheckResult:
     ranks highest (a human tier wins over automation); automation if that
     tier is or that commit's person file names an accountable maintainer;
     the emails that person file lists and that an endorsement in that
-    commit endorses, judged as the working tree's are. None if
+    commit endorses, judged as the working tree's are (none, with a
+    warning, if their history cannot be read; check never reads it). None if
     no person file of theirs parses at that commit. Revocations count at
     every time, as everywhere. Export answers for now instead, so it can
     differ for past times.
@@ -2011,6 +2021,41 @@ def check_registry(root: Path) -> CheckResult:
                 f" is also claimed by {others}"
             )
 
+    def endorsed_at(person: Person, i: int) -> set[str]:
+        # The emails endorsed at position i, by endorsements as they were
+        # there, judged as the working tree's are. Their history is read
+        # only here, for one subject, so check never pays for it, and a
+        # past version git-vouch cannot read fails this query alone, closed.
+        prefix = f"endorsements/{person.handle}"
+        try:
+            past = registry_history(
+                root,
+                [p for p in paths if p.startswith(prefix + "/")],
+                [prefix],
+                ENDORSEMENT_RE,
+            )
+        except VouchError as e:
+            print(
+                f"git-vouch: warning: {e}; so no email of {person.handle}"
+                " counts as endorsed then",
+                file=sys.stderr,
+            )
+            return set()
+        ok: set[str] = set()
+        for rel in past.versions:
+            data, sig = past.at(rel, i), past.at(rel + ".sig", i)
+            if rel.endswith(".sig") or data is None or sig is None:
+                continue
+            try:
+                e = parse_record(rel, data)
+                if not isinstance(e, Endorsement):
+                    continue
+                judge_endorsement(rel, e, data, sig, person)
+            except (VouchError, Void):
+                continue  # counts for nothing, as in the working tree
+            ok.update(m.lower() for m in e.subject_emails)
+        return ok
+
     def held_at(handle: str, when: Optional[datetime]) -> Optional[Held]:
         # The registry at ``when`` is the newest commit on HEAD's first-parent
         # line, the registry's own merges, dated at or before it; None is
@@ -2024,6 +2069,7 @@ def check_registry(root: Path) -> CheckResult:
         person = None if i is None else person_at(handle, i)
         if i is None or person is None or handle not in people:
             return None
+        ok = endorsed.get(handle, set()) if when is None else endorsed_at(person, i)
         when = when or datetime.now(timezone.utc)
         held = [t for _, t in standing(handle, i) if isinstance(t, str)]
         if handle in anchors_at(i):
@@ -2041,19 +2087,6 @@ def check_registry(root: Path) -> CheckResult:
         humans = [t for t in held if t != "automation"]
         tier = min(humans, key=RANK.__getitem__) if humans else None
         tier = tier or ("automation" if held else None)
-        ok: set[str] = set()
-        for rel in history.versions:
-            if not rel.startswith(f"endorsements/{handle}/") or rel.endswith(".sig"):
-                continue
-            data, sig = pair_at(rel, i)
-            e = record_at(rel, i)
-            if data is None or sig is None or not isinstance(e, Endorsement):
-                continue
-            try:
-                judge_endorsement(rel, e, data, sig, person)
-            except (VouchError, Void):
-                continue  # counts for nothing, as in the working tree
-            ok.update(m.lower() for m in e.subject_emails)
         return Held(
             tier,
             tier == "automation"
