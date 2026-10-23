@@ -45,6 +45,10 @@ STALE_AFTER = timedelta(days=7)
 # set their own timestamps and could backdate anyway, so the hour admits
 # nothing new. Drop it once that OpenSSH is gone.
 END_SLACK = timedelta(hours=1)
+# A record date must leave room for END_SLACK and format as four digits.
+RECORD_YEARS = range(1970, 9999)
+# The latest valid-before: a commit can be dated to the end of datetime's range.
+LAST_SECOND = datetime.max.replace(microsecond=0, tzinfo=timezone.utc)
 
 B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ED25519_CODEC = b"\xed\x01"  # multicodec ed25519-pub (0xed) as a varint
@@ -222,17 +226,21 @@ GIT_LOG = [
 FILE_MODES = ("100644", "100755")
 
 
-def read_blobs(root: Path, what: str, blobs: Sequence[str]) -> dict[str, bytes]:
+def read_blobs(
+    root: Path, what: str, blobs: Sequence[str], skip: bool = False
+) -> dict[str, bytes]:
     """Return the content of each git blob in ``blobs``, keyed by object id.
 
     Args:
         root: The repository's work tree.
         what: Named in the error message.
         blobs: Object ids from git's own output.
+        skip: Leave out an object that is not a blob of at most
+            MAX_FILE_SIZE bytes instead of failing.
 
     Raises:
-        VouchError: git fails, or an object is not a blob of at most
-            MAX_FILE_SIZE bytes; no oversized blob is ever read.
+        VouchError: git fails, or, unless ``skip``, an object is not a blob
+            of at most MAX_FILE_SIZE bytes; no oversized blob is ever read.
     """
     if not blobs:
         return {}
@@ -243,22 +251,44 @@ def read_blobs(root: Path, what: str, blobs: Sequence[str]) -> dict[str, bytes]:
         c.split()[2] if c.split()[1:2] == [b"blob"] else b""
         for c in checks.splitlines()
     ]
-    if len(sizes) != len(blobs) or not all(
-        s.isdigit() and int(s) <= MAX_FILE_SIZE for s in sizes
-    ):
+    good = [b for b, s in zip(blobs, sizes) if s.isdigit() and int(s) <= MAX_FILE_SIZE]
+    if len(sizes) != len(blobs) or (len(good) != len(blobs) and not skip):
         raise VouchError(
             f"{what}: a version is not a blob of at most {MAX_FILE_SIZE} bytes"
         )
+    if not good:
+        return {}
+    stdin = "".join(f"{b}\n" for b in good).encode()
     out = run([*GIT, "cat-file", "--batch"], stdin=stdin, cwd=root)
     contents = {}
-    for blob in blobs:
+    for blob in good:
         header, out = out.split(b"\n", 1)
         size = int(header.split()[2])
         contents[blob], out = out[:size], out[size + 1 :]
     return contents
 
 
-def file_history(root: Path, rel: str) -> list[Version]:
+def _unreadable(
+    rel: str, commit: str, blob: str, unreadable: Optional[list[str]]
+) -> bytes:
+    """Return stand-in content for a version of ``rel`` that cannot be read.
+
+    The stand-in never parses, so the version counts as a malformed record,
+    and differs per blob, so two such versions still differ.
+
+    Raises:
+        VouchError: ``unreadable`` is None; otherwise the message is added to it.
+    """
+    problem = f"{rel}: not a regular file of at most {MAX_FILE_SIZE} bytes"
+    if unreadable is None:
+        raise VouchError(f"{problem}, at {commit}")
+    unreadable.append(f"{problem} (ignored, at {commit})")
+    return b"\0unreadable " + blob.encode()
+
+
+def file_history(
+    root: Path, rel: str, unreadable: Optional[list[str]] = None
+) -> list[Version]:
     """Return every version of ``rel`` in the registry repository at ``root``, oldest first.
 
     A version is a commit whose ``rel`` differs from that of its parent, or,
@@ -272,12 +302,15 @@ def file_history(root: Path, rel: str) -> list[Version]:
     Args:
         root: Top of the registry's git work tree.
         rel: Slash-separated path below ``root``.
+        unreadable: If given, a version that is a directory, a symlink, a
+            submodule or too large is not an error: it gets content that never parses,
+            and a message naming its commit is added here.
 
     Raises:
         VouchError: ``rel`` is not a plain path, the repository is a shallow
-            clone, git fails, or a version is not a regular file (a
-            directory, symlink or submodule) or is too large, or a commit's
-            date is beyond what datetime can hold.
+            clone, git fails, or, unless ``unreadable`` is given, a version is
+            a directory, a symlink, a submodule or too large. A commit dated
+            beyond what datetime can hold is dated LAST_SECOND.
     """
     parts = rel.split("/")
     if any(p in ("", ".", "..") for p in parts) or not rel.isprintable():
@@ -304,7 +337,8 @@ def file_history(root: Path, rel: str) -> list[Version]:
         values=[rel],
         cwd=root,
     )
-    found = []  # (commit, committer time, parents, result mode, result blob)
+    # commit -> (commit, committer time, parents, result mode, result blob)
+    found: dict[str, tuple[str, str, tuple[str, ...], str, str]] = {}
     tokens = iter(log.split(b"\0"))
     for token in tokens:
         token = token.lstrip(b"\n")
@@ -317,19 +351,33 @@ def file_history(root: Path, rel: str) -> list[Version]:
         n = len(token) - len(token.lstrip(b":"))
         fields = token[n:].decode().split()
         mode, blob = fields[n], fields[2 * n + 1]
-        if path != rel.encode() or mode not in ("000000", *FILE_MODES):
+        entry = (commit, ctime, tuple(parents), mode, blob)
+        if path.startswith(rel.encode() + b"/"):
+            # A directory at rel: git lists the files below it, beside rel's
+            # own deletion. A file added or changed there means a directory
+            # version; only files deleted there mean rel is gone.
+            if mode != "000000":
+                found[commit] = (commit, ctime, tuple(parents), "040000", commit)
+            else:
+                found.setdefault(commit, entry)
+        elif path == rel.encode():
+            if found.get(commit, entry)[3] != "040000":
+                found[commit] = entry
+        else:
             raise VouchError(f"{rel} at {commit}: not a regular file")
-        found.append((commit, ctime, tuple(parents), mode, blob))
-    contents = read_blobs(root, rel, [f[4] for f in found if f[3] != "000000"])
+    contents = read_blobs(
+        root, rel, [f[4] for f in found.values() if f[3] in FILE_MODES], skip=True
+    )
     versions = []
-    for commit, ctime, parents, mode, blob in found:
+    for commit, ctime, parents, mode, blob in found.values():
         try:
             date = datetime.fromtimestamp(int(ctime), timezone.utc)
-        except (ValueError, OverflowError, OSError) as e:
-            raise VouchError(f"commit {commit}: committer date out of range") from e
-        versions.append(
-            Version(commit, date, parents, None if mode == "000000" else contents[blob])
-        )
+        except (ValueError, OverflowError, OSError):
+            date = LAST_SECOND
+        data = None if mode == "000000" else contents.get(blob)
+        if mode != "000000" and data is None:
+            data = _unreadable(rel, commit, blob, unreadable)
+        versions.append(Version(commit, date, parents, data))
     return versions
 
 
@@ -668,11 +716,15 @@ def _date(obj: Mapping[str, object], key: str) -> datetime:
     value = _required(obj, key)
     if isinstance(value, str) and DATE_RE.fullmatch(value):
         try:
-            return datetime.strptime(value, DATE_FORMAT).replace(tzinfo=timezone.utc)
+            when = datetime.strptime(value, DATE_FORMAT).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
+        else:
+            if when.year in RECORD_YEARS:
+                return when
     raise VouchError(
-        f"{key}: must be a UTC time like 2026-11-05T00:00:00Z, not {value!r:.60}"
+        f"{key}: must be a UTC time like 2026-11-05T00:00:00Z"
+        f" in the years 1970 to 9998, not {value!r:.60}"
     )
 
 
@@ -1121,6 +1173,8 @@ class History(NamedTuple):
     ancestors: list[int]  # per position, bit j set if j is a strict ancestor
     # rel -> [(position, content or None if deleted)], by position
     versions: dict[str, list[tuple[int, Optional[bytes]]]]
+    # Commits whose date ``date`` returned as LAST_SECOND; check reports each.
+    far: set[str]
 
     @property
     def final(self) -> int:
@@ -1134,17 +1188,17 @@ class History(NamedTuple):
     def date(self, i: int) -> datetime:
         """Return the committer date at position ``i``; the working tree is dated now.
 
-        Raises:
-            VouchError: the date is beyond what datetime can hold.
+        A date beyond what datetime can hold is returned as LAST_SECOND and
+        the commit added to ``far``, so one such commit never stops the
+        history being read.
         """
         if i == self.final:
             return datetime.now(timezone.utc)
         try:
             return datetime.fromtimestamp(self.dates[i], timezone.utc)
-        except (ValueError, OverflowError, OSError) as e:
-            raise VouchError(
-                f"commit {self.commits[i]}: committer date out of range"
-            ) from e
+        except (ValueError, OverflowError, OSError):
+            self.far.add(self.commits[i])
+            return LAST_SECOND
 
     def before(self, j: int, i: int) -> bool:
         """Return whether position ``j`` is a strict ancestor of position ``i``."""
@@ -1199,6 +1253,7 @@ def registry_history(
     paths: Iterable[str],
     sources: Sequence[str] = ("anchors.json", "people", "tiers", "revocations"),
     pattern: re.Pattern[str] = HISTORY_RE,
+    unreadable: Optional[list[str]] = None,
 ) -> History:
     """Return the history of ``anchors.json`` and of every person, tier and revocation file.
 
@@ -1207,6 +1262,7 @@ def registry_history(
         paths: Record paths in the working tree, as from ``_record_paths``.
         sources: The paths below ``root`` whose logs list the files to read.
         pattern: Of the files found, those to read; the rest are ignored.
+        unreadable: As for ``file_history``.
 
     Raises:
         VouchError: git fails, or a version cannot be read (see ``file_history``).
@@ -1283,33 +1339,47 @@ def registry_history(
             rel = next(tokens, b"").decode(errors="replace")
             if pattern.fullmatch(rel):
                 kept.setdefault(rel, []).append((merge, fields[1], fields[3]))
+            elif fields[1] != "000000":
+                # A file below a record path: the merge left a directory there.
+                for top in (rel[:i] for i, c in enumerate(rel) if c == "/"):
+                    if pattern.fullmatch(top):
+                        kept.setdefault(top, []).append((merge, "040000", merge))
     versions: dict[str, list[tuple[int, Optional[bytes]]]] = {}
     # ponytail: one file_history (four git runs) per path, so a registry of
     # thousands of files takes seconds; one combined git log would be faster.
     for rel in sorted(n for n in names if pattern.fullmatch(n)):
         found = (
-            {order[v.commit]: v.data for v in file_history(root, rel)}
+            {order[v.commit]: v.data for v in file_history(root, rel, unreadable)}
             if commits
             else {}
         )
-        merges = {(m, mode, blob) for m, mode, blob in kept.get(rel, [])}
-        if any(mode not in ("000000", *FILE_MODES) for _, mode, _ in merges):
-            raise VouchError(f"{rel}: a merge left it not a regular file")
+        merges: dict[str, tuple[str, str]] = {}  # merge -> (mode, blob)
+        for m, mode, blob in kept.get(rel, []):
+            if merges.get(m, ("",))[0] != "040000":
+                merges[m] = (mode, blob)
         contents = read_blobs(
-            root, rel, sorted({b for _, mode, b in merges if mode != "000000"})
+            root,
+            rel,
+            sorted({b for mode, b in merges.values() if mode in FILE_MODES}),
+            True,
         )
-        for m, mode, blob in merges:
-            found.setdefault(order[m], None if mode == "000000" else contents[blob])
+        for m, (mode, blob) in sorted(merges.items()):
+            data = None if mode == "000000" else contents.get(blob)
+            if mode != "000000" and data is None:
+                data = _unreadable(rel, m, blob, unreadable)
+            found.setdefault(order[m], data)
         history = sorted(found.items())
         try:
             now: Optional[bytes] = read_capped(root, rel)
         except VouchError:
             now = None  # missing, or reported by check as a record problem
-        head = History(hashes, dates, parents, ancestors, {rel: history}).at(rel, final)
+        head = History(hashes, dates, parents, ancestors, {rel: history}, set()).at(
+            rel, final
+        )
         if head != now:
             history.append((final, now))
         versions[rel] = history
-    return History(hashes, dates, parents, ancestors, versions)
+    return History(hashes, dates, parents, ancestors, versions, set())
 
 
 def _record_paths(root: Path, problems: list[str]) -> list[str]:
@@ -1443,7 +1513,11 @@ def check_registry(root: Path) -> CheckResult:
                     f"people/{handle}.json: {other} and {handle} both list the email {email}"
                 )
 
-    history = registry_history(root, paths)
+    # A past version git-vouch cannot read counts as one that does not parse:
+    # a warning, so it never blocks the export for good.
+    unreadable: list[str] = []
+    history = registry_history(root, paths, unreadable=unreadable)
+    warnings += dict.fromkeys(unreadable)
     final = history.final
 
     def record_at(rel: str, i: int) -> Optional[Record]:
@@ -2141,6 +2215,10 @@ def check_registry(root: Path) -> CheckResult:
             tuple(m for m in person.emails if m.lower() in ok),
         )
 
+    # A problem, not an abort, so sync still writes the revocation file.
+    problems += (
+        f"commit {c}: committer date out of range" for c in sorted(history.far)
+    )
     return CheckResult(
         people, tiers, revoked, emails, problems, voids, warnings, ended, held_at
     )
@@ -2217,7 +2295,7 @@ def allowed_signers(
                 )
                 before = [d for d in (key.retired, until) if d is not None]
                 if before:
-                    end = min(before) + END_SLACK
+                    end = min(*before, LAST_SECOND - END_SLACK) + END_SLACK
                     options += f',valid-before="{_ssh_time(end)}"'
                 lines.append(f"{principals} {options} {key.ssh}\n")
             if until is None:
@@ -2346,8 +2424,13 @@ def _fetched(root: Path) -> Optional[datetime]:
     this returns None and warns about nothing.
     """
     # git rewrites FETCH_HEAD even when a fetch fails, so sync keeps its own stamp.
+    # In a worktree .git is a file; every worktree shares the common dir.
     try:
-        mtime = (root / ".git" / "vouch-fetched").stat().st_mtime
+        git_dir = run([*GIT, "rev-parse", "--git-common-dir"], cwd=root)
+    except VouchError:
+        return None  # not a repository, so not the copy sync keeps
+    try:
+        mtime = (root / git_dir.decode().strip() / "vouch-fetched").stat().st_mtime
     except FileNotFoundError:
         return None
     when = datetime.fromtimestamp(mtime, timezone.utc)
@@ -2593,12 +2676,22 @@ def cmd_query(args: argparse.Namespace) -> int:
             emails=list(held.emails),
             added=key.added.strftime(DATE_FORMAT),
             retired=key.retired and key.retired.strftime(DATE_FORMAT),
-            valid=did not in result.revoked
-            and key.added <= when
-            and (key.retired is None or when < key.retired),
+            valid=key_valid(key, when, result.revoked),
         )
     print(json.dumps(answer, indent=2))
     return 0 if held is not None else 1
+
+
+def key_valid(key: PersonKey, when: datetime, revoked: Collection[str]) -> bool:
+    """Return whether ``key`` is valid at ``when``: added, not retired, not revoked.
+
+    Whole seconds, both ends included, as check and OpenSSH judge.
+    """
+    return (
+        key.did not in revoked
+        and key.added <= when
+        and (key.retired is None or when.replace(microsecond=0) <= key.retired)
+    )
 
 
 def cmd_keys(args: argparse.Namespace) -> int:
@@ -2630,11 +2723,7 @@ def cmd_keys(args: argparse.Namespace) -> int:
         return 1
     now = datetime.now(timezone.utc)
     for key in result.people[handles[0]].keys:
-        if (
-            key.did not in result.revoked
-            and key.added <= now
-            and (key.retired is None or now < key.retired)
-        ):
+        if key_valid(key, now, result.revoked):
             print(f"{patatt_selector(key.ssh)} {key.ssh}")
     return 0
 

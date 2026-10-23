@@ -312,6 +312,79 @@ def test_sync_writes_revocations_when_check_fails(
     assert signers.read_text() == signers_before
 
 
+def test_sync_goes_on_past_an_oversized_version(
+    home: Path,
+    reg: Registry,  # noqa: F811
+    remote: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    """One past version too large to read is ignored with a warning naming its
+    commit; it never stops a revocation or the export (vouch-xlha.24)."""
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    assert verifies(home, keys("gregkh"), tmp_path)
+    big = reg.root / "revocations" / "zz-1.json"
+    big.write_bytes(b"x" * 70000)
+    assert git(reg.root, "add", "-A").returncode == 0
+    assert git(reg.root, "commit", "-q", "-m", "oops").returncode == 0
+    bad = git(reg.root, "rev-parse", "HEAD").stdout.strip()
+    big.unlink()
+    reg.person("gregkh", keys("gregkh"), keys("gregkh2"), retired=(keys("gregkh-old"),))
+    reg.revoke("gregkh", keys("gregkh2"), keys("torvalds"))
+    # A tier removal, so the export's effect shows.
+    for tier in (reg.root / "tiers").glob("gregkh.json*"):
+        tier.unlink()
+    assert git(reg.root, "add", "-A").returncode == 0
+    assert git(reg.root, "commit", "-q", "-m", "revoke").returncode == 0
+    push(reg, remote)
+    proc = run_script("sync")
+    assert proc.returncode == 0, proc.stderr
+    assert (
+        f"revocations/zz-1.json: not a regular file of at most 65536 bytes (ignored, at {bad})"
+        in proc.stderr
+    )
+    assert "Traceback" not in proc.stderr
+    revoked = (data_dir(home) / "revoked_keys").read_text().split("\n")
+    assert " ".join(keys("gregkh2").pubkey.split()[:2]) in revoked
+    assert not verifies(home, keys("gregkh"), tmp_path)
+
+
+def test_sync_writes_revocations_past_a_commit_beyond_year_9999(
+    home: Path,
+    reg: Registry,  # noqa: F811
+    remote: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """A commit dated past what datetime holds is a problem, not an abort, so
+    a later revocation still reaches every user (vouch-xlha.24)."""
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    signers = data_dir(home) / "allowed_signers"
+    signers_before = signers.read_text()
+    # One commit whose date both file_history (a new file) and the tier's
+    # end (a deletion) read; git takes the date, datetime cannot hold it.
+    stray = reg.root / "revocations" / "zz-1.json"
+    stray.write_text("{}\n")
+    for tier in (reg.root / "tiers").glob("gregkh.json*"):
+        tier.unlink()
+    assert git(reg.root, "add", "-A").returncode == 0
+    far = "@253402300800 +0000"  # 10000-01-01T00:00:00Z
+    assert git(reg.root, "commit", "-q", "-m", "far", date=far).returncode == 0
+    bad = git(reg.root, "rev-parse", "HEAD").stdout.strip()
+    stray.unlink()
+    reg.person("gregkh", keys("gregkh"), keys("gregkh2"), retired=(keys("gregkh-old"),))
+    reg.revoke("gregkh", keys("gregkh2"), keys("torvalds"))
+    assert git(reg.root, "add", "-A").returncode == 0
+    assert git(reg.root, "commit", "-q", "-m", "revoke").returncode == 0
+    push(reg, remote)
+    proc = run_script("sync")
+    assert proc.returncode == 1
+    assert f"commit {bad}: committer date out of range" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    revoked = (data_dir(home) / "revoked_keys").read_text().split("\n")
+    assert " ".join(keys("gregkh2").pubkey.split()[:2]) in revoked
+    assert signers.read_text() == signers_before
+
+
 def test_status_shows_commit_fetch_age_and_own_tier(
     home: Path,
     remote: Path,
@@ -350,6 +423,22 @@ def test_stale_fetch_warns_and_still_succeeds(home: Path, remote: Path) -> None:
     # A sync is a fresh fetch, so the warning goes away.
     assert run_script("sync").returncode == 0
     assert warning not in run_script("status").stderr
+
+
+def test_worktree_of_the_copy_shares_its_fetch_time(
+    home: Path, remote: Path, tmp_path: Path
+) -> None:
+    """A worktree's .git is a file; the stamp is in the common git dir (vouch-88xy)."""
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    copy = data_dir(home) / "registry"
+    eight_days_ago = time.time() - 8 * 24 * 3600
+    os.utime(copy / ".git" / "vouch-fetched", (eight_days_ago, eight_days_ago))
+    side = tmp_path / "side"
+    assert git(copy, "worktree", "add", "-q", "--detach", str(side)).returncode == 0
+    assert (side / ".git").is_file()
+    proc = run_script("check", str(side))
+    assert proc.returncode == 0, proc.stderr
+    assert "last fetched 8 days ago; run git vouch sync" in proc.stderr
 
 
 def test_status_before_setup_fails(home: Path) -> None:

@@ -230,6 +230,27 @@ def test_unimplemented_command_fails_cleanly() -> None:
     assert result.stderr.startswith("git-vouch: error:")
 
 
+def test_check_in_a_worktree_fails_cleanly(tmp_path: Path) -> None:
+    """In a git worktree .git is a file, not a directory (vouch-88xy)."""
+    main, side = tmp_path / "main", tmp_path / "side"
+    for args, cwd in (
+        (["init", "-q", str(main)], tmp_path),
+        (["commit", "-q", "--allow-empty", "-m", "init"], main),
+        (["worktree", "add", "-q", "--detach", str(side)], main),
+    ):
+        subprocess.run(["git", *args], cwd=cwd, check=True)
+    assert (side / ".git").is_file()
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "check"],
+        cwd=side,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert result.stderr.startswith("git-vouch: error:")
+    assert "Traceback" not in result.stderr
+
+
 @pytest.mark.parametrize(
     ("fixture", "fingerprint_type", "openssl_marker"),
     [("ed25519_key", "(ED25519)", None), ("ecdsa_key", "(ECDSA)", "prime256v1")],

@@ -109,9 +109,12 @@ def test_accountable_human_tier_is_automation(
         ("2026-01-01T00:00:00Z", True),  # added is inclusive
         (BEFORE, True),
         ("2026-05-31T23:59:59Z", True),
-        ("2026-06-01T00:00:00Z", False),  # retired is exclusive
+        ("2026-06-01T00:00:00Z", True),  # the retirement second, as check has it
+        ("2026-06-01T00:00:00.500Z", True),  # still that second, as OpenSSH sees it
+        ("2026-06-01T00:00:01Z", False),
         ("2026-05-31T19:59:59-04:00", True),
-        ("2026-05-31T20:00:00-04:00", False),  # the retirement, in another offset
+        ("2026-05-31T20:00:00-04:00", True),  # the retirement, in another offset
+        ("2026-05-31T20:00:01-04:00", False),
         (AFTER, False),
         (None, False),  # now: 2026-06-01 is past
     ],

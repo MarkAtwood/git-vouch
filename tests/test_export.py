@@ -10,7 +10,9 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -307,6 +309,44 @@ def test_retirement_second_matches_openssh(
     )
     assert proc.returncode != 0
     assert "gregkh-3.json: dated outside the validity" in proc.stderr
+
+
+def test_tier_ended_at_the_end_of_time_exports(
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """A commit dated 9999-12-31 ends a tier; adding END_SLACK must not overflow (vouch-xlha.22)."""
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "r"]):
+        assert git(reg.root, *args).returncode == 0
+    assert git(reg.root, "rm", "-q", "tiers/gregkh.json*").returncode == 0
+    end = "@253402299000 +0000"  # 9999-12-31T23:30:00Z; git takes no ISO date there
+    proc = git(reg.root, "commit", "-q", "-m", "end", date=end)
+    assert proc.returncode == 0, proc.stderr
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert 'valid-before="99991231235959Z"' in out.signers.read_text()
+    data, sig = sign_file(tmp_path, keys("gregkh"), "git")
+    assert ssh_verify(data, sig, out.signers, "gregkh@example.org", "git")
+
+
+def test_valid_before_is_capped_at_the_end_of_time(
+    vouch: ModuleType,
+    reg: Registry,
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """A tier ended in the last hour datetime holds exports without overflow,
+    however check comes to judge such a commit date (vouch-xlha.22)."""
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    del result.tiers["gregkh"]
+    end = datetime(9999, 12, 31, 23, 30, tzinfo=timezone.utc)
+    result.ended["gregkh"] = {"maintainer": end}
+    signers = tmp_path / "allowed_signers"
+    signers.write_text(vouch.allowed_signers(result, "maintainer"))
+    assert 'valid-before="99991231235959Z"' in signers.read_text()
+    data, sig = sign_file(tmp_path, keys("gregkh"), "git")
+    assert ssh_verify(data, sig, signers, "gregkh@example.org", "git")
 
 
 def test_refuses_to_export_on_problem(

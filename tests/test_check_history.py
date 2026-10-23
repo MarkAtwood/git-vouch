@@ -32,10 +32,11 @@ class GitRegistry(Registry):
         subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
         self.day = 0
 
-    def commit(self, author: str | None = None) -> None:
+    def commit(self, author: str | None = None, add: bool = True) -> None:
         """Commit everything, one day after the previous commit.
 
         The author date is the committer date unless ``author`` is given.
+        With ``add`` false, commit only what is already staged.
         """
         self.day += 1
         date = f"2026-01-{self.day:02d}T00:00:00Z"
@@ -44,7 +45,7 @@ class GitRegistry(Registry):
             "GIT_COMMITTER_DATE": date,
             "GIT_AUTHOR_DATE": author or date,
         }
-        for args in (["add", "-A"], ["commit", "-q", "-m", date]):
+        for args in (["add", "-A"], ["commit", "-q", "-m", date])[not add :]:
             subprocess.run(
                 ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
                 cwd=self.root,
@@ -277,6 +278,63 @@ def test_deleted_revocation_still_holds(
     result = vouch.check_registry(reg.root)
     assert result.problems == []
     assert set(result.revoked) == {did(key("alice"))}
+
+
+@pytest.mark.parametrize("merged", [False, True])
+@pytest.mark.parametrize("kind", ["oversized", "symlink", "directory", "submodule"])
+def test_unreadable_past_version_is_ignored_and_check_goes_on(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    kind: str,
+    merged: bool,
+) -> None:
+    """A past version git-vouch cannot read is ignored like one that does not
+    parse, with a warning naming its commit, so it never blocks the export and
+    revocations still count (vouch-xlha.24)."""
+    rel = "revocations/zz-1.json"
+    path = reg.root / rel
+    path.parent.mkdir(exist_ok=True)
+    if kind == "directory":
+        path.write_bytes(b"{}")  # the name must once be a file to be read at all
+        reg.commit()
+        path.unlink()
+    if merged:
+        reg.git("checkout", "-q", "-b", "side")
+    if kind == "oversized":
+        path.write_bytes(b"x" * (64 * 1024 + 1))
+    elif kind == "symlink":
+        os.symlink("../people/alice.json", path)
+    elif kind == "directory":
+        path.mkdir()
+        (path / "x").write_bytes(b"x")
+    else:
+        reg.git("update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},{rel}")
+    reg.commit(add=kind != "submodule")
+    bad = [head(reg)]
+    if merged:
+        reg.git("checkout", "-q", "main")
+        reg.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        bad.append(head(reg))
+    if kind == "directory":
+        shutil.rmtree(path)
+    elif kind == "submodule":
+        reg.git("rm", "-q", "--cached", rel)
+        if path.is_dir():
+            path.rmdir()  # git checks out a submodule it lacks as an empty directory
+    else:
+        path.unlink()
+    reg.revoke("alice", key("alice"), key("torvalds"))
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    unreadable = [w for w in result.warnings if "not a regular file" in w]
+    assert unreadable == [
+        f"{rel}: not a regular file of at most 65536 bytes (ignored, at {c})"
+        for c in bad
+    ]
+    assert set(result.revoked) == {did(key("alice"))}
+    assert result.tiers["gregkh"] == "maintainer"
 
 
 def test_revocation_by_key_revoked_later_counts(

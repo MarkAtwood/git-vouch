@@ -131,8 +131,10 @@ def test_who_is_authorized(
         (BEFORE, True),
         ("2026-05-31T23:59:59.999Z", True),  # sub-second, just before retirement
         ("2026-05-31T19:59:59-04:00", True),
-        ("2026-06-01T00:00:00Z", False),  # retirement is exclusive
-        ("2026-05-31T20:00:00-04:00", False),
+        ("2026-06-01T00:00:00Z", True),  # the retirement second, as check has it
+        ("2026-05-31T20:00:00-04:00", True),
+        ("2026-06-01T00:00:01Z", False),
+        ("2026-05-31T20:00:01-04:00", False),
         (AFTER, False),
     ],
 )

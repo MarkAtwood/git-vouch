@@ -265,6 +265,12 @@ def test_revocation_fields(vouch: ModuleType) -> None:
             id="leap-day",
         ),
         pytest.param(
+            TIER_REL, {**TIER, "date": "1970-01-01T00:00:00Z"}, id="first-year"
+        ),
+        pytest.param(
+            PERSON_REL, with_key(retired="9998-12-31T23:59:59Z"), id="last-year"
+        ),
+        pytest.param(
             REVOCATION_REL,
             {
                 "@context": [CONTEXT, "https://example.org/ctx"],
@@ -290,6 +296,9 @@ BAD_DATES = [
     "2026-11-05T00:00:60Z",
     "２026-11-05T00:00:00Z",  # fullwidth digit
     "2026-11-05T00:00:00z",
+    "9999-01-01T00:00:00Z",  # END_SLACK past it overflows datetime
+    "1969-12-31T23:59:59Z",
+    "0999-01-01T00:00:00Z",  # strftime writes 999 for OpenSSH
     20261105,
     "",
 ]

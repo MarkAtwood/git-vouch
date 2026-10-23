@@ -3,11 +3,15 @@
   "title": "check crashes when .git is a file (git worktree)",
   "description": "Found 2026-10-23 by the faq3.12 worktree agent: in a git worktree .git is a file, so _fetched reading .git/vouch-fetched raises NotADirectoryError and git vouch check prints a traceback (tests/test_skeleton.py::test_unimplemented_command_fails_cleanly fails in a worktree). Resolve the git dir with git rev-parse --git-dir (or --git-common-dir as appropriate) instead of assuming .git is a directory, and never traceback to the user.",
   "acceptance_criteria": "check and sync work from a git worktree and a normal checkout; test runs the suite's skeleton case inside a real git worktree; no traceback.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "issue_type": "bug",
+  "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T18:25:39.402889502Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T18:25:39.402889502Z"
+  "updated_at": "2026-10-23T23:05:59.100268966Z",
+  "started_at": "2026-10-23T21:00:46.999718361Z",
+  "closed_at": "2026-10-23T23:05:59.100268966Z",
+  "close_reason": "_fetched resolves the stamp via git rev-parse --git-common-dir (test_check_in_a_worktree_fails_cleanly, test_worktree_of_the_copy_shares_its_fetch_time)"
 }
