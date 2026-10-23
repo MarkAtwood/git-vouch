@@ -1083,9 +1083,10 @@ class CheckResult(NamedTuple):
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
 RANK = {"anchor": 0, "maintainer": 1, "contributor": 2, "automation": 2}
-# The paths whose history check reads; endorsements are judged on the tree alone.
+# The paths whose history check reads; endorsements only for query --at.
 HISTORY_RE = re.compile(
-    r"anchors\.json|(?:people|tiers|revocations)/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
+    r"anchors\.json|(?:people|tiers|revocations|endorsements/[a-z0-9][a-z0-9_-]*)"
+    r"/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
 )
 
 
@@ -1184,7 +1185,7 @@ def _is_repo_top(root: Path) -> bool:
 
 
 def registry_history(root: Path, paths: Iterable[str]) -> History:
-    """Return the history of ``anchors.json`` and of every person, tier and revocation file.
+    """Return the history of ``anchors.json`` and of every other record file.
 
     Args:
         root: Registry checkout.
@@ -1216,7 +1217,7 @@ def registry_history(root: Path, paths: Iterable[str]) -> History:
         for p in ps:
             bits |= ancestors[p] | 1 << p
         ancestors.append(bits)
-    sources = ["anchors.json", "people", "tiers", "revocations"]
+    sources = ["anchors.json", "people", "tiers", "revocations", "endorsements"]
     names = {"anchors.json", *paths, *(f"{p}.sig" for p in paths)}
     kept: dict[str, list[tuple[str, str, str]]] = {}  # rel -> [(merge, mode, blob)]
     if commits:
@@ -1368,7 +1369,8 @@ def check_registry(root: Path) -> CheckResult:
     tier that ended after ``when`` as that commit's history has it, whichever
     ranks highest (a human tier wins over automation); automation if that
     tier is or that commit's person file names an accountable maintainer;
-    the emails that person file lists and that are endorsed now. None if
+    the emails that person file lists and that an endorsement in that
+    commit endorses, judged as the working tree's are. None if
     no person file of theirs parses at that commit. Revocations count at
     every time, as everywhere. Export answers for now instead, so it can
     differ for past times.
@@ -1952,25 +1954,28 @@ def check_registry(root: Path) -> CheckResult:
     claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
     automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
+
+    def judge_endorsement(
+        rel: str, e: Endorsement, data: bytes, sig: bytes, subject: Person
+    ) -> None:
+        if e.endorser in automation:
+            raise VouchError(f"{rel}: {e.endorser} is automation and cannot endorse")
+        if e.subject_key not in {k.did for k in subject.keys}:
+            raise VouchError(f"{rel}: {e.subject_key} is not a key of {e.subject}")
+        # Only a revoked endorser key voids it; like the tier, an
+        # endorsement carries over to the subject's later keys.
+        check_signer(rel, e, data, sig, e.endorser)
+        if e.subject_name != subject.name:
+            raise Void(f"{rel}: void: endorses the name {e.subject_name!r:.60}")
+        if e.endorser == e.subject:
+            raise Void(f"{rel}: void: {e.subject} cannot endorse themselves")
+
     endorsed: dict[str, set[str]] = {}  # handle -> lowercased endorsed emails
     for rel, e, data, sig in endorsements:
         try:
             if e.subject not in parsed:
                 raise VouchError(f"{rel}: no person file for {e.subject}")
-            if e.endorser in automation:
-                raise VouchError(
-                    f"{rel}: {e.endorser} is automation and cannot endorse"
-                )
-            subject = parsed[e.subject][0]
-            if e.subject_key not in {k.did for k in subject.keys}:
-                raise VouchError(f"{rel}: {e.subject_key} is not a key of {e.subject}")
-            # Only a revoked endorser key voids it; like the tier, an
-            # endorsement carries over to the subject's later keys.
-            check_signer(rel, e, data, sig, e.endorser)
-            if e.subject_name != subject.name:
-                raise Void(f"{rel}: void: endorses the name {e.subject_name!r:.60}")
-            if e.endorser == e.subject:
-                raise Void(f"{rel}: void: {e.subject} cannot endorse themselves")
+            judge_endorsement(rel, e, data, sig, parsed[e.subject][0])
             endorsed.setdefault(e.subject, set()).update(
                 m.lower() for m in e.subject_emails
             )
@@ -2036,9 +2041,19 @@ def check_registry(root: Path) -> CheckResult:
         humans = [t for t in held if t != "automation"]
         tier = min(humans, key=RANK.__getitem__) if humans else None
         tier = tier or ("automation" if held else None)
-        # ponytail: endorsements are judged on the tree alone, so one made
-        # after ``when`` counts at ``when``.
-        ok = endorsed.get(handle, set())
+        ok: set[str] = set()
+        for rel in history.versions:
+            if not rel.startswith(f"endorsements/{handle}/") or rel.endswith(".sig"):
+                continue
+            data, sig = pair_at(rel, i)
+            e = record_at(rel, i)
+            if data is None or sig is None or not isinstance(e, Endorsement):
+                continue
+            try:
+                judge_endorsement(rel, e, data, sig, person)
+            except (VouchError, Void):
+                continue  # counts for nothing, as in the working tree
+            ok.update(m.lower() for m in e.subject_emails)
         return Held(
             tier,
             tier == "automation"

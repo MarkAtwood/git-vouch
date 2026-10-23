@@ -326,6 +326,41 @@ def test_emails_come_from_the_person_file_at_time(
     assert answer(r.root, alice)["emails"] == ["b@example.org"]
 
 
+def test_endorsement_committed_after_time_does_not_count(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """carol, a contributor from the first commit, is endorsed in the second."""
+    r = base(tmp_path, keys)
+    r.person("carol", keys("carol"))
+    r.tier("carol", "contributor", "gregkh", keys("gregkh"))
+    r.commit()
+    r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    carol = did(keys("carol"))
+    assert answer(r.root, carol, "--at", T0)["emails"] == []
+    assert answer(r.root, carol, "--at", T1)["emails"] == ["carol@example.org"]
+    assert answer(r.root, carol)["emails"] == ["carol@example.org"]
+
+
+def test_endorsement_removed_after_time_counts_then(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """carol is endorsed in the first commit; the second deletes the endorsement."""
+    r = base(tmp_path, keys)
+    r.person("carol", keys("carol"))
+    r.tier("carol", "contributor", "gregkh", keys("gregkh"))
+    rel = r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
+    r.commit()
+    r.delete(rel)
+    r.commit()
+    carol = did(keys("carol"))
+    assert answer(r.root, carol, "--at", T0)["emails"] == ["carol@example.org"]
+    assert answer(r.root, carol, "--at", T1)["emails"] == []
+    assert answer(r.root, carol)["emails"] == []
+
+
 def test_time_before_the_handle_existed_is_unknown(
     tmp_path: Path,
     keys: Callable[[str], Key],  # noqa: F811
