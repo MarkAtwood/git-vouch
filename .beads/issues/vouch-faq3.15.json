@@ -1,0 +1,22 @@
+{
+  "id": "vouch-faq3.15",
+  "title": "query: report root commit and sync time in JSON",
+  "description": "Core change (needs core lock). git vouch query should emit its registry root's HEAD commit and vouch-fetched time in its JSON, so git-vouch-trqp can copy them into ext and gate freshness on the same read that answered. Today the bridge re-derives the root (copying _registry_dir/_data_dir, ponytail in registry_root) and reads HEAD just before the query, so a sync between the two can make ext.commit one commit behind. From vouch-faq3.6 review.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:51:33.48184289Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:51:33.48184289Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-faq3.15",
+      "depends_on_id": "vouch-faq3",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:51:33.496113924Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

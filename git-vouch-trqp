@@ -8,14 +8,17 @@ holds which key. Stateless and unauthenticated: the registry is public.
 TLS is left to a reverse proxy, which must also buffer each whole request
 and bound how long it may take: the server limits each socket read, not a
 request, and starts a thread per connection. ``did-document`` prints the
-registry's DID document, which advertises the bridge to verify-trust. See
-DESIGN.md, TRQP bridge, and docs/trqp-interop.md.
+registry's DID document, which advertises the bridge to verify-trust.
+It answers from the registry ``git vouch query`` reads, the copy ``git vouch
+sync`` keeps once setup has run; sync that copy on a timer, since the bridge
+refuses every query once its last successful sync is over 24 hours old. See DESIGN.md, TRQP bridge, and docs/trqp-interop.md.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -25,6 +28,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -36,6 +40,8 @@ PATH = "/trust-tasks"
 MAX_BODY = 64 * 1024
 CLOCK_SKEW = timedelta(minutes=5)
 QUERY_TIMEOUT = 30  # seconds for one git vouch query
+STALE_AFTER = timedelta(hours=24)  # DESIGN.md, TRQP bridge, Freshness
+EXT = "org.kernel.git-vouch"  # the response's ext namespace
 # ponytail: a fixed cap on concurrent registry checks; past it a request gets
 # a retryable 503. Each query re-checks the whole registry, so the ceiling is
 # QUERY_SLOTS checks per QUERY_TIMEOUT; caching a checked registry (vouch-faq3.6)
@@ -203,27 +209,37 @@ def check_payload(payload: Mapping[str, object]) -> Optional[str]:
     return time
 
 
+def git(args: Sequence[str], failure: str) -> subprocess.CompletedProcess[str]:
+    """Run git with ``args`` while holding one of the QUERY_SLOTS.
+
+    Raises:
+        TaskError: unavailable if every slot is taken, or with ``failure`` if
+            git cannot run or times out.
+    """
+    if not QUERY_SLOTS.acquire(blocking=False):
+        raise TaskError("unavailable", "the registry is busy")
+    try:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=QUERY_TIMEOUT
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise TaskError("unavailable", failure) from e
+    finally:
+        QUERY_SLOTS.release()
+
+
 def query(entity: str, at: Optional[datetime]) -> dict[str, object]:
     """Return ``git vouch query``'s answer for the did:key ``entity``.
 
     Raises:
         TaskError: unavailable if the registry cannot be read or checked.
     """
-    command = ["git", "vouch", "query", entity]
+    command = ["vouch", "query", entity]
     if at is not None:
         # Truncating to whole seconds is exact: every registry date is whole seconds.
         # The year is padded by hand: strftime's %Y leaves years before 1000 short.
         command += ["--at", f"{at.year:04d}" + at.strftime("-%m-%dT%H:%M:%SZ")]
-    if not QUERY_SLOTS.acquire(blocking=False):
-        raise TaskError("unavailable", "the registry is busy")
-    try:
-        proc = subprocess.run(
-            command, capture_output=True, text=True, timeout=QUERY_TIMEOUT
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        raise TaskError("unavailable", "the registry cannot be queried") from e
-    finally:
-        QUERY_SLOTS.release()
+    proc = git(command, "the registry cannot be queried")
     # Exit 1 with an answer means an unknown key; with none, a failed registry check.
     if proc.returncode in (0, 1):
         try:
@@ -233,6 +249,64 @@ def query(entity: str, at: Optional[datetime]) -> dict[str, object]:
         if isinstance(answer, dict):
             return answer
     raise TaskError("unavailable", "the registry cannot be checked")
+
+
+def registry_root() -> Path:
+    """Return the registry ``git vouch query`` reads: the synced copy once setup has run.
+
+    Before setup (no ``vouch.registry`` config) it is the current directory.
+    ponytail: this copies git-vouch's _registry_dir and _data_dir, so it
+    drifts if they change; having ``git vouch query`` report its root's
+    commit and sync time is the upgrade path (core change).
+
+    Raises:
+        TaskError: unavailable if git config cannot be read.
+    """
+    proc = git(["config", "--get", "vouch.registry"], "git config cannot be read")
+    if proc.returncode == 1:
+        return Path(".")
+    if proc.returncode != 0:
+        raise TaskError("unavailable", "git config cannot be read")
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    base = Path(xdg) if os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    return base / "git-vouch" / "registry"
+
+
+def freshness(now: datetime) -> dict[str, Optional[str]]:
+    """Return the registry copy's commit (None if it has none) and last sync time.
+
+    The copy is the one ``git vouch query`` reads, and the time is that of
+    the stamp ``git vouch sync`` touches in its git directory after each
+    successful fetch. The commit is read just before the query, so a sync
+    that lands between the two can make it one commit behind the answer.
+
+    Raises:
+        TaskError: unavailable if the copy has no sync stamp, its last
+            successful sync is over 24 hours old, or the stamp is dated
+            ahead of ``now`` by more than the allowed clock skew.
+    """
+    root = registry_root()
+    command = ["-C", str(root), "rev-parse", "--absolute-git-dir"]
+    proc = git([*command, "--verify", "--quiet", "HEAD"], "the registry is unreadable")
+    # Exit 1 prints the git directory but no commit: a repository with none.
+    lines = proc.stdout.splitlines()
+    if proc.returncode not in (0, 1) or not lines:
+        raise TaskError("unavailable", "the registry is not a git repository")
+    try:
+        mtime = (Path(lines[0]) / "vouch-fetched").stat().st_mtime
+    except OSError as e:
+        raise TaskError("unavailable", "the registry copy was never synced") from e
+    synced = datetime.fromtimestamp(mtime, timezone.utc)
+    when = synced.strftime(DATE_FORMAT)
+    if now - synced > STALE_AFTER:
+        raise TaskError(
+            "unavailable", f"the registry copy was last synced {when}, over 24h ago"
+        )
+    if synced - now > CLOCK_SKEW:
+        raise TaskError(
+            "unavailable", f"the registry copy was synced {when}, in the future"
+        )
+    return {"commit": lines[1] if len(lines) > 1 else None, "synced": when}
 
 
 def decide(
@@ -270,6 +344,7 @@ def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object
         payload = check_envelope(doc, did, now)
         time = check_payload(payload)
         at = None if time is None else parse_time(time, "payload.context.time")
+        synced = freshness(now)
         authorized, message = decide(payload, did, at)
     except TaskError as e:
         return STATUS[e.code], error_document(doc, did, now, e.code, str(e))
@@ -280,6 +355,7 @@ def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object
     answer.update(authorized=authorized, time_evaluated=stamp, message=message)
     if time is not None:
         answer["time_requested"] = time
+    answer["ext"] = {EXT: synced}
     reply = envelope(doc, did, stamp, TASK_TYPE + "#response", answer)
     return 200, reply
 

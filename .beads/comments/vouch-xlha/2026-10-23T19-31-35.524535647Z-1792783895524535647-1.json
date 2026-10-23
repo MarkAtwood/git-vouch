@@ -1,0 +1,7 @@
+{
+  "id": "1792783895524535647-1",
+  "issue_id": "vouch-xlha",
+  "author": "agent",
+  "text": "Calibration (orchestrator, 2026-10-23): 6 agents (correctness x3 per tool, python standards, polish, crypto); 23 findings + 3 keep-decisions; every P1 reproduced with real git/ssh-keygen/gpg/openssl except none (all 7 P1 reproduced). Est. 25-35% chance of a missed S1-class issue in git-vouch check_registry given its size (760-line function) and history logic; least confident: merge-topology edge cases beyond -s ours, tier-record replay/ordering variants, and performance numbers (synthetic, not a real migrated registry). Would raise confidence: a second correctness pass on check_registry after xlha.6 split, fuzzing history shapes, and timing check on the migrate rehearsal registry.",
+  "created_at": "2026-10-23T19:31:35.524535647Z"
+}

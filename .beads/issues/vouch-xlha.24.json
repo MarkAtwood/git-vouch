@@ -1,0 +1,26 @@
+{
+  "id": "vouch-xlha.24",
+  "title": "check: one bad historical blob aborts check; sync writes no revocations",
+  "description": "One unreadable historical version of any registry path aborts check entirely: export, sync, query, keys and status all fail. Sync then writes no revocation file, and because sync refuses a rewind, the registry cannot recover.\n\nWhere (HEAD 4237c43): read_blobs at git-vouch:246-251, file_history at 320-321 and registry_history at 1279-1280 raise VouchError for a historical blob over 64 KiB or a non-regular mode (symlink, submodule). check_registry (1429) lets it propagate. cmd_sync calls check_registry at 2388, before the revocation write at 2391.\n\nReproduced (scratchpad a1/big.sh): commit a 70,000-byte revocations/zz-1.json, delete it in the next commit, then commit a valid revocation of alice's key. check prints \"revocations/zz-1.json: a version is not a blob of at most 65536 bytes\" and exits 1, with no tiers. export writes nothing, not even the revocation file.\n\nWhy it matters: DESIGN.md says \"sync writes the revocation file even when check fails on something else, so a revocation always spreads.\" Once such a commit is merged (a merger who ignored check, or a later git-vouch that tightens a cap), every user's sync fails forever. New revocations never reach anyone, and the only repair is a history rewrite that `_fetch` refuses by design. A malformed working-tree file, by contrast, is just a problem.\n\nFix: treat an unreadable historical version like an unparsable one. Record it as content that is present but unreadable (record_at already maps unparsable bytes to None), add a problem naming path and commit, and carry on, so the revocation file is still computed and written. Keep failing closed for allowed_signers through `problems`.\n",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:31:08.709900992Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:31:08.709900992Z",
+  "labels": [
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.24",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:31:08.732369035Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

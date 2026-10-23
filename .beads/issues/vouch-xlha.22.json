@@ -1,0 +1,26 @@
+{
+  "id": "vouch-xlha.22",
+  "title": "export/sync: retired/date near 9999 crashes with OverflowError",
+  "description": "A `retired` (or demotion `date`) near year 9999 passes check, then crashes export and sync with a traceback for every user.\n\nWhere (HEAD 4237c43): allowed_signers at git-vouch:2173 does `end = min(before) + END_SLACK`. _date (667-676) accepts any year from 0001 to 9999. datetime + timedelta raises OverflowError, which neither cmd_export (2232) nor cmd_sync (2396) catches (they catch only OSError).\n\nReproduced (scratchpad a1/dates.sh big): alice, a contributor, sets her own key's \"retired\": \"9999-12-31T23:30:00Z\" in a self-signed edit. `check` passes with exit 0, so a merger has no signal. `export` dies with \"OverflowError: date value out of range\" and a traceback. Every user's `sync` then writes the revocation file and crashes before allowed_signers. allowed_signers stays frozen at the last good export, so later tier deletions, demotions and new members never reach anyone until the record is fixed. That fails open for removals. An approver can trigger the same crash with a tier record `date` of 9999-12-31T23:xx (a demotion's `until`).\n\nRelated, same root cause: years 0001-0999 parse, but on Linux CPython 3.12 strftime(\"%Y\") does not zero-pad, so `valid-after=\"9990101000000Z\"`. OpenSSH rejects that one line (\"bad options\") and skips it, which harms only that key's holder.\n\nFix: bound record years in _date to a range that survives END_SLACK and formats as four digits, e.g. 1970-9998, and report anything else as a record problem in check. Also catch OverflowError at the export boundary as defence in depth.\n",
+  "status": "open",
+  "priority": 1,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T19:31:08.5539582Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T19:31:08.5539582Z",
+  "labels": [
+    "correctness",
+    "review"
+  ],
+  "dependencies": [
+    {
+      "issue_id": "vouch-xlha.22",
+      "depends_on_id": "vouch-xlha",
+      "type": "parent-child",
+      "created_at": "2026-10-23T19:31:08.574740447Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

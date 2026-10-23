@@ -97,14 +97,21 @@ def serve(
     """Return a function that starts the bridge in a registry directory.
 
     The repository root goes first on PATH, so ``git vouch`` runs this
-    tree's git-vouch.
+    tree's git-vouch. Unless ``stamp`` is false, the directory is made a
+    git repository if it is not one (no commit, so check still reads it as
+    a plain tree) and given the sync stamp ``git vouch sync`` writes,
+    ``.git/vouch-fetched``, dated now.
     """
     repo = str(BRIDGE.parent)
     monkeypatch.setenv("PATH", repo + os.pathsep + os.environ["PATH"])
     procs: list[subprocess.Popen[str]] = []
     logs: list[IO[str]] = []
 
-    def start(registry: Path, *extra: str) -> Bridge:
+    def start(registry: Path, *extra: str, stamp: bool = True) -> Bridge:
+        if stamp:
+            if not (registry / ".git").exists():
+                subprocess.run(["git", "init", "-q", str(registry)], check=True)
+            (registry / ".git" / "vouch-fetched").touch()
         log = (tmp_path / f"bridge-{len(procs)}.log").open("w")
         logs.append(log)
         proc = subprocess.Popen(
