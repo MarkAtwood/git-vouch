@@ -1,0 +1,25 @@
+{
+  "id": "vouch-im6j.2",
+  "title": "Keyring test: Arch Linux keyring: per-packet tree, threshold main-key certifications",
+  "description": "Fetch the production keyring into ~/GIT (shallow, no overwrite), check its own provenance where it has any, stage it pgpkeys-shaped, run git-vouch-migrate port at HEAD, and audit: reconcile key count = drafts + merges + skips + conflicts; every pre-filled SSH line passes ssh-keygen -l and ssh_to_did; encoding damage; skip and conflict reasons by category; time. Aggregates only.",
+  "acceptance_criteria": "Port result explained (pass, or each failure understood); tally reconciles; defects filed as beads",
+  "status": "closed",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T03:18:26.838893217Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T03:19:05.672338976Z",
+  "closed_at": "2026-10-23T03:19:05.672338976Z",
+  "close_reason": "Superseded by the union run (revised plan)",
+  "dependencies": [
+    {
+      "issue_id": "vouch-im6j.2",
+      "depends_on_id": "vouch-im6j",
+      "type": "parent-child",
+      "created_at": "2026-10-23T03:18:26.849384188Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

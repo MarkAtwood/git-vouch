@@ -1,0 +1,28 @@
+{
+  "id": "vouch-im6j.6",
+  "title": "Union run: all five keyrings through one staged port",
+  "description": "Fetch GNU gnu-keyring.gpg, Arch archlinux.gpg, Apache KEYS files, FreeBSD pgpkeys, Gentoo active-devs into ~/GIT (no overwrite); armor binary keyrings byte-for-byte; stage one pgpkeys-shaped repo; run port at HEAD; list distinct failure types with counts per corpus. Aggregates only.",
+  "acceptance_criteria": "Each failure type named with a minimal reproducer description",
+  "notes": "Union run 2026-10-22, corpora in ~/GIT/keyring-corpora: GNU gnu-keyring.gpg (613 keys), Gentoo active-devs.gpg (94), FreeBSD pgpkeys.txt (566 seen, 545 imported), Arch archlinux-keyring 20260909-1 (182), Apache 252 KEYS files of 263 projects. Raw gpg import probes: all rc=0 except Apache rc=2. Failure types: (1) PGP-2/v3 keys skipped silently, exit 0, no IMPORT_PROBLEM (FreeBSD 21, Apache 33); port would drop the person with no skip line. (2) An orphan revocation certificate (no matching key in the batch) makes gpg exit 2; port treats it as fatal: union port aborted after 240s, rc=1, no drafts. (3) That abort's message shows only gpg's first stderr line (the faked-time warning), not the cause or the file. Not an issue: SHA-1 certifications survive import (test_sha1_certification_is_drafted). Also found and fixed: drafts ignored certifications on bare-address UIDs (259f419). Harmless: duplicate sigs merged, bad/unchecked third-party sigs.",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "task",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T03:19:05.865861866Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T03:32:26.618678527Z",
+  "started_at": "2026-10-23T03:19:06.027933406Z",
+  "closed_at": "2026-10-23T03:32:26.618678527Z",
+  "close_reason": "Failure types identified; see notes",
+  "dependencies": [
+    {
+      "issue_id": "vouch-im6j.6",
+      "depends_on_id": "vouch-im6j",
+      "type": "parent-child",
+      "created_at": "2026-10-23T03:19:05.876420389Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "vouch-im6j.7",
+  "title": "Fixtures for keyring failure types",
+  "description": "For each failure type from the union run, add a minimal fixture to tests/migrate made by real gpg (as nora/pia/olga), so the kernel path is covered offline.",
+  "acceptance_criteria": "Each failure type has a fixture; suite passes",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "task",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T03:19:05.927439332Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T03:55:20.268502123Z",
+  "started_at": "2026-10-23T03:38:54.040666083Z",
+  "closed_at": "2026-10-23T03:55:20.268502123Z",
+  "close_reason": "Failure types fixed and covered by fixtures",
+  "dependencies": [
+    {
+      "issue_id": "vouch-im6j.7",
+      "depends_on_id": "vouch-im6j",
+      "type": "parent-child",
+      "created_at": "2026-10-23T03:19:05.939908569Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-im6j.7",
+      "depends_on_id": "vouch-im6j.6",
+      "type": "blocks",
+      "created_at": "2026-10-23T03:19:05.983979406Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

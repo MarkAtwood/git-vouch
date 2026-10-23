@@ -1,1 +1,2 @@
 {"id":"01a166a7-4098-7cef-8d75-ccdd2f82a018","issue_id":"vouch-fyok","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T02:46:39.512848106Z"}
+{"id":"01a166c4-064e-79a8-a227-220c9666e47d","issue_id":"vouch-fyok","event_type":"closed","actor":"agent","old_value":"","new_value":"Decided: migrate is pgpkeys-only (DESIGN.md)","created_at":"2026-10-23T03:18:05.134633394Z"}

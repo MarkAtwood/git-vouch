@@ -1,0 +1,14 @@
+{
+  "id": "vouch-im6j",
+  "title": "Stress git-vouch-migrate with other projects' keyrings",
+  "description": "Mark 2026-10-22 (revised plan): other projects' keyrings are a source of test cases, not migration targets (port is pgpkeys-only, DESIGN.md). Stage all five corpora (GNU, Arch, Apache, FreeBSD, Gentoo) into one local union repo, never committed; run port once; collect distinct failure types; turn each into a small real-gpg fixture in tests/migrate; discard the corpora. Priority by kernel value: GNU high (import failures, v3/old algorithms), FreeBSD medium, Gentoo/Arch/Apache low. Key question: does one unimportable key abort the whole port (gpg import is all-or-nothing)? Skip-and-report vs fail-closed is Mark's call.",
+  "status": "closed",
+  "priority": 2,
+  "issue_type": "epic",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T03:18:26.713917277Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T03:55:21.056994963Z",
+  "closed_at": "2026-10-23T03:55:21.056994963Z",
+  "close_reason": "Failure types fixed and covered by fixtures"
+}
