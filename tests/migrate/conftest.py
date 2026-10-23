@@ -86,6 +86,24 @@ class Gpg:
         return points
 
 
+def _v3_key() -> bytes:
+    """Return a PGP-2 style (v3) RSA public key and user ID, which gpg 2.4 skips.
+
+    Built from RFC 4880 5.5.2 and 5.11 by hand, since gpg can no longer make
+    one; gpg reports it as a skipped PGP-2 key, as it does real ones.
+    """
+
+    def mpi(v: int) -> bytes:
+        return v.bit_length().to_bytes(2, "big") + v.to_bytes(
+            (v.bit_length() + 7) // 8, "big"
+        )
+
+    body = bytes([3]) + (946684800).to_bytes(4, "big") + bytes(2) + bytes([1])
+    body += mpi((1 << 1023) | 1) + mpi(65537)
+    uid = b"Vic Version3 <vic@example.org>"
+    return b"\x99" + len(body).to_bytes(2, "big") + body + bytes([0xB4, len(uid)]) + uid
+
+
 def _created(status: bytes) -> str:
     """Return the fingerprint in gpg's KEY_CREATED status line."""
     (line,) = [ln for ln in status.decode().splitlines() if "KEY_CREATED" in ln]
@@ -262,6 +280,10 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
             if name == "carol":
                 armored = revoker("--armor", "--export", fpr)
             (repo / "keys" / f"{fpr[-16:]}.asc").write_bytes(armored)
+        # Files gpg will not fully import: port must skip and name them.
+        (repo / "keys" / "v3key.asc").write_bytes(_v3_key())
+        orphan = gpg.new_key("Orla Orphan <orla@example.org>")
+        (repo / "keys" / "orphan-revocation.asc").write_bytes(gpg.revocation(orphan))
         (home / "gpg.conf").write_text("faked-system-time 20200601T000000!\n")
         env = dict(
             os.environ,

@@ -84,7 +84,7 @@ class GpgKey(NamedTuple):
     created: int
     validity: str
     uids: tuple[str, ...]  # unrevoked user IDs, primary first
-    auth: tuple[str, ...]  # fingerprints of live auth keys git-vouch accepts, primary first
+    auth: tuple[str, ...]  # live auth keys git-vouch accepts, primary first
 
 
 class Proof(NamedTuple):
@@ -129,6 +129,17 @@ def _unescape(field: bytes) -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         return raw.decode("latin-1")
+
+
+def gpg_error(stderr: bytes) -> str:
+    """Return gpg's first stderr line that is not a routine notice, or ''.
+
+    gpg can print its real error before a notice it emits on exit, such as
+    "no gpg-agent running in this session".
+    """
+    notices = ("running with faked system time", "no gpg-agent running")
+    lines = stderr.decode(errors="replace").splitlines()
+    return next((ln for ln in lines if not any(n in ln for n in notices)), "")
 
 
 def _is_reusable_auth(f: list[bytes]) -> bool:
@@ -333,14 +344,47 @@ class Pgpkeys:
         # Judge every key and C's own signature at C, for gpg and git verify-commit alike.
         (home / "gpg.conf").write_text(f"faked-system-time {self.time}!\n")
         archive = vouch.run(["git", "archive", self.commit, "keys"], cwd=repo)
-        armored = []
+        # Files gpg did not fully import, with why; port reports and skips them.
+        self.skipped: list[tuple[str, str]] = []
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             for member in tar:
                 if member.isfile() and member.name.endswith(".asc"):
                     f = tar.extractfile(member)
                     assert f is not None
-                    armored.append(f.read())
-        self.gpg("--import", stdin=b"\n".join(armored))
+                    why = self._import(f.read())
+                    if why is not None:
+                        self.skipped.append((member.name, why))
+
+    def _import(self, data: bytes) -> Optional[str]:
+        """Import one keys/ file; return why gpg did not take all of it, or None.
+
+        One file at a time, so a bad file names itself: gpg skips a PGP-2
+        (v3) key with exit 0, and fails a whole batch on one revocation
+        certificate whose key is missing.
+
+        Raises:
+            VouchError: gpg cannot be run.
+        """
+        cmd = [*self._gpg_cmd(), "--status-fd", "1", "--import"]
+        try:
+            proc = subprocess.run(cmd, input=data, capture_output=True, check=False)
+        except OSError as e:
+            raise VouchError(f"cannot run gpg: {e}") from e
+        res = [
+            ln.split()[2:]
+            for ln in proc.stdout.decode(errors="replace").splitlines()
+            if ln.startswith("[GNUPG:] IMPORT_RES ")
+        ]
+        if proc.returncode != 0 or len(res) != 1:
+            return f"gpg failed: {gpg_error(proc.stderr) or proc.returncode}"
+        count, imported, unchanged = (int(res[0][i]) for i in (0, 2, 4))
+        if len(res[0]) > 14 and int(res[0][14]):
+            return f"{res[0][14]} PGP-2 (v3) key(s), which gpg no longer imports"
+        if count == 0:
+            return "no key"
+        if imported + unchanged != count:
+            return f"gpg imported {imported + unchanged} of {count} keys"
+        return None
 
     def _git(self, *args: str) -> str:
         out: bytes = vouch.run(["git", *args], cwd=self.repo)
@@ -448,6 +492,8 @@ def port(pgp: Pgpkeys, out: Path) -> int:
     Returns:
         The number of drafts written.
     """
+    for name, why in pgp.skipped:
+        print(f"skip {name}: {why}")
     keys = pgp.keys()
     usable = []
     for key in keys:

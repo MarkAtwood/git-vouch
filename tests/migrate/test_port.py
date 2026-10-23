@@ -273,6 +273,31 @@ def test_port_joins_name_only_and_email_only_uids(
     assert set(draft["emails"]) <= migrate._all_emails(key)
 
 
+def test_port_skips_and_names_unimportable_files(ported: Ported) -> None:
+    lines = ported.stdout.splitlines()
+    v3 = "skip keys/v3key.asc: 1 PGP-2 (v3) key(s), which gpg no longer imports"
+    assert v3 in lines
+    (orphan,) = [
+        ln for ln in lines if ln.startswith("skip keys/orphan-revocation.asc: ")
+    ]
+    assert "gpg failed: " in orphan and "revocation" in orphan
+    assert "faked system time" not in orphan
+
+
+def test_gpg_error_skips_exit_notices(migrate: ModuleType) -> None:
+    # gpg 2.4's stderr importing an Apache KEYS file with an orphan revocation
+    # certificate (key id replaced): the agent notice comes after the cause.
+    stderr = (
+        b"gpg: WARNING: running with faked system time: 2026-10-23 03:27:40\n"
+        b"gpg: key 0123456789ABCDEF: no public key - can't apply revocation"
+        b" certificate\n"
+        b"gpg: no gpg-agent running in this session\n"
+    )
+    assert migrate.gpg_error(stderr) == (
+        "gpg: key 0123456789ABCDEF: no public key - can't apply revocation certificate"
+    )
+
+
 def test_port_skips_rsa_auth_subkey_below_2048(ported: Ported) -> None:
     assert drafts(ported)[ported.pgp.fprs["tim"]]["keys"] == []
 
