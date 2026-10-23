@@ -16,14 +16,12 @@ import argparse
 import base64
 import importlib.machinery
 import importlib.util
-import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 from collections.abc import Collection, Sequence
 from datetime import datetime, timezone
@@ -113,6 +111,14 @@ class Certification(NamedTuple):
 
     uid: str
     time: int
+
+
+class Imported(NamedTuple):
+    """What gpg took from one keys/ file."""
+
+    failed: bool  # gpg exited non-zero: a retry may apply what it refused
+    taken: tuple[str, ...]  # fingerprints of the keys gpg imported or merged
+    why: Optional[str]  # why gpg did not take all of the file, or None
 
 
 class Draft(NamedTuple):
@@ -349,24 +355,61 @@ class Pgpkeys:
         # Judge every key and the freeze commit's own signature at the freeze
         # commit, for gpg and git verify-commit alike.
         (home / "gpg.conf").write_text(f"faked-system-time {self.time}!\n")
-        archive = vouch.run(["git", "archive", self.commit, "keys"], cwd=repo)
-        # Files gpg did not fully import, with why; port reports and skips them.
-        self.skipped: list[tuple[str, str]] = []
-        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-            for member in tar:
-                if member.isfile() and member.name.endswith(".asc"):
-                    f = tar.extractfile(member)
-                    assert f is not None
-                    why = self._import(f.read())
-                    if why is not None:
-                        self.skipped.append((member.name, why))
+        # With --trust-model always gpg never makes a trustdb, yet applying a
+        # revocation to a key already in the keyring dies without one.
+        self.gpg("--trust-model", "pgp", "--check-trustdb")
+        files = self._key_files()
+        found = {name: self._import(data) for name, data in files.items()}
+        # One retry settles file order: by then every key gpg will take is in
+        # the keyring, so a revocation filed before its key now applies.
+        for name, data in files.items():
+            if found[name].failed:
+                found[name] = self._import(data)
+        # One line per file gpg did not fully import, saying what it did take.
+        self.report: list[str] = []
+        for name, got in found.items():
+            if got.why is None:
+                continue
+            if got.taken:
+                self.report.append(
+                    f"partial {name}: took {', '.join(got.taken)}; {got.why}"
+                )
+            else:
+                self.report.append(f"skip {name}: {got.why}")
 
-    def _import(self, data: bytes) -> Optional[str]:
-        """Import one keys/ file; return why gpg did not take all of it, or None.
+    def _key_files(self) -> dict[str, bytes]:
+        """Return each keys/**.asc file at the freeze commit, by path.
+
+        Read as blobs, not with git archive, whose export-ignore and
+        export-subst attributes could drop or change a file. Not with
+        vouch.read_blobs either: a few real keys/ files are over its size cap.
+
+        Raises:
+            VouchError: git fails.
+        """
+        cmd = [*vouch.GIT_LOG, "ls-tree", "-r", "-z", "--full-tree", self.commit]
+        listing = vouch.run([*cmd, "--", "keys/"], cwd=self.repo)
+        blobs = {}
+        for entry in listing.decode().split("\0"):
+            meta, _, name = entry.partition("\t")
+            if name.endswith(".asc") and meta.split()[0] in vouch.FILE_MODES:
+                blobs[name] = meta.split()[2]
+        stdin = "".join(f"{b}\n" for b in blobs.values()).encode()
+        out = vouch.run([*vouch.GIT, "cat-file", "--batch"], stdin=stdin, cwd=self.repo)
+        files = {}
+        for name in blobs:
+            header, out = out.split(b"\n", 1)
+            size = int(header.split()[2])
+            files[name], out = out[:size], out[size + 1 :]
+        return files
+
+    def _import(self, data: bytes) -> Imported:
+        """Import one keys/ file into the keyring.
 
         One file at a time, so a bad file names itself: gpg skips a PGP-2
-        (v3) key with exit 0, and fails a whole batch on one revocation
-        certificate whose key is missing.
+        (v3) key with exit 0, and fails a file holding a revocation
+        certificate whose key is not yet in the keyring, after importing
+        the rest of it.
 
         Raises:
             VouchError: gpg cannot be run.
@@ -376,24 +419,30 @@ class Pgpkeys:
             proc = subprocess.run(cmd, input=data, capture_output=True, check=False)
         except OSError as e:
             raise VouchError(f"cannot run gpg: {e}") from e
-        res = [
-            ln.split()[2:]
+        status = [
+            ln.split()[1:]
             for ln in proc.stdout.decode(errors="replace").splitlines()
-            if ln.startswith("[GNUPG:] IMPORT_RES ")
+            if ln.startswith("[GNUPG:] ")
         ]
+        taken = tuple(dict.fromkeys(s[2] for s in status if s[0] == "IMPORT_OK"))
+        res = [s[1:] for s in status if s[0] == "IMPORT_RES"]
         if proc.returncode != 0 or len(res) != 1:
-            return f"gpg failed: {gpg_error(proc.stderr) or proc.returncode}"
-        count, imported, unchanged = (int(res[0][i]) for i in (0, 2, 4))
+            why = f"gpg failed: {gpg_error(proc.stderr) or proc.returncode}"
+            return Imported(True, taken, why)
         if len(res[0]) > 14 and int(res[0][14]):
-            return f"{res[0][14]} PGP-2 (v3) key(s), which gpg no longer imports"
-        if count == 0:
-            return "no key"
-        if imported + unchanged != count:
-            return f"gpg imported {imported + unchanged} of {count} keys"
-        return None
+            why = f"{res[0][14]} PGP-2 (v3) key(s), which gpg no longer imports"
+            return Imported(False, taken, why)
+        if int(res[0][0]) == 0:
+            return Imported(False, taken, "no key")
+        # gpg's own refusals: no user ID, skipped new key, not imported. Not
+        # taken minus count: a revocation it already holds is counted, unnamed.
+        refused = sum(int(res[0][i]) for i in (1, 12, 13))
+        if refused:
+            return Imported(False, taken, f"gpg refused {refused} key(s)")
+        return Imported(False, taken, None)
 
     def _git(self, *args: str) -> str:
-        out: bytes = vouch.run(["git", *args], cwd=self.repo)
+        out: bytes = vouch.run([*vouch.GIT_LOG, *args], cwd=self.repo)
         return out.decode().strip()
 
     def gpg(
@@ -460,7 +509,7 @@ class Pgpkeys:
             VouchError: The freeze commit is unsigned, the signature is bad, or
                 someone else made it.
         """
-        cmd = ["git", "-c", "gpg.format=openpgp", "-c", "gpg.program=gpg"]
+        cmd = [*vouch.GIT, "-c", "gpg.format=openpgp", "-c", "gpg.program=gpg"]
         cmd += ["verify-commit", "--raw", self.commit]
         proc = subprocess.run(
             cmd,
@@ -501,8 +550,6 @@ def port(pgp: Pgpkeys, out: Path) -> int:
     Returns:
         The number of drafts written.
     """
-    for name, why in pgp.skipped:
-        print(f"skip {name}: {why}")
     keys = pgp.keys()
     usable = []
     for key in keys:
@@ -991,6 +1038,8 @@ def _open_pgpkeys(args: argparse.Namespace, home: Path) -> Pgpkeys:
     pgp = Pgpkeys(Path(args.pgpkeys), args.commit, home)
     pgp.check_signature(args.signer)
     print(f"pgpkeys at {pgp.commit}, signed by {args.signer}")
+    for line in pgp.report:
+        print(line)
     return pgp
 
 
