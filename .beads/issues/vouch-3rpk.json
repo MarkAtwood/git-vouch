@@ -1,0 +1,18 @@
+{
+  "id": "vouch-3rpk",
+  "title": "Load and test the Debian keyring through migrate",
+  "description": "Mark 2026-10-22: load and test the debian keyring. port assumes pgpkeys layout (keys/*.asc, C signed by a key in keys/). Stage Debian's active keyrings (salsa debian-keyring/keyring) into a throwaway pgpkeys-shaped repo signed by a throwaway key, run port, and audit as for vouch-j89q: reconcile counts, every pre-filled key passes ssh-keygen -l and ssh_to_did, encodings, role keys, merges. Check Debian's own provenance separately. Keep drafts local; record aggregates only. File defects as beads.",
+  "acceptance_criteria": "Staged port exits 0 or each failure is understood and filed; tally reconciles; findings recorded",
+  "notes": "Debian keyring test 2026-10-22, salsa debian-keyring/keyring 7dc4637 (2026-09-21), shallow clone ~/GIT/debian-keyring. Provenance: HEAD verifies (GOODSIG) by signing subkey 8060...3C3C of primary 419FB4B6567E6EF7DEAF80A09026108FB942BEA4, which is in Debian's active keyring. Staged (port needs pgpkeys layout): active dirs debian-keyring 947, maintainers 212, nonupload 46, role-keys 6 (= 1211; emeritus 119 excluded), each binary key ASCII-armored byte-for-byte (gpg --dearmor round trip: 0 mismatches of 1211), plus 1 throwaway signer; commit dated at Debian's C. Port exit 0. Tally: 1212 = 1203 drafts + 6 skips + 3 conflicts, 0 merges. Judged at C: 1169 live, 43 expired. Drafts: 937 with 0 SSH keys, 230/29/4/2/1 with 1/2/3/4/5. Pre-filled 313: 254 ssh-rsa (253 e=65537, 1 e=41), 58 ssh-ed25519, 1 P-256; all pass ssh-keygen -l and ssh_to_did. 0 U+FFFD. Live keys with reusable auth 269, 266 drafted: the 3 missing are among the 6 skips. Findings: vouch-zzil (split name/email UIDs), vouch-fyok (role keys). Speed: 145s alone (642s when contending with a second import); cProfile shows ~99% in the one gpg --import of Debian's heavily cross-signed keys, port logic 4.6s; not a git-vouch issue. Drafts and staging stay in the session scratchpad.",
+  "status": "closed",
+  "priority": 2,
+  "issue_type": "task",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T02:25:20.591459771Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T02:46:39.938149329Z",
+  "started_at": "2026-10-23T02:25:22.884603898Z",
+  "closed_at": "2026-10-23T02:46:39.938149329Z",
+  "close_reason": "Debian keyring ports cleanly via staging; 2 findings filed"
+}

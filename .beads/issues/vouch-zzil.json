@@ -1,0 +1,12 @@
+{
+  "id": "vouch-zzil",
+  "title": "migrate: skips keys with name and email in separate UIDs",
+  "description": "Debian keyring test (salsa 7dc4637): 6 live Debian Developer keys are skipped as 'no user ID with a usable name and email'. Each has a name-only UID plus email-only UIDs (' \u003cx@y\u003e', '\u003cx@y\u003e', or a bare 'x@y'); _name_and_emails wants one UID with both. 3 of the 6 also lose a reusable auth key pre-fill. pgpkeys af88128 has none today, but nothing stops a kernel key adopting this layout before the freeze. Proposed: when no UID has both, take the name from a name-only UID and emails from email-only UIDs (including bare addresses). Needs Mark's OK: it changes which UIDs count as identity claims.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "bug",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T02:46:39.4371086Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T02:46:39.4371086Z"
+}
