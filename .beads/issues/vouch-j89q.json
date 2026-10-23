@@ -1,0 +1,23 @@
+{
+  "id": "vouch-j89q",
+  "title": "Port the real pgpkeys.git keyring end to end",
+  "description": "Mark 2026-10-22: suck in the real keyring and convert it. Run git-vouch-migrate port against a real pgpkeys.git clone (~/GIT/pgpkeys, af88128 at filing) with its real commit signer (find the fingerprint from git log --show-signature; do not guess it), and audit the result: every key accounted for as draft/merge/skip/conflict, every pre-filled SSH line accepted by ssh-keygen -l and by git-vouch ssh_to_did, RSA pre-fill counts consistent with the measured 182 reusable / 89 RSA-only / 12 both, the 6 keys with e=35/41, latin-1 UIDs, role keys. Real people's names and emails: keep output local, never commit drafts or paste them anywhere; commit only aggregate counts or bugs found. File each defect as its own bead.",
+  "acceptance_criteria": "port exits 0 on the real keyring; a written tally reconciles keys/ count with drafts+merges+skips+conflicts; every drafted key passes check_draft; defects filed",
+  "status": "open",
+  "priority": 1,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T01:40:48.024403643Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T01:40:48.024403643Z",
+  "dependencies": [
+    {
+      "issue_id": "vouch-j89q",
+      "depends_on_id": "vouch-i99r.2",
+      "type": "blocks",
+      "created_at": "2026-10-23T01:40:48.079453979Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

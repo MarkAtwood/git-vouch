@@ -1,0 +1,27 @@
+{
+  "id": "vouch-i99r.1",
+  "title": "git-vouch: ssh-rsa \u003c-\u003e did:key",
+  "description": "Add ssh-rsa to SSH_KEY_FIELDS; RSA branch in ssh_to_did/did_to_ssh with minimal DER; size 2048-16384, odd e\u003e=3; reject non-minimal mpint and DER (decode, re-encode, compare); raise MAX_DID_LEN from the 16384-bit maximum; fix the ed25519-else-P-256 branch.",
+  "acceptance_criteria": "CCG rsa.json vectors (w3c-ccg/did-method-key 1b4f72d) map exactly both ways; ssh-keygen -e -m PEM DER agrees; 1024-bit, even e, non-minimal encodings rejected; real ssh-keygen -Y sign/verify with an RSA key passes",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "feature",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T01:29:53.986694648Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T01:45:22.228878183Z",
+  "started_at": "2026-10-23T01:29:54.598310776Z",
+  "closed_at": "2026-10-23T01:45:22.228878183Z",
+  "close_reason": "RSA 2048-16384 accepted in aa80d0a",
+  "dependencies": [
+    {
+      "issue_id": "vouch-i99r.1",
+      "depends_on_id": "vouch-i99r",
+      "type": "parent-child",
+      "created_at": "2026-10-23T01:29:54.01020778Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "vouch-i99r.3",
+  "title": "Docs: RSA accepted, upgrade recommended",
+  "description": "Rework f985978: README, guide-regulars, flag-day say RSA 2048+ is accepted and now is a good time to move to ed25519-sk; DESIGN did:key table and 'RSA and DSA are not accepted' line; trqp-interop: verify-trust refuses RSA, so the bridge says yes but verify-trust fails.",
+  "acceptance_criteria": "No doc says RSA is refused; doc tests pass",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T01:29:54.436091683Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T01:45:23.383245291Z",
+  "closed_at": "2026-10-23T01:45:23.383245291Z",
+  "close_reason": "RSA 2048-16384 accepted in aa80d0a",
+  "dependencies": [
+    {
+      "issue_id": "vouch-i99r.3",
+      "depends_on_id": "vouch-i99r",
+      "type": "parent-child",
+      "created_at": "2026-10-23T01:29:54.452730407Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    },
+    {
+      "issue_id": "vouch-i99r.3",
+      "depends_on_id": "vouch-i99r.1",
+      "type": "blocks",
+      "created_at": "2026-10-23T01:29:54.551055805Z",
+      "created_by": "agent",
+      "metadata": "{}"
+    }
+  ]
+}

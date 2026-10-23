@@ -1,0 +1,14 @@
+{
+  "id": "vouch-i99r",
+  "title": "Accept RSA SSH keys",
+  "description": "Mark 2026-10-22: RSA is not banned; docs say now is a good time to upgrade. Decisions: RSA 2048-16384 bits (floor = kernel maintainer-pgp-guide.rst:118), any odd e\u003e=3 (matches OpenSSH), migrate pre-fills RSA auth subkeys \u003e=2048 but prefers ed25519/P-256 when both exist. did:key = multicodec rsa-pub 0x1205 + DER RSAPublicKey. One spelling per key: reject non-minimal mpint/DER.",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "epic",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T01:29:53.873997913Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T01:45:23.799518871Z",
+  "closed_at": "2026-10-23T01:45:23.799518871Z",
+  "close_reason": "RSA 2048-16384 accepted in aa80d0a"
+}
