@@ -70,7 +70,13 @@ def ecdsa_key(tmp_path: Path) -> Key:
     return make_key(tmp_path, "ecdsa", ["-t", "ecdsa", "-b", "256"])
 
 
-@pytest.fixture(params=["ed25519", "ecdsa"])
+@pytest.fixture
+def rsa_key(tmp_path: Path) -> Key:
+    """Return a throwaway 2048-bit ssh-rsa key pair, the smallest accepted."""
+    return make_key(tmp_path, "rsa", ["-t", "rsa", "-b", "2048"])
+
+
+@pytest.fixture(params=["ed25519", "ecdsa", "rsa"])
 def any_key(request: pytest.FixtureRequest) -> Key:
     """Return each supported throwaway key type in turn."""
     return request.getfixturevalue(f"{request.param}_key")

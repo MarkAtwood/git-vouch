@@ -51,11 +51,32 @@ EVEN_Y_P256_SSH = (
 )
 EVEN_Y_P256_DID = "did:key:zDnaeZydegH3tmrALkCJ3hEhmYEgjivy6TxyzzprUZSfbHf7V"
 
-# Key types DESIGN.md does not accept, as CCG did:keys (rsa.json, nist-curves.json P-384,
+# test-vectors/rsa.json: did -> JWK n (base64url). Both have e = AQAB (65537).
+CCG_RSA_JWK_N = {
+    "did:key:z4MXj1wBzi9jUstyPMS4jQqB6KdJaiatPkAtVtGc6bQEQEEsKTic4G7Rou3iBf9vPmT5dbkm9qsZsuVNjq8HCuW1w24nhBFGkRE4cd2Uf2tfrB3N7h4mnyPp1BF3ZttHTYv3DLUPi1zMdkULiow3M1GfXkoC6DoxDUm1jmN6GBj22SjVsr6dxezRVQc7aj9TxE7JLbMH1wh5X3kA58H3DFW8rnYMakFGbca5CB2Jf6CnGQZmL7o5uJAdTwXfy2iiiyPxXEGerMhHwhjTA1mKYobyk2CpeEcmvynADfNZ5MBvcCS7m3XkFCMNUYBS9NQ3fze6vMSUPsNa6GVYmKx2x6JrdEjCk3qRMMmyjnjCMfR4pXbRMZa3i": (  # noqa: E501 -- a vector is one token
+        "sbX82NTV6IylxCh7MfV4hlyvaniCajuP97GyOqSvTmoEdBOflFvZ06kR_9D6ctt45Fk6hskfnag2GG69"
+        "NALVH2o4RCR6tQiLRpKcMRtDYE_thEmfBvDzm_VVkOIYfxu-Ipuo9J_S5XDNDjczx2v-3oDh5-CIHkU4"
+        "6hvFeCvpUS-L8TJSbgX0kjVk_m4eIb9wh63rtmD6Uz_KBtCo5mmR4TEtcLZKYdqMp3wCjN-TlgHiz_4o"
+        "VXWbHUefCEe8rFnX1iQnpDHU49_SaXQoud1jCaexFn25n-Aa8f8bc5Vm-5SeRwidHa6ErvEhTvf1dz6G"
+        "oNPp2iRvm-wJ1gxwWJEYPQ"
+    ),
+    "did:key:zgghBUVkqmWS8e1ioRVp2WN9Vw6x4NvnE9PGAyQsPqM3fnfPf8EdauiRVfBTcVDyzhqM5FFC7ekAvuV1cJHawtfgB9wDcru1hPDobk3hqyedijhgWmsYfJCmodkiiFnjNWATE7PvqTyoCjcmrc8yMRXmFPnoASyT5beUd4YZxTE9VfgmavcPy3BSouNmASMQ8xUXeiRwjb7xBaVTiDRjkmyPD7NYZdXuS93gFhyDFr5b3XLg7Rfj9nHEqtHDa7NmAX7iwDAbMUFEfiDEf9hrqZmpAYJracAjTTR8Cvn6mnDXMLwayNG8dcsXFodxok2qksYF4D8ffUxMRmyyQVQhhhmdSi4YaMPqTnC1J6HTG9Yfb98yGSVaWi4TApUhLXFow2ZvB6vqckCNhjCRL2R4MDUSk71qzxWHgezKyDeyThJgdxydrn1osqH94oSeA346eipkJvKqYREXBKwgB5VL6WF4qAK6sVZxJp2dQBfCPVZ4EbsBQaJXaVK7cNcWG8tZBFWZ79gG9Cu6C4u8yjBS8Ux6dCcJPUTLtixQu4z2n5dCsVSNdnP1EEs8ZerZo5pBgc68w4Yuf9KL3xVxPnAB1nRCBfs9cMU6oL1EdyHbqrTfnjE8HpY164akBqe92LFVsk8RusaGsVPrMekT8emTq5y8v8CabuZg5rDs3f9NPEtogjyx49wiub1FecM5B7QqEcZSYiKHgF4mfkteT2": (  # noqa: E501 -- a vector is one token
+        "qMCkFFRFWtzUyZeK8mgJdyM6SEQcXC5E6JwCRVDld-jlJs8sXNOE_vliexq34wZRQ4hk53-JPFlvZ_Qj"
+        "RgIxdUxSMiZ3S5hlNVvvRaue6SMakA9ugQhnfXaWORro0UbPuHLms-bg5StDP8-8tIezu9c1H1FjwPcd"
+        "bV6rAvKhyhnsM10qP3v2CPbdE0q3FOsihoKuTelImtO110E7N6fLn4U3EYbC4OyViqlrP1o_1M-R-tiM"
+        "1cb4pD7XKJnIs6ryZdfOQSPBJwjNqSdN6Py_tdrFgPDTyacSSdpTVADOM2IMAoYbhV1N5APhnjOHBRFy"
+        "KkF1HffQKpmXQLBqvUNNjuhmpVKWBtrTdcCKrglFXiw0cKGHKxIirjmiOlB_HYHg5UdosyE3_1Txct2U"
+        "7-WBB6QXak1UgxCzgKYBDI8UPA0RlkUuHHP_Zg0fVXrXIInHO04MYxUeSps5qqyP6dJBu_v_BDn3zUq6"
+        "LYFwJ_-xsU7zbrKYB4jaRlHPoCj_eDC-rSA2uQ4KXHBB8_aAqNFC9ukWxc26Ifz9dF968DLuL30bi-ZA"
+        "a2oUh492Pw1bg89J7i4qTsOOfpQvGyDV7TGhKuUG3Hbumfr2w16S-_3EI2RIyd1nYsflE6ZmCkZQMG_l"
+        "wDAFXaqfyGKEDouJuja4XH8r4fGWeGTrozIoniXT1HU"
+    ),
+}
+
+# Key types DESIGN.md does not accept, as CCG did:keys (nist-curves.json P-384,
 # secp256k1.json) and a real DSA public key made by ssh-keygen (OpenSSH 9.8+ no
 # longer generates DSA, so it is hardcoded).
 CCG_UNSUPPORTED_DIDS = [
-    "did:key:z4MXj1wBzi9jUstyPMS4jQqB6KdJaiatPkAtVtGc6bQEQEEsKTic4G7Rou3iBf9vPmT5dbkm9qsZsuVNjq8HCuW1w24nhBFGkRE4cd2Uf2tfrB3N7h4mnyPp1BF3ZttHTYv3DLUPi1zMdkULiow3M1GfXkoC6DoxDUm1jmN6GBj22SjVsr6dxezRVQc7aj9TxE7JLbMH1wh5X3kA58H3DFW8rnYMakFGbca5CB2Jf6CnGQZmL7o5uJAdTwXfy2iiiyPxXEGerMhHwhjTA1mKYobyk2CpeEcmvynADfNZ5MBvcCS7m3XkFCMNUYBS9NQ3fze6vMSUPsNa6GVYmKx2x6JrdEjCk3qRMMmyjnjCMfR4pXbRMZa3i",  # noqa: E501 -- a vector is one token
     "did:key:z82LkvCwHNreneWpsgPEbV3gu1C6NFJEBg4srfJ5gdxEsMGRJUz2sG9FE42shbn2xkZJh54",
     "did:key:zQ3shokFTS3brHcDQrn82RUDfCZESWL1ZdCEJwekUDPQiYBme",
 ]
@@ -79,6 +100,15 @@ def ssh_line(*strings: bytes) -> str:
     """Build an OpenSSH public key line from its wire-format strings."""
     blob = b"".join(len(s).to_bytes(4, "big") + s for s in strings)
     return f"{strings[0].decode()} {base64.b64encode(blob).decode()}"
+
+
+def rsa_line(n: int, e: int, n_raw: bytes | None = None) -> str:
+    """Build an ssh-rsa public key line, minimal mpints unless ``n_raw`` overrides n."""
+
+    def mpint(v: int) -> bytes:
+        return v.to_bytes(v.bit_length() // 8 + 1, "big")
+
+    return ssh_line(b"ssh-rsa", mpint(e), mpint(n) if n_raw is None else n_raw)
 
 
 def ed25519_public_from_seed(seed_hex: str) -> bytes:
@@ -125,6 +155,24 @@ def assert_openssl_p256(line: str, tmp_path: Path) -> None:
         check=True,
     ).stdout.decode()
     assert "prime256v1" in text
+
+
+def assert_openssl_rsa(line: str, n: int, tmp_path: Path) -> None:
+    """Check that openssl reads ``line``'s key as RSA with modulus ``n``."""
+    path = tmp_path / "check.pub"
+    path.write_text(line + "\n")
+    pkcs8 = subprocess.run(
+        ["ssh-keygen", "-e", "-m", "PKCS8", "-f", str(path)],
+        capture_output=True,
+        check=True,
+    ).stdout
+    out = subprocess.run(
+        ["openssl", "rsa", "-pubin", "-noout", "-modulus"],
+        input=pkcs8,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    assert int(out.strip().removeprefix("Modulus="), 16) == n
 
 
 def ed25519_lines() -> list[tuple[str, str, str]]:
@@ -175,6 +223,114 @@ def test_p256_even_y_vector(vouch: ModuleType, tmp_path: Path) -> None:
     assert vouch.did_to_ssh(EVEN_Y_P256_DID) == EVEN_Y_P256_SSH
 
 
+@pytest.mark.parametrize("did", CCG_RSA_JWK_N)
+def test_rsa_vectors(vouch: ModuleType, tmp_path: Path, did: str) -> None:
+    n = int.from_bytes(b64url(CCG_RSA_JWK_N[did]), "big")
+    line = rsa_line(n, 65537)
+    assert_openssl_rsa(line, n, tmp_path)
+    assert vouch.ssh_to_did(line) == did
+    assert vouch.did_to_ssh(did) == line
+
+
+def test_rsa_did_carries_ssh_keygen_pkcs1(vouch: ModuleType, rsa_key: Key) -> None:
+    # ssh-keygen's own PKCS#1 export is the DER the did:key must carry; b58decode
+    # is checked against the Bitcoin vectors below.
+    pem = subprocess.run(
+        ["ssh-keygen", "-e", "-m", "PEM", "-f", str(rsa_key.public)],
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    assert "BEGIN RSA PUBLIC KEY" in pem
+    der = base64.b64decode("".join(ln for ln in pem.splitlines() if "-----" not in ln))
+    did = vouch.ssh_to_did(rsa_key.pubkey)
+    assert vouch.b58decode(did[len("did:key:z") :]) == b"\x85\x24" + der
+
+
+# The ceiling is OpenSSH's own (ssh-keygen is the oracle); the floor is the
+# kernel's (maintainer-pgp-guide.rst), below OpenSSH's 1024.
+@pytest.mark.parametrize(
+    ("bits", "openssh_ok", "accepted"),
+    [(2047, True, False), (2048, True, True), (16384, True, True), (16385, False, False)],
+)
+def test_rsa_size_bounds(
+    vouch: ModuleType, tmp_path: Path, bits: int, openssh_ok: bool, accepted: bool
+) -> None:
+    line = rsa_line((1 << (bits - 1)) | 1, 65537)
+    path = tmp_path / "check.pub"
+    path.write_text(line + "\n")
+    keygen = subprocess.run(["ssh-keygen", "-l", "-f", str(path)], capture_output=True)
+    assert (keygen.returncode == 0) == openssh_ok
+    if accepted:
+        assert vouch.did_to_ssh(vouch.ssh_to_did(line)) == line
+    else:
+        with pytest.raises(vouch.VouchError, match="2048 to 16384"):
+            vouch.ssh_to_did(line)
+
+
+RSA_TEST_N = (1 << 2047) | 1
+
+
+@pytest.mark.parametrize("e", [3, 41, 65537, RSA_TEST_N - 2])
+def test_rsa_odd_exponents_accepted(vouch: ModuleType, e: int) -> None:
+    line = rsa_line(RSA_TEST_N, e)
+    assert vouch.did_to_ssh(vouch.ssh_to_did(line)) == line
+
+
+@pytest.mark.parametrize("e", [1, 2, 65536, RSA_TEST_N, RSA_TEST_N + 2])
+def test_rsa_bad_exponents_rejected(vouch: ModuleType, e: int) -> None:
+    with pytest.raises(vouch.VouchError, match="exponent"):
+        vouch.ssh_to_did(rsa_line(RSA_TEST_N, e))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        ssh_line(b"ssh-rsa", b"\x00\x01\x00\x01", b"\x00" + RSA_TEST_N.to_bytes(256, "big")),
+        # The top bit is set, so without its leading zero n is negative.
+        rsa_line(RSA_TEST_N, 65537, n_raw=RSA_TEST_N.to_bytes(256, "big")),
+        rsa_line(RSA_TEST_N, 65537, n_raw=b"\x00\x00" + RSA_TEST_N.to_bytes(256, "big")),
+    ],
+)
+def test_rsa_non_minimal_mpint_rejected(vouch: ModuleType, line: str) -> None:
+    # Accepting these would give one key two did:keys, so a revocation of one
+    # would miss signatures made under the other.
+    with pytest.raises(vouch.VouchError, match="minimally encoded"):
+        vouch.ssh_to_did(line)
+
+
+def _ccg_rsa2048_der(vouch: ModuleType) -> bytes:
+    """Return the PKCS#1 DER inside the CCG 2048-bit vector, which ends with e = 65537."""
+    der = vouch.b58decode(next(iter(CCG_RSA_JWK_N))[len("did:key:z") :])[2:]
+    assert der[:4] == b"\x30\x82\x01\x0a" and der.endswith(b"\x02\x03\x01\x00\x01")
+    return der
+
+
+def _reseq(body: bytes) -> bytes:
+    return b"\x30\x82" + len(body).to_bytes(2, "big") + body
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d + b"\x00",  # trailing byte
+        lambda d: d[:-1],  # truncated
+        lambda d: b"\x30\x83\x00" + d[2:],  # long-form length with a leading zero
+        lambda d: _reseq(d[4:-5] + b"\x02\x81\x03\x01\x00\x01"),  # long form for 3
+        lambda d: _reseq(d[4:-5] + b"\x02\x04\x00\x01\x00\x01"),  # padded e
+        lambda d: b"\x31" + d[1:],  # SET, not SEQUENCE
+        # A minimal 1024-bit key: well-formed DER, refused for its size.
+        lambda d: b"\x30\x81\x89\x02\x81\x81\x00\x80"
+        + b"\x00" * 126
+        + b"\x01\x02\x03\x01\x00\x01",
+    ],
+)
+def test_rsa_bad_der_dids_rejected(vouch: ModuleType, mutate: object) -> None:
+    # b58encode only builds the input; the CCG vectors check it.
+    der = mutate(_ccg_rsa2048_der(vouch))  # type: ignore[operator]
+    with pytest.raises(vouch.VouchError):
+        vouch.did_to_ssh("did:key:z" + vouch.b58encode(b"\x85\x24" + der))
+
+
 def test_cli_prints_both_directions() -> None:
     did = "did:key:zDnaerx9CtbPJ1q36T5Ln5wYt3MQYeGRG5ehnPAmxcf5mDZpv"
     line = ssh_line(b"ecdsa-sha2-nistp256", b"nistp256", p256_point(CCG_P256_JWKS[did]))
@@ -201,16 +357,20 @@ def test_real_key_round_trips_through_ssh_keygen(any_key: Key, tmp_path: Path) -
 
 
 @pytest.mark.parametrize(
-    "keygen_args", [["-t", "rsa", "-b", "1024"], ["-t", "ecdsa", "-b", "384"]]
+    ("keygen_args", "error"),
+    [
+        (["-t", "rsa", "-b", "1024"], "RSA key is 1024 bits"),
+        (["-t", "ecdsa", "-b", "384"], "unsupported key type"),
+    ],
 )
 def test_cli_rejects_unsupported_real_keys(
-    tmp_path: Path, keygen_args: list[str]
+    tmp_path: Path, keygen_args: list[str], error: str
 ) -> None:
     key = make_key(tmp_path, "unsupported", keygen_args)
     result = run_script("did", key.pubkey)
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr.startswith("git-vouch: error: unsupported key type")
+    assert result.stderr.startswith(f"git-vouch: error: {error}")
 
 
 def test_cli_rejects_dsa() -> None:
@@ -301,7 +461,7 @@ def test_overlong_did_not_decoded(
 
     monkeypatch.setattr(vouch, "b58decode", no_decode)
     with pytest.raises(vouch.VouchError):
-        vouch.did_to_ssh("did:key:zDnae" + "1" * 60)
+        vouch.did_to_ssh("did:key:zDnae" + "1" * vouch.MAX_DID_LEN)
 
 
 # P-256 field prime, typed in from SEC 2 / `openssl ecparam -param_enc explicit`.

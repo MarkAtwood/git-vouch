@@ -178,6 +178,10 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
                 "Hank Hill <hank@example.org>", expire="1d", at="20190201T000000"
             ),
             "fireant": gpg.new_key("Flippant Fireant <flippant-fireant@kernel.org>"),
+            # RSA auth subkeys: only RSA, RSA beside ed25519, and too small.
+            "rhea": gpg.new_key("Rhea Rivest <rhea@example.org>"),
+            "boris": gpg.new_key("Boris Both <boris@example.org>"),
+            "tim": gpg.new_key("Tim Tiny <tim@example.org>"),
             "sam1": gpg.new_key("Sam One <sam@example.com>"),
             "sam2": gpg.new_key("Sam Two <sam@example.org>"),
             "victor": gpg.new_key("Victor Victim <victor@example.com>"),
@@ -212,6 +216,10 @@ def pgpkeys(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pgpkeys]:
         gpg("--quick-add-key", fprs["alice"], "ed25519", "auth", "never")
         gpg("--quick-add-key", fprs["bob"], "nistp256/ecdsa", "auth", "never")
         gpg("--quick-add-key", fprs["carol"], "brainpoolP256r1/ecdsa", "auth", "never")
+        gpg.add_key(fprs["rhea"], "rsa2048", "auth")
+        gpg.add_key(fprs["boris"], "rsa2048", "auth")
+        gpg.add_key(fprs["boris"], "ed25519", "auth")
+        gpg.add_key(fprs["tim"], "rsa1024", "auth")
         gpg(
             "--quick-add-uid",
             fprs["dave_new"],

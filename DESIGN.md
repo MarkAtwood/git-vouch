@@ -459,15 +459,21 @@ Supported key types:
 | `sk-ssh-ed25519@openssh.com` | `ed25519-pub` (0xed); the FIDO wrapping is a signing detail that `ssh-keygen` handles |
 | `ecdsa-sha2-nistp256` | `p256-pub` (0x1200), compressed point |
 | `sk-ecdsa-sha2-nistp256@openssh.com` | `p256-pub` (0x1200) |
+| `ssh-rsa`, 2048 to 16384 bits, odd e with 3 ≤ e < n | `rsa-pub` (0x1205), PKCS#1 RSAPublicKey DER |
 
 A did:key does not record whether the key is an `sk-` key, and drops
 its FIDO application string, so one did:key can match two SSH keys.
 `git vouch did` prints the plain form for the reverse; `git-vouch`
 itself resolves a did:key only by looking it up in the registry.
 
-RSA and DSA are not accepted. The ed25519 and P-256 forms are tested
-against the W3C CCG did:key test vectors, an oracle independent of this
-code.
+DSA, P-384, P-521 and RSA below 2048 bits are not accepted. The RSA
+floor is the kernel's (`maintainer-pgp-guide.rst`), the ceiling
+OpenSSH's, and the exponent range PKCS#1's. RSA is accepted so nobody
+is forced off a working key, but the guides recommend upgrading. SSH
+mpints and DER must be minimal, so each key has exactly one did:key and
+a revocation cannot be dodged by re-encoding. The ed25519, P-256 and RSA
+forms are tested against the W3C CCG did:key test vectors, an oracle
+independent of this code.
 
 ## Keys
 
@@ -475,7 +481,7 @@ code.
 -Y sign`, which uses the SSH agent or a key file, so any agent-backed
 store works: YubiKey (FIDO or PIV), Secure Enclave, 1Password, TPM, a
 cloud KMS, or gpg-agent with `enable-ssh-support` for people keeping an
-existing GPG key that has an ed25519 or P-256 authentication subkey.
+existing GPG key whose authentication subkey is an accepted type.
 
 **Hardware is recommended, not required.** Maintainers and anchors
 should keep their keys on a hardware token, but any supported key type is
@@ -585,7 +591,7 @@ itself stays a CLI. Facts about `verify-trust` come from
 - **Trust:** answers over HTTPS are unsigned, so they rest on the
   `https://` endpoint named in the DID document. Anyone can check an
   answer against the public registry.
-- **Key types:** `verify-trust` must accept all four types `git-vouch`
+- **Key types:** `verify-trust` must accept all five types `git-vouch`
   does. Today it accepts only `ssh-ed25519`
   (https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169);
   the bridge is built assuming that is fixed.
@@ -779,7 +785,7 @@ Decided 2026-10-22:
   Task envelopes; authority DID configured (`did:web` or `did:webvh`);
   `git.commit.sign` authorized for current keys of anyone with an
   endorsed email, no bots; any repository; refuses after 24 hours
-  without a sync; assumes OpenVTC accepts all four key types.
+  without a sync; assumes OpenVTC accepts all five key types.
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.

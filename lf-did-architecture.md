@@ -1,6 +1,6 @@
 # LF DID Infrastructure: Architecture and Deployment Guide
 
-> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384, importing GPG secret keys) and status do not describe git-vouch.
+> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384 accepted, RSA refused, importing GPG secret keys) and status do not describe git-vouch.
 
 **Audience:** Linux Foundation staff, CNCF technical staff, project governing boards,
 and technical leads responsible for adopting LF DID within their projects  

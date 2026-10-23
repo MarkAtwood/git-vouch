@@ -58,7 +58,8 @@ FPR_RE = re.compile(r"[0-9A-F]{40}")
 MIGRATED_RE = re.compile(r"openpgp4fpr:([0-9A-Fa-f]{40})")
 # gpg status words that say why a detached signature did not verify.
 GPG_FAILURES = ("NO_PUBKEY", "BADSIG", "REVKEYSIG", "EXPSIG", "ERRSIG")
-# Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts.
+# Auth subkey curves whose `gpg --export-ssh-key` output git-vouch accepts;
+# RSA (algorithm 1) is accepted in git-vouch's size range.
 REUSABLE_CURVES = ("ed25519", "nistp256")
 # gpg validity letters for keys not live at C. A primary key is skipped only
 # if revoked or invalid: an expired one is still continuity proof (D9).
@@ -82,7 +83,7 @@ class GpgKey(NamedTuple):
     created: int
     validity: str
     uids: tuple[str, ...]  # unrevoked user IDs, primary first
-    auth: tuple[str, ...]  # fingerprints of live auth subkeys on REUSABLE_CURVES
+    auth: tuple[str, ...]  # fingerprints of live auth subkeys git-vouch accepts
 
 
 class Proof(NamedTuple):
@@ -156,7 +157,11 @@ def parse_listing(colons: bytes) -> list[GpgKey]:
                 if (
                     sub[1].decode() not in NOT_LIVE
                     and b"a" in sub[11]
-                    and sub[16].decode() in REUSABLE_CURVES
+                    and (
+                        sub[16].decode() in REUSABLE_CURVES
+                        or sub[3] == b"1"
+                        and vouch.RSA_MIN_BITS <= int(sub[2]) <= vouch.RSA_MAX_BITS
+                    )
                 ):
                     auth.append(f[9].decode())
                 sub = None
@@ -460,15 +465,15 @@ def port(pgp: Pgpkeys, out: Path) -> int:
     added = datetime.fromtimestamp(pgp.time, timezone.utc).strftime(vouch.DATE_FORMAT)
     drafts = []
     for key, emails in people:
+        lines = [pgp.ssh_key(sub) for sub in key.auth]
+        # RSA is pre-filled only when it is all the key has.
+        lines = [s for s in lines if not s.startswith("ssh-rsa ")] or lines
         draft = {
             "@context": [vouch.CONTEXT],
             "handle": handles[key.fpr],
             "name": names[key.fpr],
             "emails": emails,
-            "keys": [
-                {"ssh": pgp.ssh_key(sub), "added": added, "retired": None}
-                for sub in key.auth
-            ],
+            "keys": [{"ssh": s, "added": added, "retired": None} for s in lines],
             "migratedFrom": "openpgp4fpr:" + key.fpr,
         }
         data = (json.dumps(draft, indent=2, ensure_ascii=False) + "\n").encode()
@@ -554,8 +559,8 @@ def verify_continuity(
     The person file must be validly signed by git-vouch's own rules, and
     its ``migratedFrom`` key in pgpkeys at C not revoked (an expired key is
     accepted, D9), with every email in the file on an unrevoked user ID of
-    that key. The proof is a signature on the file by a live ed25519 or
-    P-256 authentication subkey of that key, or ``people/<handle>.json.asc``,
+    that key. The proof is a signature on the file by a live ed25519, P-256
+    or RSA authentication subkey of that key, or ``people/<handle>.json.asc``,
     a detached signature by the key over the file's exact bytes. A
     fingerprint claimed by two or more handles proves none of them (D3).
 
@@ -859,7 +864,8 @@ def build_parser() -> argparse.ArgumentParser:
             "unexpired key (else the newest key), if "
             "their primary names match, and otherwise none is drafted. Emails "
             "come from unrevoked user IDs. An ed25519 or P-256 authentication "
-            "subkey is pre-filled as the SSH key."
+            "subkey is pre-filled as the SSH key, else an RSA one of 2048 to "
+            "16384 bits."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")
@@ -877,8 +883,8 @@ def build_parser() -> argparse.ArgumentParser:
             "the registry with migratedFrom (or each HANDLE given), verify its "
             "continuity proof against the keys in pgpkeys.git at C: the GPG key "
             "must not be revoked at C (expired is accepted), every email in the "
-            "file must be on an unrevoked user ID of it, and either an ed25519 or "
-            "P-256 authentication subkey of it signed the person file, or "
+            "file must be on an unrevoked user ID of it, and either an ed25519, "
+            "P-256 or RSA authentication subkey of it signed the person file, or "
             "people/<handle>.json.asc is its detached signature over the file's "
             "exact bytes. A fingerprint claimed by two handles proves neither. "
             "Prints 'ok' or 'fail' per handle, and exits 1 if any fails."

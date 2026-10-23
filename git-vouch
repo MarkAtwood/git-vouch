@@ -43,6 +43,9 @@ STALE_AFTER = timedelta(days=7)
 B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ED25519_CODEC = b"\xed\x01"  # multicodec ed25519-pub (0xed) as a varint
 P256_CODEC = b"\x80\x24"  # multicodec p256-pub (0x1200) as a varint
+RSA_CODEC = b"\x85\x24"  # multicodec rsa-pub (0x1205) as a varint
+# The kernel's floor (maintainer-pgp-guide.rst) and OpenSSH's ceiling.
+RSA_MIN_BITS, RSA_MAX_BITS = 2048, 16384
 P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
 P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
 # Number of SSH wire strings in each accepted key blob; sk- keys add an application.
@@ -51,8 +54,11 @@ SSH_KEY_FIELDS = {
     "sk-ssh-ed25519@openssh.com": 3,
     "ecdsa-sha2-nistp256": 3,
     "sk-ecdsa-sha2-nistp256@openssh.com": 4,
+    "ssh-rsa": 3,
 }
-MAX_DID_LEN = 64  # a P-256 did:key is 57 characters; longer input is never decoded
+# A did:key for a 16384-bit RSA key with e < n is at most 5625 characters;
+# longer input is never decoded.
+MAX_DID_LEN = 5625
 NAMESPACES = {
     "people": "git-vouch-register",
     "tiers": "git-vouch-tier",
@@ -377,15 +383,71 @@ def _ssh_strings(blob: bytes) -> list[bytes]:
     return out
 
 
+def _mpint(n: int) -> bytes:
+    """Return non-negative ``n`` as minimal big-endian two's complement.
+
+    This is both an SSH mpint's body and a DER INTEGER's contents.
+    """
+    return n.to_bytes(n.bit_length() // 8 + 1, "big") if n else b""
+
+
+def _der(tag: int, body: bytes) -> bytes:
+    """Return the DER element with ``tag`` and ``body``, using the minimal length form."""
+    n = len(body)
+    if n < 0x80:
+        return bytes([tag, n]) + body
+    size = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([tag, 0x80 | len(size)]) + size + body
+
+
+def _der_read(data: bytes, tag: int) -> tuple[bytes, bytes]:
+    """Return the body of the DER element with ``tag`` at the start of ``data``, and what follows.
+
+    Raises:
+        VouchError: ``data`` does not start with a whole element with ``tag``.
+    """
+    if len(data) < 2 or data[0] != tag:
+        raise VouchError("malformed RSA did:key")
+    n, start = data[1], 2
+    if n & 0x80:
+        start += n & 0x7F
+        n = int.from_bytes(data[2:start], "big")
+    if len(data) < start + n:
+        raise VouchError("malformed RSA did:key")
+    return data[start : start + n], data[start + n :]
+
+
+def _rsa_der(n: int, e: int) -> bytes:
+    """Return PKCS#1 RSAPublicKey DER for modulus ``n`` and exponent ``e``."""
+    return _der(0x30, _der(0x02, _mpint(n)) + _der(0x02, _mpint(e)))
+
+
+def _check_rsa(n: int, e: int) -> None:
+    """Check an RSA public key against the accepted sizes and PKCS#1's exponent range.
+
+    Raises:
+        VouchError: ``n`` is outside 2048-16384 bits, or ``e`` is not odd with 3 <= e < n.
+    """
+    if not RSA_MIN_BITS <= n.bit_length() <= RSA_MAX_BITS:
+        raise VouchError(
+            f"RSA key is {n.bit_length()} bits:"
+            f" {RSA_MIN_BITS} to {RSA_MAX_BITS} are accepted"
+        )
+    if not (3 <= e < n and e & 1):
+        raise VouchError("RSA exponent must be odd, at least 3 and less than n")
+
+
 def ssh_to_did(pubkey: str) -> str:
     """Return the did:key for an OpenSSH public key line ("type base64 [comment]").
 
     ed25519 keys use multicodec ed25519-pub; ecdsa-sha2-nistp256 keys use
-    p256-pub with the compressed point. The sk- (FIDO) variants map to the
-    same did:key as their plain type.
+    p256-pub with the compressed point; ssh-rsa keys use rsa-pub with
+    PKCS#1 RSAPublicKey DER. The sk- (FIDO) variants map to the same
+    did:key as their plain type.
 
     Raises:
-        VouchError: The key is malformed or of an unsupported type (RSA, DSA, ...).
+        VouchError: The key is malformed, not minimally encoded, or of an
+            unsupported type or size (DSA, P-384, RSA-1024, ...).
     """
     fields = pubkey.split()
     if len(fields) < 2:
@@ -394,8 +456,9 @@ def ssh_to_did(pubkey: str) -> str:
     count = SSH_KEY_FIELDS.get(key_type)
     if count is None:
         raise VouchError(
-            f"unsupported key type {key_type!r}: only ed25519 and"
-            " ecdsa-sha2-nistp256 keys (and their sk- variants) are accepted"
+            f"unsupported key type {key_type!r}: only ed25519,"
+            " ecdsa-sha2-nistp256 (and their sk- variants) and ssh-rsa keys"
+            " are accepted"
         )
     try:
         parts = _ssh_strings(base64.b64decode(fields[1], validate=True))
@@ -403,6 +466,13 @@ def ssh_to_did(pubkey: str) -> str:
         raise VouchError(f"invalid base64 in SSH public key: {e}") from e
     if len(parts) != count or parts[0] != key_type.encode():
         raise VouchError(f"malformed {key_type} public key")
+    if key_type == "ssh-rsa":
+        e, n = (int.from_bytes(p, "big") for p in parts[1:])
+        # One key, one did:key: a padded or negative mpint is refused, not normalized.
+        if (_mpint(e), _mpint(n)) != (parts[1], parts[2]):
+            raise VouchError("RSA public key is not minimally encoded")
+        _check_rsa(n, e)
+        return "did:key:z" + b58encode(RSA_CODEC + _rsa_der(n, e))
     if "ed25519" in key_type:
         if len(parts[1]) != 32:
             raise VouchError("ed25519 public key is not 32 bytes")
@@ -418,15 +488,16 @@ def ssh_to_did(pubkey: str) -> str:
 
 
 def did_to_ssh(did: str) -> str:
-    """Return the OpenSSH public key line ("type base64") for an ed25519 or P-256 did:key.
+    """Return the OpenSSH public key line ("type base64") for an ed25519, P-256 or RSA did:key.
 
     A did:key does not record whether the key was a FIDO (sk-) key, so the
     plain SSH type is returned.
 
     Raises:
-        VouchError: ``did`` is not a did:key for an ed25519 or P-256 key.
+        VouchError: ``did`` is not a did:key for an accepted key, or its RSA
+            DER is not minimally encoded.
     """
-    unsupported = VouchError(f"not an ed25519 or P-256 did:key: {did[:MAX_DID_LEN]!r}")
+    unsupported = VouchError(f"not an ed25519, P-256 or RSA did:key: {did[:64]!r}")
     if not did.startswith("did:key:z") or len(did) > MAX_DID_LEN:
         raise unsupported
     raw = b58decode(did[len("did:key:z") :])
@@ -440,6 +511,16 @@ def did_to_ssh(did: str) -> str:
             b"nistp256",
             b"\x04" + key[1:] + y.to_bytes(32, "big"),
         ]
+    elif codec == RSA_CODEC:
+        body, _ = _der_read(key, 0x30)
+        n_raw, body = _der_read(body, 0x02)
+        e_raw, _ = _der_read(body, 0x02)
+        n, e = int.from_bytes(n_raw, "big"), int.from_bytes(e_raw, "big")
+        # Re-encoding also catches trailing bytes and non-minimal lengths.
+        if _rsa_der(n, e) != key:
+            raise VouchError("RSA did:key is not minimally encoded DER")
+        _check_rsa(n, e)
+        parts = [b"ssh-rsa", _mpint(e), _mpint(n)]
     else:
         raise unsupported
     blob = b"".join(len(p).to_bytes(4, "big") + p for p in parts)

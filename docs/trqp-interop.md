@@ -16,8 +16,8 @@ fix them:
    plain `ssh-ed25519` signatures. A commit signed with
    `sk-ssh-ed25519@openssh.com` (kernel.org's default FIDO type),
    `ecdsa-sha2-nistp256` or `sk-ecdsa-sha2-nistp256@openssh.com` fails as
-   `malformed` before the registry is asked. git-vouch accepts all four
-   types (DESIGN.md, did:key). Only signers with a plain software or
+   `malformed` before the registry is asked, and so does `ssh-rsa`.
+   git-vouch accepts all five types (DESIGN.md, did:key). Only signers with a plain software or
    agent-held `ssh-ed25519` key can pass verify-trust.
 2. **Limitation: commits only, evaluated as of now.** verify-trust
    checks commit ranges, never tags. It never sends the TRQP
@@ -288,7 +288,8 @@ VGI `verify-trust/src/lib.rs:941-950`.
   `SkEd25519` and `SkEcdsaSha2NistP256`, and P-256 is `Ecdsa`
   (`src/public/key_data.rs:23`, `:26`, `:36`, `:41`). So
   `sk-ssh-ed25519@openssh.com`, `ecdsa-sha2-nistp256` and
-  `sk-ecdsa-sha2-nistp256@openssh.com` signatures are all refused.
+  `sk-ecdsa-sha2-nistp256@openssh.com` signatures are all refused, as
+  are `ssh-rsa` ones.
 - Key extraction from DID documents is Ed25519-only as well: VGI
   `vgi-core/src/did.rs:10` (multicodec `0xED01`), `:41-44`.
   The sshsig helpers are Ed25519-only: `vgi-core/src/sshsig.rs:1`.
@@ -296,7 +297,7 @@ VGI `verify-trust/src/lib.rs:941-950`.
   rescue it.
 
 For git-vouch this is the main interop gap. DESIGN.md accepts
-`sk-ssh-ed25519` and P-256 for every tier and notes that kernel.org
+`sk-ssh-ed25519`, P-256 and RSA for every tier and notes that kernel.org
 issues `ed25519-sk` by default with `ecdsa-sk` as the fallback. Note that
 `sk-ssh-ed25519` and `ssh-ed25519` share a did:key (DESIGN.md, did:key),
 so the DID would resolve and the raw key bytes would match. Only the

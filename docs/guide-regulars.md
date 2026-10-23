@@ -47,10 +47,9 @@ tag or pull is not accepted.
 
 ### Create your keys
 
-Only ed25519 and P-256 keys are accepted, whether software, on a token,
-or a GPG authentication subkey. RSA is refused at any size or on any
-hardware, so if your SSH or GPG authentication key is RSA, make a new
-one. Hardware is recommended, not required. kernel.org issues FIDO tokens
+ed25519, P-256 and RSA keys of 2048 bits or more are accepted, whether
+software, on a token, or a GPG authentication subkey. If yours is RSA,
+now is a good time to upgrade. Hardware is recommended, not required. kernel.org issues FIDO tokens
 and backup tokens (korg.docs.kernel.org/fido2.html); make one key on
 each, touching the token when asked:
 
@@ -61,8 +60,8 @@ ssh-keygen -t ed25519-sk -C "bob backup" -f ~/.ssh/backup
 ```
 
 If your token has no ed25519, use `-t ecdsa-sk`. Without tokens,
-`ssh-keygen -t ed25519` makes software keys that work the same way. To let endorsers check a key was made on a token, generate
-it with `-O challenge=<file> -O write-attestation=<file>` and pass both
+`ssh-keygen -t ed25519` makes software keys that work the same way. To
+let endorsers check a key was made on a token, generate it with `-O challenge=<file> -O write-attestation=<file>` and pass both
 files to `register` or `add-key` with `--challenge` and `--attestation`.
 
 ### Register

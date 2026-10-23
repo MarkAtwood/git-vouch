@@ -1,6 +1,6 @@
 # Native DID Signing Support for Git
 
-> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384, importing GPG secret keys) and status do not describe git-vouch.
+> **Superseded.** Kept for history; [DESIGN.md](DESIGN.md) is the current design. Statements here about key types (P-384 accepted, RSA refused, importing GPG secret keys) and status do not describe git-vouch.
 ## Design Proposal
 
 **Author:** Linux Foundation / Linux Kernel Project  
