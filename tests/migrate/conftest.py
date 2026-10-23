@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import importlib.machinery
 import importlib.util
 import os
@@ -136,6 +137,18 @@ class Ported(NamedTuple):
     pgp: Pgpkeys
     out: Path
     stdout: str
+
+
+def fill_disk_for_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make writing any .json file fail as it does on a full disk."""
+    write_bytes = Path.write_bytes
+
+    def full(path: Path, data: bytes) -> int:
+        if path.suffix == ".json":
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(path))
+        return write_bytes(path, data)
+
+    monkeypatch.setattr(Path, "write_bytes", full)
 
 
 def run_migrate(*args: str) -> subprocess.CompletedProcess[str]:

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import Ported, Pgpkeys, run_migrate
+from .conftest import Ported, Pgpkeys, fill_disk_for_json, run_migrate
 
 # Real `gpg --with-colons --fixed-list-mode --list-keys` output for key 4A55C497F744F705
 # in kernel.org pgpkeys.git at af88128 (gpg 2.4.4). The second user ID is stored as
@@ -377,3 +377,29 @@ def test_port_argument_errors(
     )  # fmt: skip
     assert proc.returncode == 1
     assert message in proc.stderr
+
+
+def test_failed_write_leaves_no_out_and_retry_works(
+    migrate: ModuleType,
+    pgpkeys: Pgpkeys,
+    ported: Ported,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = tmp_path / "out"
+    args = ["port", str(pgpkeys.repo), "--commit", pgpkeys.commit]
+    args += ["--signer", pgpkeys.fprs["signer"], "--out", str(out)]
+    monkeypatch.delenv("GNUPGHOME", raising=False)
+    with monkeypatch.context() as m:
+        fill_disk_for_json(m)
+        assert migrate.main(args) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"git-vouch-migrate: error: {out}: cannot write the drafts")
+    assert "No space left on device" in err
+    assert not out.exists()
+    assert list(tmp_path.glob(".out.*")) == []
+    assert migrate.main(args) == 0
+    assert sorted(p.name for p in (out / "people").iterdir()) == sorted(
+        p.name for p in (ported.out / "people").iterdir()
+    )

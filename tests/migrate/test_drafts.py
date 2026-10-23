@@ -15,7 +15,15 @@ from typing import NamedTuple
 
 import pytest
 
-from .conftest import FREEZE_DATE, T0, Gpg, _created, _git, run_migrate
+from .conftest import (
+    FREEZE_DATE,
+    T0,
+    Gpg,
+    _created,
+    _git,
+    fill_disk_for_json,
+    run_migrate,
+)
 from .test_continuity import gpg_sign, ssh_sign, write_person
 
 VOUCH = Path(__file__).resolve().parent.parent.parent / "git-vouch"
@@ -476,3 +484,27 @@ def test_drafts_signed_as_endorsements_pass_check(
         "endorsements/judy/cora-2.json",
         "endorsements/nell/cora-2.json",
     }
+
+
+def test_failed_write_leaves_no_out_and_retry_works(
+    migrate: ModuleType,
+    certified: Certified,
+    cora_drafts: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    c = certified
+    out = tmp_path / "out"
+    args = ["drafts", "--commit", c.commit, "--signer", c.fprs["signer"]]
+    args += ["--as", "cora", "--out", str(out), str(c.repo), str(c.registry)]
+    monkeypatch.delenv("GNUPGHOME", raising=False)
+    with monkeypatch.context() as m:
+        fill_disk_for_json(m)
+        assert migrate.main(args) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"git-vouch-migrate: error: {out}: cannot write the drafts")
+    assert not out.exists()
+    assert list(tmp_path.glob(".out.*")) == []
+    assert migrate.main(args) == 0
+    assert drafted(out) == drafted(cora_drafts)

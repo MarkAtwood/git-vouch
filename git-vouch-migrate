@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -612,9 +612,7 @@ def port(pgp: Pgpkeys, out: Path) -> int:
             print(f"skip {key.fpr}: {e}")
             continue
         drafts.append(Draft(handles[key.fpr], key, data))
-    (out / "people").mkdir(parents=True)
-    for d in drafts:
-        (out / "people" / f"{d.handle}.json").write_bytes(d.data)
+    _write_new(out, {f"people/{d.handle}.json": d.data for d in drafts})
     roles = [k for k in keys if is_role_key(k)]
     print(
         f"keys {len(keys)}, live {len(keys) - sum(k.validity in NOT_LIVE for k in keys)}, "
@@ -1025,13 +1023,37 @@ def drafts(pgp: Pgpkeys, root: Path, certifier: str, out: Path) -> int:
         data = (json.dumps(draft, indent=2, ensure_ascii=False) + "\n").encode()
         vouch.parse_record(rel, data)
         written[rel] = data
-    for rel, data in written.items():
-        path = out / rel
-        path.parent.mkdir(parents=True)
-        path.write_bytes(data)
+    if written:
+        _write_new(out, written)
+    for rel in written:
         print(f"draft {rel}")
     print(f"certified by {by}: {len(written)} drafts")
     return len(written)
+
+
+def _write_new(out: Path, files: Mapping[str, bytes]) -> None:
+    """Write ``files``, relative path to contents, as the new directory ``out``.
+
+    They are written to a directory beside ``out`` that is then renamed to
+    it, so a failed write leaves no ``out`` to refuse the retry.
+
+    Raises:
+        VouchError: A directory or file cannot be written, or ``out`` now exists.
+    """
+    tmp = out.parent / f".{out.name}.{os.getpid()}"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp.mkdir()
+        try:
+            for rel, data in files.items():
+                (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
+                (tmp / rel).write_bytes(data)
+            os.rename(tmp, out)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    except OSError as e:
+        raise VouchError(f"{out}: cannot write the drafts: {e}") from e
 
 
 @contextlib.contextmanager
