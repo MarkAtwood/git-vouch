@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
@@ -422,16 +423,39 @@ git -c user.signingKey="$HOME/.ssh/id_next" tag -s -m next bob-next
     assert 'Good "git" signature for bob with ED25519 key' in nxt.stderr
 
 
-def test_dst_caveat_on_the_page_holds(guide: Guide) -> None:
-    """The page says OpenSSH 9.6 fails a tag signed under an hour before its key
-    was retired while on daylight saving time; every step here is seconds apart."""
+def test_tag_signed_before_retirement_verifies_under_dst(guide: Guide) -> None:
+    """The page says the export's extra hour lets a signature made just before
+    a key's retirement verify on daylight saving time; bob tagged bob-6.99
+    seconds before retiring its key. Without that hour, OpenSSH 9.6 fails it."""
+    assert all(r.proc.returncode == 0 for r in guide.ran)
+    assert "ending every key an hour after its retirement" in DOC.read_text()
+    good = 'Good "git" signature for bob with ED25519 key'
+    dst = _bob(guide, "git verify-tag bob-6.99", tz=DST)
+    assert dst.returncode == 0, dst.stderr
+    assert good in dst.stderr
+
     version = subprocess.run(["ssh", "-V"], capture_output=True, text=True).stderr
     if not version.startswith("OpenSSH_9.6"):
-        pytest.skip(f"the caveat is about OpenSSH 9.6, not {version.strip()}")
-    assert all(r.proc.returncode == 0 for r in guide.ran)
-    assert "TZ=UTC" in DOC.read_text()
-    assert _bob(guide, "git verify-tag bob-6.99").returncode == 0
-    dst = _bob(guide, "git verify-tag bob-6.99", tz=DST)
+        pytest.skip(f"the DST bug is in OpenSSH 9.6, not {version.strip()}")
+    # The export as it would be without the hour: every valid-before an hour
+    # earlier, at the retirement second itself.
+    exported = Path(_bob(guide, "git config gpg.ssh.allowedSignersFile").stdout.strip())
+    unslacked = guide.world / "allowed_signers.unslacked"
+    unslacked.write_text(
+        re.sub(
+            r'valid-before="(\d{14})Z"',
+            lambda m: 'valid-before="{:%Y%m%d%H%M%S}Z"'.format(
+                datetime.strptime(m.group(1), "%Y%m%d%H%M%S") - timedelta(hours=1)
+            ),
+            exported.read_text(),
+        )
+    )
+    assert unslacked.read_text() != exported.read_text()
+    verify = f"git -c gpg.ssh.allowedSignersFile={unslacked} verify-tag bob-6.99"
+    utc = _bob(guide, verify)
+    assert utc.returncode == 0, utc.stderr
+    assert good in utc.stderr
+    dst = _bob(guide, verify, tz=DST)
     assert dst.returncode != 0
     assert "No principal matched" in dst.stderr
 
