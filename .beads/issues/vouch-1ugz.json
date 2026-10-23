@@ -1,0 +1,17 @@
+{
+  "id": "vouch-1ugz",
+  "title": "migrate: pre-fill auth-capable primary keys",
+  "description": "parse_listing only reads auth capability from sub lines. 12 live pgpkeys keys (af88128) have auth on the primary itself on an accepted type; 6 of them have no reusable auth subkey, so their drafts get no SSH key and the auth-key continuity path misses them. Treat a live auth-capable primary like a subkey.",
+  "acceptance_criteria": "A real gpg key with an ed25519 sign,auth primary is pre-filled with that primary's key, checked against gpg's packet dump",
+  "status": "closed",
+  "priority": 2,
+  "issue_type": "bug",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-23T01:48:34.6470593Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-23T01:56:32.181638999Z",
+  "started_at": "2026-10-23T01:48:38.949143713Z",
+  "closed_at": "2026-10-23T01:56:32.181638999Z",
+  "close_reason": "Closed"
+}
