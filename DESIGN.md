@@ -1,9 +1,6 @@
 # git-vouch: Kernel Identity Without GPG
 
-**Status:** revised design, 2026-10-22. Replaces the signing format, git
-patch series and multi-project federation in the March 2026 documents
-(`kernel-did.md`, `git-did-design.md`, `lf-did-architecture.md`), which
-are kept for history. `git-vouch`, `git-vouch-migrate` and
+**Status:** 2026-10-22. `git-vouch`, `git-vouch-migrate` and
 `git-vouch-attest` are implemented; `git vouch keys`, `git vouch query`,
 the patatt fork and `git-vouch-trqp` are not yet.
 
@@ -688,21 +685,6 @@ window length and the late cutoff.
   encoding is checked against the CCG test vectors, never against
   `git-vouch`'s own output.
 
-## Dropped from the March design
-
-| Dropped | Why |
-|---|---|
-| Custom signature payload on git objects | git's SSH signatures already bind the object. The payload's "nonce" copied the object id, and it claimed SHA-256 object ids, which kernel git does not use. |
-| `refs/signatures/` and a native DID signing method in git, as a prerequisite | Version 1 must work on today's git. Upstreaming stays the goal; see Upstream path. |
-| JCS canonicalisation | Signatures cover the file's exact bytes, which allows arbitrary JSON-LD metadata without canonicalising it. |
-| minisign output | `ssh-keygen -Y sign -n file` signs files; people who verify with git-vouch's keys already have `ssh-keygen`. |
-| `tier` field inside the person's own file | The person signs their own file, so they could promote themselves. The tier now lives in a separate record signed by the approver. |
-| Minimum endorsement counts per tier | The approver decides; endorsements are evidence. |
-| Delegated signing scopes | Not needed for v1. Tier files give the kernel's real policy: Linus pulls from maintainers, releases come from anchors. |
-| LF-wide registry federation and cross-project lookups | Kernel first. |
-| `cryptography` and other dependencies | `ssh-keygen` does all crypto. |
-| A dual GPG/SSH transition | One flag day; see Flag day. |
-
 ## Upstream path
 
 Version 1 needs nothing from git beyond SSH signing. The formats are
@@ -716,9 +698,8 @@ a time, with no change to the registry:
    instead of an `allowed_signers` file that `git vouch export` generated.
    This needs git to apply the tier rules, so it lands only after the
    rules have proven stable in `git-vouch`.
-3. **Native DID signing** (`gpg.format=did`), as in the March
-   `git-did-design.md`, if the community wants signatures that name a
-   DID rather than an SSH key.
+3. **Native DID signing** (`gpg.format=did`), if the community wants
+   signatures that name a DID rather than an SSH key.
 
 Each step is proposed only after the previous one has users. Until then
 `git-vouch` is the reference implementation, and its Python is the
@@ -736,6 +717,26 @@ specification for anyone reviewing an upstream patch.
   through the optional `git-vouch-trqp` bridge.
 - **Sigstore / gitsign.** Ties identity to an OIDC provider and depends
   on online services; the kernel wants keys people hold.
+- **A custom signature payload on git objects.** git's SSH signatures
+  already bind the object.
+- **`refs/signatures/` or a native DID signing method in git, as a
+  prerequisite.** Version 1 must work on today's git; see Upstream path.
+- **JCS canonicalisation.** Signatures cover the file's exact bytes,
+  which allows arbitrary JSON-LD metadata without canonicalising it.
+- **minisign output.** `ssh-keygen -Y sign -n file` signs files, and
+  everyone who verifies already has `ssh-keygen`.
+- **A `tier` field in the person's own file.** The person signs their
+  own file, so they could promote themselves. The tier is a separate
+  record signed by the approver.
+- **Minimum endorsement counts per tier.** The approver decides;
+  endorsements are evidence.
+- **Delegated signing scopes.** Tier files give the kernel's real
+  policy: Linus pulls from maintainers, releases come from anchors.
+- **LF-wide registry federation and cross-project lookups.** Kernel
+  first.
+- **`cryptography` or other dependencies.** `ssh-keygen` does all
+  crypto.
+- **A dual GPG/SSH transition.** One flag day; see Flag day.
 
 ## Open questions
 
