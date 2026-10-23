@@ -15,17 +15,23 @@ https://github.com/trustoverip/dtgwg-trust-tasks-tf at commit
 - ``specs/trust-task-error/0.5/payload.schema.json``: the error payload,
   the version trust-tasks-rs 0.32.1 (verify-trust's) emits.
 
-The schema oracle needs ``jsonschema`` and ``referencing`` (test-only; both
-support 3.9). A missing oracle fails the run rather than skipping it, so
-the gates are::
+The schema oracle needs ``jsonschema`` and ``referencing``, and checks
+``format`` with ``rfc3339-validator`` (date-time) and ``rfc3986-validator``
+(uri) (test-only; all support 3.9). A missing oracle fails the run rather
+than skipping it, so the gates are::
 
     python3 -m pytest -q tests/trqp
     uv run --python 3.9 --with pytest --with jsonschema --with referencing \
+        --with rfc3339-validator --with rfc3986-validator \
         python -m pytest -q tests/trqp
+
+Every document ``Bridge.post`` and ``Bridge.announce`` return has passed
+the schema oracle for its type.
 """
 
 from __future__ import annotations
 
+import functools
 import http.client
 import json
 import os
@@ -34,14 +40,26 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import IO, NamedTuple, Union
-from urllib.parse import urljoin
+from typing import IO, NamedTuple, Optional, Union
+from urllib.parse import urljoin, urlsplit
 
 import pytest
 
 BRIDGE = Path(__file__).resolve().parent.parent.parent / "git-vouch-trqp"
 SCHEMAS = Path(__file__).resolve().parent / "schemas" / "specs"
 DID = "did:web:registry.example"
+REPLY_KINDS = {
+    "https://trusttasks.org/spec/registry/authorization/0.1#response": "response",
+    "https://trusttasks.org/spec/trust-task-error/0.5": "error",
+}
+# Runs the bridge at argv[1] with QUERY_TIMEOUT set to argv[2] seconds.
+LAUNCH = """import pathlib, sys, types
+path, timeout, *argv = sys.argv[1:]
+bridge = types.ModuleType("bridge")
+exec(compile(pathlib.Path(path).read_text(), path, "exec"), bridge.__dict__)
+bridge.QUERY_TIMEOUT = int(timeout)
+sys.exit(bridge.main(argv))
+"""
 
 Checker = Callable[[dict, str], None]
 
@@ -50,13 +68,14 @@ class Bridge(NamedTuple):
     """A running git-vouch-trqp serve."""
 
     port: int
+    host: str = "127.0.0.1"
 
     def call(
         self, body: Union[dict, bytes], method: str = "POST", path: str = "/trust-tasks"
     ) -> tuple[int, str, bytes]:
         """Send ``body`` and return the status, Content-Type and body of the answer."""
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=60)
         try:
             conn.request(method, path, data, {"Content-Type": "application/json"})
             resp = conn.getresponse()
@@ -70,7 +89,7 @@ class Bridge(NamedTuple):
         Sending no body keeps the server's unread input empty, so its close
         is a clean FIN rather than a reset that could lose the reply.
         """
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=60)
         try:
             conn.putrequest("POST", "/trust-tasks")
             conn.putheader("Content-Length", length)
@@ -78,6 +97,7 @@ class Bridge(NamedTuple):
             resp = conn.getresponse()
             assert resp.getheader("Content-Type") == "application/json"
             doc: dict = json.loads(resp.read())
+            check_reply(doc)
             return resp.status, doc
         finally:
             conn.close()
@@ -87,7 +107,14 @@ class Bridge(NamedTuple):
         status, content_type, data = self.call(body)
         assert content_type == "application/json", (status, data[:200])
         doc: dict = json.loads(data)
+        check_reply(doc)
         return status, doc
+
+
+def check_reply(doc: dict) -> None:
+    """Check a reply document against the schema for its type."""
+    assert doc.get("type") in REPLY_KINDS, doc
+    schema_checker()(doc, REPLY_KINDS[doc["type"]])
 
 
 @pytest.fixture
@@ -100,22 +127,31 @@ def serve(
     tree's git-vouch. Unless ``stamp`` is false, the directory is made a
     git repository if it is not one (no commit, so check still reads it as
     a plain tree) and given the sync stamp ``git vouch sync`` writes,
-    ``.git/vouch-fetched``, dated now.
+    ``.git/vouch-fetched``, dated now. A ``query_timeout`` replaces the
+    bridge's QUERY_TIMEOUT, in seconds.
     """
     repo = str(BRIDGE.parent)
     monkeypatch.setenv("PATH", repo + os.pathsep + os.environ["PATH"])
     procs: list[subprocess.Popen[str]] = []
     logs: list[IO[str]] = []
 
-    def start(registry: Path, *extra: str, stamp: bool = True) -> Bridge:
+    def start(
+        registry: Path,
+        *extra: str,
+        stamp: bool = True,
+        query_timeout: Optional[int] = None,
+    ) -> Bridge:
         if stamp:
             if not (registry / ".git").exists():
                 subprocess.run(["git", "init", "-q", str(registry)], check=True)
             (registry / ".git" / "vouch-fetched").touch()
         log = (tmp_path / f"bridge-{len(procs)}.log").open("w")
         logs.append(log)
+        command = [sys.executable, str(BRIDGE)]
+        if query_timeout is not None:
+            command = [sys.executable, "-c", LAUNCH, str(BRIDGE), str(query_timeout)]
         proc = subprocess.Popen(
-            [sys.executable, str(BRIDGE), "serve", "--did", DID, "--port", "0", *extra],
+            [*command, "serve", "--did", DID, "--port", "0", *extra],
             cwd=registry,
             stdout=subprocess.PIPE,
             stderr=log,
@@ -125,7 +161,9 @@ def serve(
         assert proc.stdout is not None
         line = proc.stdout.readline()
         assert line.startswith("git-vouch-trqp: serving "), line
-        return Bridge(int(line.rsplit(":", 1)[1].split("/")[0]))
+        url = urlsplit(line.split(" at ", 1)[1].strip())
+        assert url.hostname is not None and url.port is not None, line
+        return Bridge(url.port, url.hostname)
 
     yield start
     for proc in procs:
@@ -156,14 +194,16 @@ def _load(rel: str) -> dict:
     return data
 
 
-@pytest.fixture(scope="session")
-def check_schema() -> Checker:
+@functools.lru_cache(maxsize=None)
+def schema_checker() -> Checker:
     """Return ``check(doc, kind)``, which validates a Trust Task document.
 
     ``kind`` is "request", "response" or "error". The document must match
-    the framework envelope and the payload schema for its kind.
+    the framework envelope and the payload schema for its kind, formats
+    included.
     """
     jsonschema, referencing = schema_oracle()
+    formats = jsonschema.Draft202012Validator.FORMAT_CHECKER
     envelope = _load("_framework/0.5/trust-task.schema.json")
     payload = _load("registry/authorization/0.1/payload.schema.json")
     error = _load("trust-task-error/0.5/payload.schema.json")
@@ -186,12 +226,18 @@ def check_schema() -> Checker:
     }
 
     def check(doc: dict, kind: str) -> None:
-        jsonschema.Draft202012Validator(envelope).validate(doc)
+        jsonschema.Draft202012Validator(envelope, format_checker=formats).validate(doc)
         jsonschema.Draft202012Validator(
-            {"$ref": ids[kind]}, registry=registry
+            {"$ref": ids[kind]}, registry=registry, format_checker=formats
         ).validate(doc["payload"])
 
     return check
+
+
+@pytest.fixture(scope="session")
+def check_schema() -> Checker:
+    """Return the schema oracle's ``check(doc, kind)`` (see ``schema_checker``)."""
+    return schema_checker()
 
 
 @pytest.fixture(scope="session")

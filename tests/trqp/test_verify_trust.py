@@ -321,7 +321,7 @@ def test_forged_signer_did_is_refused(
     before it asks the bridge about that DID.
     """
     signer = did(keys("alice"))
-    assert authorized(bridge, request(signer)) is True
+    assert authorized(bridge, request(signer))[0] is True
     report = verify_trust(signed_repo(tmp_path, keys("mallory"), signer), url(bridge))
     # verify-trust's "fingerprint" is the hex of the raw Ed25519 key that signed.
     raw = ssh_strings(base64.b64decode(keys("mallory").pubkey.split()[1]))[1]
@@ -344,7 +344,7 @@ def test_only_plain_ed25519_passes_openvtc_169(
     When OpenVTC #169 is fixed this must become trusted.
     """
     key, signer = getattr(extra, kind)
-    assert authorized(bridge, request(signer)) is True
+    assert authorized(bridge, request(signer))[0] is True
     report = verify_trust(signed_repo(tmp_path, key, signer), url(bridge))
     assert report == Report(
         1, "malformed", f"unsupported signature algorithm: {algorithm}"

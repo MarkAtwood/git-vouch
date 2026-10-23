@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import json
 import shutil
+import socket
 import subprocess
 import sys
 import time as clock
@@ -71,8 +72,11 @@ def bridge(reg: Registry, serve: Callable[[Path], Bridge]) -> Bridge:  # noqa: F
     return serve(reg.root)
 
 
-def authorized(bridge: Bridge, req: dict) -> bool:
-    """Return the answer's ``authorized`` after checking the reply's framing."""
+def authorized(bridge: Bridge, req: dict) -> tuple[bool, dict]:
+    """Return the answer's ``authorized`` and payload after checking the reply's framing.
+
+    ``Bridge.post`` has checked the reply against the schemas.
+    """
     status, doc = bridge.post(req)
     assert status == 200, doc
     assert doc["type"] == RESPONSE_TYPE
@@ -85,11 +89,14 @@ def authorized(bridge: Bridge, req: dict) -> bool:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     assert abs((now - evaluated).total_seconds()) < 120
     result: bool = answer["authorized"]
-    return result
+    return result, answer
 
 
 def error(bridge: Bridge, body: dict | bytes) -> tuple[int, dict]:
-    """POST ``body`` and return the status and payload of the trust-task-error reply."""
+    """POST ``body`` and return the status and payload of the trust-task-error reply.
+
+    ``Bridge.post`` has checked the reply against the schemas.
+    """
     status, doc = bridge.post(body)
     assert doc["type"] == ERROR_TYPE, doc
     assert doc["issuer"] == DID
@@ -115,7 +122,7 @@ def test_who_is_authorized(
     name: str,
     expected: bool,
 ) -> None:
-    assert authorized(bridge, request(did(keys(name)))) is expected
+    assert authorized(bridge, request(did(keys(name))))[0] is expected
 
 
 @pytest.mark.parametrize(
@@ -135,10 +142,8 @@ def test_context_time(
     time: str,
     expected: bool,
 ) -> None:
-    req = request(did(keys("gregkh-old")), time=time)
-    assert authorized(bridge, req) is expected
-    _, doc = bridge.post(req)
-    assert doc["payload"]["time_requested"] == time
+    got, answer = authorized(bridge, request(did(keys("gregkh-old")), time=time))
+    assert (got, answer["time_requested"]) == (expected, time)
 
 
 def test_bot_era_signature_of_since_promoted_handle(
@@ -148,11 +153,12 @@ def test_bot_era_signature_of_since_promoted_handle(
 ) -> None:
     """bot was automation until T1 and is a human contributor since (test_query)."""
     bridge = serve(promoted_bot(tmp_path, keys).root)
-    req = request(did(keys("bot")), time=T0)
-    assert authorized(bridge, req) is False
-    _, doc = bridge.post(req)
-    assert doc["payload"]["message"] == "automation identities do not sign commits"
-    assert authorized(bridge, request(did(keys("bot")))) is True
+    got, answer = authorized(bridge, request(did(keys("bot")), time=T0))
+    assert (got, answer["message"]) == (
+        False,
+        "automation identities do not sign commits",
+    )
+    assert authorized(bridge, request(did(keys("bot"))))[0] is True
 
 
 def test_endorsed_after_time_is_not_authorized_then(
@@ -168,8 +174,8 @@ def test_endorsed_after_time_is_not_authorized_then(
     r.endorse("carol", keys("carol"), "gregkh", keys("gregkh"))
     r.commit()
     bridge = serve(r.root)
-    assert authorized(bridge, request(did(keys("carol")), time=T0)) is False
-    assert authorized(bridge, request(did(keys("carol")))) is True
+    assert authorized(bridge, request(did(keys("carol")), time=T0))[0] is False
+    assert authorized(bridge, request(did(keys("carol"))))[0] is True
 
 
 @pytest.mark.parametrize("time", ["0999-06-01T00:00:00Z", "0001-01-01T00:00:00Z"])
@@ -179,10 +185,8 @@ def test_time_before_any_key(
     time: str,
 ) -> None:
     """A valid early time is answered (no key existed then), not refused as an outage."""
-    req = request(did(keys("torvalds")), time=time)
-    assert authorized(bridge, req) is False
-    _, doc = bridge.post(req)
-    assert doc["payload"]["time_requested"] == time
+    got, answer = authorized(bridge, request(did(keys("torvalds")), time=time))
+    assert (got, answer["time_requested"]) == (False, time)
 
 
 @pytest.mark.parametrize(
@@ -195,10 +199,9 @@ def test_blank_time_means_now(
     expected: bool,
 ) -> None:
     """registry.schema.json QueryContext.time: "Blank/absent uses current server time"."""
-    req = request(did(keys(name)), time="")
-    assert authorized(bridge, req) is expected
-    _, doc = bridge.post(req)
-    assert "time_requested" not in doc["payload"]
+    got, answer = authorized(bridge, request(did(keys(name)), time=""))
+    assert got is expected
+    assert "time_requested" not in answer
 
 
 def test_no_time_requested_without_context(
@@ -222,7 +225,7 @@ def test_other_authority_or_action_is_denied(
     keys: Callable[[str], Key],  # noqa: F811
     change: dict[str, str],
 ) -> None:
-    assert authorized(bridge, request(did(keys("torvalds")), **change)) is False
+    assert authorized(bridge, request(did(keys("torvalds")), **change))[0] is False
 
 
 @pytest.mark.parametrize(
@@ -240,7 +243,7 @@ def test_non_did_key_entity_is_denied(
     reg: Registry,  # noqa: F811
     entity: str,
 ) -> None:
-    assert authorized(bridge, request(entity)) is False
+    assert authorized(bridge, request(entity))[0] is False
     assert not (reg.root / "PWNED").exists()
 
 
@@ -297,7 +300,7 @@ def test_valid_resource_is_echoed(
     keys: Callable[[str], Key],  # noqa: F811
     resource: str,
 ) -> None:
-    assert authorized(bridge, request(did(keys("alice")), resource=resource)) is True
+    assert authorized(bridge, request(did(keys("alice")), resource=resource))[0] is True
 
 
 @pytest.mark.parametrize("resource", INVALID_RESOURCES)
@@ -382,7 +385,17 @@ def test_refused_documents(
     assert (got_status, payload["code"], payload["retryable"]) == (status, code, False)
 
 
-@pytest.mark.parametrize("length", [str(64 * 1024 + 1), "\u00b2", "-1", "1e3"])
+@pytest.mark.parametrize(
+    "length",
+    [
+        str(64 * 1024 + 1),
+        "\u00b2",
+        "-1",
+        "1e3",
+        "1" * 5000,  # past int()'s 4300-digit limit
+        "0" * 5000,
+    ],
+)
 def test_bad_content_length_is_malformed(bridge: Bridge, length: str) -> None:
     status, doc = bridge.announce(length)
     assert (status, doc["type"], doc["payload"]["code"]) == (
@@ -427,7 +440,7 @@ def test_ext_and_locator_are_accepted(
     req = request(did(keys("alice")))
     req["payload"]["context"] = {"locator": "anything"}
     req["payload"]["ext"] = {"org.example": {"x": 1}}
-    assert authorized(bridge, req) is True
+    assert authorized(bridge, req)[0] is True
 
 
 def test_error_echoes_request(bridge: Bridge) -> None:
@@ -465,10 +478,23 @@ def test_registry_check_failure_is_unavailable(
     reg: Registry,  # noqa: F811
     serve: Callable[[Path], Bridge],
     keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
 ) -> None:
+    """The client gets a generic 503; the log says why, on one escaped line."""
     (reg.root / "people" / "zed.json").write_text('{"handle": "zed"')
     status, payload = error(serve(reg.root), request(did(keys("torvalds"))))
     assert (status, payload["code"], payload["retryable"]) == (503, "unavailable", True)
+    assert "zed" not in payload["message"]
+    logged = [
+        line
+        for line in (tmp_path / "bridge-0.log").read_text().splitlines()
+        if line.startswith("git-vouch-trqp: git vouch query exited ")
+    ]
+    # git vouch query names no file; its error is what there is to log.
+    assert logged == [
+        "git-vouch-trqp: git vouch query exited 1: 'git-vouch: error: "
+        "the registry check failed; run git vouch check .'"
+    ]
 
 
 def test_missing_git_vouch_is_unavailable(
@@ -481,7 +507,7 @@ def test_missing_git_vouch_is_unavailable(
     # the bridge already runs; a fresh one without git-vouch on PATH is what matters
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     bare = serve(reg.root)
-    assert authorized(bridge, request(did(keys("torvalds")))) is True
+    assert authorized(bridge, request(did(keys("torvalds"))))[0] is True
     status, payload = error(bare, request(did(keys("torvalds"))))
     assert (status, payload["code"], payload["retryable"]) == (503, "unavailable", True)
 
@@ -552,6 +578,119 @@ def test_concurrent_queries_are_capped(
             )
 
 
+def test_failure_log_is_bounded_and_escaped(
+    reg: Registry,  # noqa: F811
+    serve: Callable[[Path], Bridge],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only git-vouch's last stderr line is logged, escaped, at most 300 characters."""
+    stub_git(
+        tmp_path,
+        monkeypatch,
+        "echo early >&2; printf 'x\\033[2J%05000d\\n' 0 >&2; exit 3",
+    )
+    status, payload = error(serve(reg.root), with_doc())
+    assert (status, payload["code"]) == (503, "unavailable")
+    lines = (tmp_path / "bridge-0.log").read_text().splitlines()
+    logged = [line for line in lines if "git vouch query exited 3: " in line]
+    assert len(logged) == 1, lines
+    assert logged[0].startswith(
+        "git-vouch-trqp: git vouch query exited 3: 'x\\x1b[2J000"
+    )
+    assert "\033" not in logged[0] and "early" not in logged[0]
+    assert len(logged[0]) == len("git-vouch-trqp: git vouch query exited 3: ") + 300
+
+
+def test_query_timeout_kills_the_whole_query(
+    reg: Registry,  # noqa: F811
+    serve: Callable[..., Bridge],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out query's children die with it before its slot is freed.
+
+    git runs git-vouch as a child, so killing git alone left the registry
+    check running. Here the stub git's background sleep stands in for it.
+    """
+    pid_file = tmp_path / "child.pid"
+    stub_git(tmp_path, monkeypatch, f'sleep 60 & echo $! > "{pid_file}"; wait')
+    bridge = serve(reg.root, query_timeout=2)
+    started = clock.monotonic()
+    status, payload = error(bridge, with_doc())
+    assert (status, payload["code"], payload["retryable"]) == (503, "unavailable", True)
+    assert clock.monotonic() - started < 30
+    child = int(pid_file.read_text())
+    deadline = clock.monotonic() + 5  # init reaps the killed child
+    while clock.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        clock.sleep(0.05)
+    else:
+        os.kill(child, 9)
+        pytest.fail("the timed-out query's child survived")
+    log = (tmp_path / "bridge-0.log").read_text()
+    assert "git-vouch-trqp: git vouch timed out after 2s" in log
+
+
+def test_serve_on_a_port_in_use_fails_cleanly() -> None:
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = str(taken.getsockname()[1])
+        proc = subprocess.run(
+            [sys.executable, str(BRIDGE), "serve", "--did", DID, "--port", port],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    assert proc.returncode == 1
+    assert proc.stderr.startswith(
+        f"git-vouch-trqp: cannot listen on 127.0.0.1:{port}: "
+    )
+    assert "Traceback" not in proc.stderr
+
+
+@pytest.mark.parametrize(("port", "status"), [("70000", 2), ("-1", 2)])
+def test_serve_wants_a_port(port: str, status: int) -> None:
+    proc = subprocess.run(
+        [sys.executable, str(BRIDGE), "serve", "--did", DID, "--port", port],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == status
+    assert "--port" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_serve_binds_ipv6(
+    reg: Registry,  # noqa: F811
+    serve: Callable[..., Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    v6 = serve(reg.root, "--bind", "::1")
+    assert v6.host == "::1"
+    assert authorized(v6, request(did(keys("torvalds"))))[0] is True
+
+
+@pytest.mark.parametrize(
+    ("bind", "host"), [("", "0.0.0.0"), ("localhost", "127.0.0.1")]
+)
+def test_serve_binds_names_and_all_on_ipv4(
+    reg: Registry,  # noqa: F811
+    serve: Callable[..., Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+    bind: str,
+    host: str,
+) -> None:
+    """'' and 'localhost' listen on IPv4 as before, where a proxy expects them."""
+    bridge = serve(reg.root, "--bind", bind)
+    assert bridge.host == host
+    assert authorized(bridge, request(did(keys("torvalds"))))[0] is True
+
+
 @pytest.mark.parametrize(
     "bad", ["did:key:z6Mk", "https://registry.example", "did:web:"]
 )
@@ -566,8 +705,8 @@ def test_serve_wants_a_did_web(bad: str, tmp_path: Path) -> None:
     assert "did:web" in proc.stderr
 
 
-# Schema conformance: every request the tests send, and every reply kind,
-# against the published schemas.
+# Schema conformance of requests, and a guard on the oracle itself. Every
+# reply is checked by Bridge.post and Bridge.announce.
 
 
 def test_verify_trust_example_request_is_valid(check_schema: Checker) -> None:
@@ -599,63 +738,19 @@ def test_spec_invalid_payloads_fail_the_schema(
 
 
 @pytest.mark.parametrize(
-    ("name", "time"),
+    "change",
     [
-        ("torvalds", None),
-        ("dave", None),
-        ("gregkh-old", BEFORE),
-        ("mallory", AFTER),
-        ("torvalds", ""),
-        ("torvalds", "0999-06-01T00:00:00Z"),
+        {"issuedAt": "not a date"},  # needs rfc3339-validator
+        {"issuedAt": "2026-10-22 12:00:00"},
+        {"type": "not a uri"},  # needs rfc3986-validator
     ],
 )
-def test_responses_match_schema(
-    bridge: Bridge,
-    check_schema: Checker,
-    keys: Callable[[str], Key],  # noqa: F811
-    name: str,
-    time: Optional[str],
-) -> None:
-    status, doc = bridge.post(request(did(keys(name)), time=time))
-    assert status == 200
-    check_schema(doc, "response")
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        b"not json",
-        with_doc(id=None),
-        with_doc(recipient="did:web:elsewhere.example"),
-        with_doc(type="https://trusttasks.org/spec/registry/recognition/0.1"),
-        with_doc(
-            issuer="did:web:client.example",
-            expiresAt="2026-01-01T00:00:00Z",
-            issuedAt="2025-12-01T00:00:00Z",
-        ),
-        with_doc(proof={"type": "DataIntegrityProof"}),
-    ],
-)
-def test_errors_match_schema(
-    bridge: Bridge, check_schema: Checker, body: dict | bytes
-) -> None:
-    _, doc = bridge.post(body)
-    check_schema(doc, "error")
-
-
-def test_oversized_matches_schema(bridge: Bridge, check_schema: Checker) -> None:
-    check_schema(bridge.announce(str(64 * 1024 + 1))[1], "error")
-
-
-def test_unavailable_matches_schema(
-    reg: Registry,  # noqa: F811
-    serve: Callable[[Path], Bridge],
-    check_schema: Checker,
-    keys: Callable[[str], Key],  # noqa: F811
-) -> None:
-    (reg.root / "people" / "zed.json").write_text('{"handle": "zed"')
-    _, doc = serve(reg.root).post(request(did(keys("torvalds"))))
-    check_schema(doc, "error")
+def test_oracle_checks_formats(check_schema: Checker, change: dict[str, str]) -> None:
+    """Guard the oracle: a missing format package fails here, not silently."""
+    jsonschema = schema_oracle()[0]
+    check_schema(with_doc(), "request")
+    with pytest.raises(jsonschema.ValidationError):
+        check_schema(with_doc(**change), "request")
 
 
 EXT = "org.kernel.git-vouch"
@@ -698,7 +793,7 @@ def test_stale_registry_is_refused(
     age_stamp(reg.root, hours)
     req = request(did(keys("torvalds")))
     if fresh:
-        assert authorized(bridge, req) is True
+        assert authorized(bridge, req)[0] is True
     else:
         assert_stale(bridge, req)
         assert stamp_time(reg.root) in error(bridge, req)[1]["message"]
