@@ -964,6 +964,14 @@ specification for anyone reviewing an upstream patch.
 - **A `tier` field in the person's own file.** The person signs their
   own file, so they could promote themselves. The tier is a separate
   record signed by the approver.
+- **Key references or forge-sourced keys in person files**
+  (`github:<user>`, or a URL to an SSH key or a GPG `.asc`). The registry
+  must answer from git alone, offline and reproducibly, and the person
+  file's signature must cover the key itself, not a pointer whose
+  content can change; a forge would become a trust root. A GPG `.asc`
+  URL adds nothing: `git-vouch` never runs `gpg`, continuity is checked
+  against pgpkeys at the freeze commit, and a newcomer's GPG key proves
+  nothing.
 - **Minimum endorsement counts per tier.** The approver decides;
   endorsements are evidence.
 - **Delegated signing scopes.** Tier files give the kernel's real

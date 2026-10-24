@@ -125,6 +125,11 @@ git push -q origin HEAD:register-carol
 Add your backup key with `git vouch add-key` in the same branch, as bob
 did.
 
+A forge's `.keys` URL, such as `https://github.com/<user>.keys`, is a
+handy place to copy your public key from: save your key's line as a
+`.pub` file and register that file, because the person file holds the
+key itself, never a link to it.
+
 ### How your branch is merged
 
 The registry maintainer merges your branch (here as `korg`):
