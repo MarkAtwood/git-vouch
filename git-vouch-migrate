@@ -76,10 +76,16 @@ NAME_ONLY_RE = re.compile(r"([^<>@]*?)\s*(?:\([^()]*\))?")
 # kernel.org remail and security lists: "Flippant Fireant <flippant-fireant@kernel.org>".
 ROLE_RE = re.compile(r"([A-Za-z]+) ([A-Za-z]+) <([a-z]+)-([a-z]+)@kernel\.org>")
 # Stands in for the key the holder adds, so a keyless draft can be checked;
-# 32 zero bytes, never written to a draft.
+# never written to a draft. RFC 8032 section 7.1 TEST 1's public key: a valid
+# point, since check refuses small-order ones such as 32 zero bytes.
 PLACEHOLDER_KEY = (
     "ssh-ed25519 "
-    + base64.b64encode(b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + bytes(32)).decode()
+    + base64.b64encode(
+        b"\0\0\0\x0bssh-ed25519\0\0\0\x20"
+        + bytes.fromhex(
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+        )
+    ).decode()
 )
 
 
