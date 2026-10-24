@@ -641,6 +641,16 @@ itself stays a CLI. Facts about `verify-trust` come from
 - **Freshness:** it syncs on a timer and refuses to answer, with an
   error that makes `verify-trust` fail closed, once 24 hours pass
   without a successful sync.
+- **Serving:** `--bind` takes an IPv4 address, a host name, `''` (all
+  IPv4 interfaces) or an IPv6 literal. Only an address containing `:`
+  listens on IPv6; a host name always binds IPv4, so `localhost` is
+  127.0.0.1. A failure to listen prints `git-vouch-trqp: cannot listen
+  on HOST:PORT: reason` and exits 1; a `--port` outside 0..65535 is a
+  usage error (exit 2). Each 503 `unavailable` for a failed or timed-out
+  query writes one line to the bridge's stderr (`git-vouch-trqp: git
+  vouch query exited N: <last stderr line, escaped, at most 300 chars>`
+  or `git-vouch-trqp: git vouch timed out after 30s`); the reply to the
+  client stays generic.
 - **Trust:** answers over HTTPS are unsigned, so they rest on the
   `https://` endpoint named in the DID document. Anyone can check an
   answer against the public registry.
@@ -754,7 +764,9 @@ the window length. The late cutoff is six months after the flag day.
   size cap (64 KiB); git-vouch's own terms are checked strictly for type and
   format, and all other terms are ignored; no registry value is ever put
   on a command line except as a single argument after `--`.
-- **Tests** use pytest only as a development dependency. Signatures are
+- **Tests** use only development dependencies: pytest, and as oracles
+  for the bridge and patatt tests jsonschema, referencing,
+  rfc3339-validator, rfc3986-validator and pynacl. Signatures are
   made and checked by real `ssh-keygen` on throwaway keys. did:key
   encoding is checked against the CCG test vectors, never against
   `git-vouch`'s own output.
