@@ -1,1 +1,2 @@
 {"id":"01a16a73-2496-7f3f-bc18-a9294678d4b7","issue_id":"vouch-mzkw.11","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T20:28:13.33500013Z"}
+{"id":"01a16c51-8d81-7a73-bef0-14e8da69db65","issue_id":"vouch-mzkw.11","event_type":"closed","actor":"agent","old_value":"","new_value":"b4 7195c01 (branch git-vouch, unpushed): misc/vouch-check.sh header matches docs/guide-*.md. tests/patatt 37/38 pass on 3.12 and 3.9; install-line sync test fails until Mark pushes b4 git-vouch.","created_at":"2026-10-24T05:10:46.401686085Z"}

@@ -3,13 +3,15 @@
   "title": "b4 fork: vouch-check.sh header matches the guides",
   "description": "Critic 2026-10-23: ~/PROJECT/b4 branch git-vouch misc/vouch-check.sh header shows only the patatt pip line, puts vouch: under b4.keyringsrc, and says the recheck setting is not in released b4. Bring it in line with docs/guide-*.md (install both forks in one pip command; patatt keyringsrc = vouch:; b4.attestation-recheck-hours = 0 is a fork setting). Commit on the b4 git-vouch branch; push needs Mark.",
   "acceptance_criteria": "Header matches the guides; tests/patatt doc test still passes.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T20:28:13.32689062Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T20:28:13.32689062Z",
+  "updated_at": "2026-10-24T05:10:46.085100328Z",
+  "closed_at": "2026-10-24T05:10:46.085100328Z",
+  "close_reason": "b4 7195c01 (branch git-vouch, unpushed): misc/vouch-check.sh header matches docs/guide-*.md. tests/patatt 37/38 pass on 3.12 and 3.9; install-line sync test fails until Mark pushes b4 git-vouch.",
   "dependencies": [
     {
       "issue_id": "vouch-mzkw.11",
