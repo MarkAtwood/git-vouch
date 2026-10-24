@@ -1,1 +1,2 @@
 {"id":"01a16a01-3256-7832-a755-8bfea3419a45","issue_id":"vouch-tq92.7","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T18:23:45.750538847Z"}
+{"id":"01a16c96-c05e-7b61-a140-74ecd1c2bc4c","issue_id":"vouch-tq92.7","event_type":"closed","actor":"agent","old_value":"","new_value":"Done in 8a2bfcc; docs gate passed at 66c3cc8 apart from the b4 push","created_at":"2026-10-24T06:26:21.406746506Z"}
