@@ -176,13 +176,19 @@ off under daylight saving time, which would reject signatures made in
 the last hour before an end. The hour adds no risk: the signer sets the
 signing time and could backdate by any amount anyway. It also means a
 signature in the same second as a retirement is not a special case.
+Each `valid-before` is the earlier of the key's `retired` and its tier's
+end, plus the hour, capped at 9999-12-31T23:59:59Z, so a commit dated
+near the end of time that ends a tier still exports.
 
 `git vouch check` judges a record's date the same way, without the hour:
 it accepts a record dated from its key's `added` second through its
 `retired` second, both included, as OpenSSH treats `valid-after` and
 `valid-before`. A record dated in its key's retirement second passes;
-one dated a second later does not. `git vouch query` and `git vouch
-keys` still treat the retirement second as outside the key's validity.
+one dated a second later does not. `git vouch query --at` and `git vouch
+keys` judge validity the same way, in whole seconds: a key is valid from
+its `added` second through its `retired` second, both included. So
+`keys` run in a key's retirement second still lists that key, and so
+does the TRQP bridge for a time in that second.
 
 ## The registry
 
@@ -216,6 +222,12 @@ bytes on disk needs neither. Editing a record means re-signing it, which
 every change needs anyway. Using a separate namespace per kind stops a
 signature made for one kind of record from being accepted as another.
 
+**Record dates** (a key's `added` and `retired`, and every record's
+`date`) are UTC times like `2026-11-05T00:00:00Z` in the years 1970 to
+9998. `check` reports any other year as a problem in that record. That
+keeps the export from computing a `valid-before` past the range of a
+datetime, and gives OpenSSH four-digit years.
+
 **Git history is part of the registry.** Order and removal come from the
 commits rather than from a field anyone could write: which commit first
 listed a key, which commit deleted a tier record and its committer date,
@@ -227,10 +239,12 @@ approver. Either signer could backdate them; review is the check.
 **Merging needs one person.** A registry maintainer merges a change once
 `git vouch check` passes. Endorsements, tier records and revocations are
 signed by the key that makes them, so the merger cannot forge one for a
-key they do not control. Registry maintainers merge with `git merge
---no-ff`, so every commit on the main line's first-parent chain carries
-the maintainer's committer date, not the submitter's. Three things rest
-on review instead, as accepted risks:
+key they do not control. A replayed or merged-back tier record that
+undoes a demotion is caught by `check` (see Tier record), so it is not a
+review-gated risk. Registry maintainers merge with `git merge --no-ff`,
+so every commit on the main line's first-parent chain carries the
+maintainer's committer date, not the submitter's. Three things rest on
+review instead, as accepted risks:
 
 - **`anchors.json`** (see Anchors).
 - **A person file change not signed by any key from the previous
@@ -239,7 +253,9 @@ on review instead, as accepted risks:
   person, and `check` accepts them. The only trace is `check`'s WARNING
   on that version, and git history.
 - **Deleting a tier record**, which is an unsigned git change, so any
-  merger can remove anyone's tier (see Tier record).
+  merger can remove anyone's tier (see Tier record). Restoring an older
+  lower-tier record over a promotion is the same kind of unsigned change
+  and rests on review too.
 
 The remaining host attack is to withhold updates, such as a revocation.
 Two git behaviours address that:
@@ -287,6 +303,17 @@ Two git behaviours address that:
   with that `valid-before`. A replacement record that does not verify
   ends nothing: the tier before it stands until a valid record replaces
   it or the file is deleted.
+- **Restoring:** a tier record cannot come back, by a commit or by a
+  merge (including `--no-ff` resolved to the old side, or `-s ours`),
+  over a demotion committed after it. If a version that demotes it
+  (lower tier, or across the automation line) and did not fail
+  verification lies between an earlier copy of the same bytes and the
+  commit being judged, `check` fails ("restores an earlier record ...
+  needs a new approval"). Deleting the demotion first changes nothing.
+  The signature covers the exact bytes, so only the approver can make a
+  newer record. Bringing back a same-tier or lower-tier record, or one
+  over a record that did not verify, is not flagged: like a deletion it
+  only takes authority away, and review is the gate.
 
 ### Person file
 
@@ -431,10 +458,36 @@ Two git behaviours address that:
 Signed by the key itself, by another of the subject's current keys, or by
 any anchor. A revocation signed by a key that is later revoked still
 counts if it was committed before that key's own revocation. Revocations
-are read from history, so once committed one holds even if its file is
-later deleted. A revocation never fails `check`: records it voids are
+are read from history, so a revocation holds once its commit is
+reachable from HEAD, even if its file is later deleted or a merge
+dropped it (`merge -s ours`, or a conflict resolution that deletes the
+file). A revocation never fails `check`: records it voids are
 reported, not fatal. `sync` writes the revocation file even when `check`
 fails on something else, so a revocation always spreads.
+
+**History git-vouch cannot read.** A past version of a record path that
+`git-vouch` cannot read (a directory, symlink or submodule, or over
+64 KiB) is treated like a version that does not parse. For each such
+commit, including a merge that left it, `check` warns `<path>: not a
+regular file of at most 65536 bytes (ignored, at <commit>)` and carries
+on. This never blocks `check`, `export` or `sync`, so revocations and
+tier removals keep spreading. Files in the working tree are still
+reported as problems. A commit whose committer date is beyond what
+`git-vouch` can represent (year 10000 or later) is read as
+9999-12-31T23:59:59Z. Where `check` uses that date it reports the
+problem `commit <id>: committer date out of range`, so `allowed_signers`
+is not exported, but the history is still read and `sync` still writes
+the revocation file.
+
+Nothing has to be repaired for an unreadable version. It stays in
+history, `check` warns about it on every run naming the commit, and
+history is not rewritten (`sync` refuses rewinds). Registry maintainers
+refuse such commits in review, and the warning on the branch is the
+signal. If a registry ever wants the warning gone, the only route is a
+coordinated history rewrite after which every user reruns `git vouch
+setup`; that is not recommended. A commit dated past year 9999 is
+different: it blocks `allowed_signers`, and repairing it needs that same
+rewrite, so maintainers must refuse such commits.
 
 Removing someone without suspecting their key is different: their tier
 record is deleted in a reviewed merge, and the export gives
@@ -472,6 +525,9 @@ of the registry repository is therefore as sensitive as an anchor key.
 
 `DIR` defaults to the synced registry copy once `setup` has run; pass
 `.` to check or export a checkout.
+`check`, `query`, `keys` and `status` also work from a git worktree: the
+fetch stamp `vouch-fetched` lives in the repository's common git dir
+(`git rev-parse --git-common-dir`), which all its worktrees share.
 `register`, `endorse`, `approve` and `revoke` write files for a registry
 merge request; they never push. `--help` is the documentation; there is
 no man page.
@@ -495,7 +551,7 @@ Supported key types:
 | `sk-ssh-ed25519@openssh.com` | `ed25519-pub` (0xed); the FIDO wrapping is a signing detail that `ssh-keygen` handles |
 | `ecdsa-sha2-nistp256` | `p256-pub` (0x1200), compressed point |
 | `sk-ecdsa-sha2-nistp256@openssh.com` | `p256-pub` (0x1200) |
-| `ssh-rsa`, 2048 to 16384 bits, odd e with 3 ≤ e < n | `rsa-pub` (0x1205), PKCS#1 RSAPublicKey DER |
+| `ssh-rsa`, 2048 to 16384 bits, odd e with 3 ≤ e < n, n not prime, not a prime power and with no factor below 2^16 | `rsa-pub` (0x1205), PKCS#1 RSAPublicKey DER |
 
 A did:key does not record whether the key is an `sk-` key, and drops
 its FIDO application string, so one did:key can match two SSH keys.
@@ -506,8 +562,18 @@ DSA, P-384, P-521 and RSA below 2048 bits are not accepted. The RSA
 floor is the kernel's (`maintainer-pgp-guide.rst`), the ceiling
 OpenSSH's, and the exponent range PKCS#1's. RSA is accepted so nobody
 is forced off a working key, but the guides recommend upgrading. SSH
-mpints and DER must be minimal, so each key has exactly one did:key and
-a revocation cannot be dodged by re-encoding. The ed25519, P-256 and RSA
+base64, mpints and DER must be canonical and minimal, so each key has
+exactly one did:key and a revocation cannot be dodged by re-encoding.
+Keys anyone can sign with are refused: ed25519 keys (plain and `sk-`)
+with y ≥ p or at one of the 8 small-order points (libsodium's list; for
+the identity point, R = identity and S = 0 verify every message), and
+RSA keys whose modulus is prime, a prime power or has a factor below
+2^16. Newer OpenSSH also refuses those ed25519 keys, so accepting them
+would make `check` depend on the OpenSSH version. The RSA check catches
+only accidental or naive weak moduli: a registrant who deliberately
+picks a moderate factor is not detected. The key's base64 must be
+canonical, as OpenSSH requires, so no line is exported that
+`ssh-keygen` would skip. The ed25519, P-256 and RSA
 forms are tested against the W3C CCG did:key test vectors, an oracle
 independent of this code.
 
@@ -763,7 +829,8 @@ the window length. The late cutoff is six months after the flag day.
   and file names match `^[a-z0-9][a-z0-9_-]{0,38}$`; each file has a
   size cap (64 KiB); git-vouch's own terms are checked strictly for type and
   format, and all other terms are ignored; no registry value is ever put
-  on a command line except as a single argument after `--`.
+  on a command line except as a single argument after `--`. Record dates
+  must fall in the years 1970 to 9998.
 - **Tests** use only development dependencies: pytest, and as oracles
   for the bridge and patatt tests jsonschema, referencing,
   rfc3339-validator, rfc3986-validator and pynacl. Signatures are
