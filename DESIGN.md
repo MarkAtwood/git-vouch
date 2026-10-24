@@ -1,8 +1,9 @@
 # git-vouch: Kernel Identity Without GPG
 
-**Status:** 2026-10-22. `git-vouch`, `git-vouch-migrate` and
-`git-vouch-attest` are implemented; `git vouch keys`, `git vouch query`,
-the patatt fork and `git-vouch-trqp` are not yet.
+**Status:** 2026-10-23. Every tool in Tools is implemented: `git-vouch`
+(including `git vouch keys` and `git vouch query`), `git-vouch-migrate`,
+`git-vouch-attest`, the patatt fork and `git-vouch-trqp`. Nothing is
+tagged as a release, and the patatt and b4 forks are not upstream.
 
 ## Summary
 
@@ -878,9 +879,11 @@ the window length. The late cutoff is six months after the flag day.
 
 ## Implementation
 
-- **One file**, `git-vouch`, executable, about 1,000–1,500 lines. Modules
-  used: `argparse`, `json`, `subprocess`, `pathlib`, `datetime`,
-  `hashlib`, `base64`, `tempfile`. The other tools are separate files.
+- **One file**, `git-vouch`, executable, 3,906 lines (`wc -l`,
+  2026-10-23). Standard-library modules used: `argparse`, `base64`,
+  `collections.abc`, `datetime`, `functools`, `hashlib`, `json`, `math`,
+  `os`, `pathlib`, `re`, `stat`, `subprocess`, `sys`, `tempfile`,
+  `typing`. The other tools are separate files.
 - **External programs**, called with argument lists and never through a
   shell: `git`, `ssh-keygen`.
 - **Input is untrusted:** registry files come from other people. Handles

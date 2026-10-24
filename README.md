@@ -25,28 +25,28 @@ kernel.org issues, hold only ed25519 and P-256 SSH keys, and you are
 registering a key anyway. Make it `ed25519-sk` on a token (`ecdsa-sk`
 if the token has no ed25519), not a bigger RSA key.
 
-There will also be an agent daemon that bridges this to an OpenVTC
-instance, so OpenVTC's verifiers can check signers in the registry. It is
-optional: nobody using git-vouch at the shell depends on it.
+An optional daemon, `git-vouch-trqp`, bridges this to OpenVTC, so
+OpenVTC's verifiers can check signers in the registry. Nobody using
+git-vouch at the shell depends on it.
 
 ## Tools
 
 Each tool is one Python file that uses only the standard library and does
-one job.
+one job. Patch email adds a patatt fork.
 
 | Tool | Job |
 |---|---|
 | `git-vouch` | The core: registry rules, signing commands, export |
 | `git-vouch-migrate` | One-time move from a GPG keyring to the registry |
 | `git-vouch-attest` | Verifies a FIDO key's hardware attestation |
-
-Planned: patch-email signing through a [patatt fork](https://github.com/MarkAtwood/patatt)
-that reads the registry, and `git-vouch-trqp`, the OpenVTC bridge daemon.
+| `git-vouch-trqp` | Optional bridge that answers OpenVTC's `verify-trust` from the registry |
+| [patatt fork](https://github.com/MarkAtwood/patatt) | Lets b4 check patch-email signatures against the registry |
 
 ## Status
 
-Under active development. The core commands, the migration tool and the
-attestation verifier are implemented and tested. Formats may still change.
+Under active development. The core commands, the migration tool, the
+attestation verifier, the TRQP bridge and the patatt fork are implemented
+and tested. Nothing is tagged as a release. Formats may still change.
 
 ## Read more
 
