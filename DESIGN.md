@@ -772,7 +772,8 @@ itself stays a CLI. Facts about `verify-trust` come from
   record deleted, or replaced with one that has no effect, and an anchor
   dropped from `anchors.json` end at the effective date of that commit,
   which is also the export's `valid-before`.
-- **Freshness:** it syncs on a timer and refuses to answer, with an
+- **Freshness:** the operator runs `git vouch sync` on a timer
+  (`docs/bridge-deployment.md`), and the bridge refuses to answer, with an
   error that makes `verify-trust` fail closed, once 24 hours pass
   without a successful sync.
 - **Caching:** answers for now come from one `git vouch query --all`

@@ -72,7 +72,8 @@ These are real capabilities, deliberately left out of git-vouch:
 ## What git-vouch has that OpenVTC lacks
 
 - **Nothing to run or operate.** No VTA or other always-on agent, no TEE, no mediator, no
-  registry service.
+  registry service. The optional TRQP bridge (below) serves outside
+  verifiers; kernel developers never need it.
 - **No new key custody.** Keys stay where people keep them today.
   OpenVTC had a critical, since-fixed key-custody bug (a scoped admin
   could derive and export any key), keeps a private-key export route on
@@ -91,3 +92,47 @@ people, one HTTPS transport, two credential types, a revocation list, a
 registry, commit signing checked in CI) is close to git-vouch. git-vouch takes it one step further: the
 registry is a git repository rather than a service, and git checks the
 signatures rather than a separate CI tool.
+
+## Compatibility: the TRQP bridge
+
+**OpenVTC's `verify-trust` can check git-vouch signers through
+`git-vouch-trqp`, except FIDO, P-256 and RSA signers.** The bridge answers
+verify-trust's Trust Task queries (`registry/authorization/0.1` at
+`POST /trust-tasks`) from `git vouch query`, and `git-vouch-trqp
+did-document` prints the registry DID document with one `TRQPRest`
+endpoint. LF devops are expected to run the canonical instance;
+`docs/bridge-deployment.md` covers running it, and
+`docs/trqp-interop.md` records verify-trust's side.
+
+What a yes proves: the did:key is a current key of a registered person
+with at least one endorsed email, any tier, in a registry copy synced
+within 24 hours, from an answer at most 60 seconds old. Automation
+identities, retired and revoked keys, and unknown keys get `false`
+(DESIGN.md, TRQP bridge).
+
+What it does not prove:
+
+- **That the answer is authentic.** Answers over HTTPS are unsigned.
+  verify-trust trusts one because its URL came from the registry DID's
+  document, so trust rests on the DID-bound `https://` endpoint and on
+  TLS to it. verify-trust also accepts an `http://` endpoint and follows
+  redirects, so the bridge refuses to print a non-`https://` endpoint and
+  serves `/trust-tasks` directly. Anyone can check an answer against the
+  public registry.
+- **That the signer may sign this repository.** Answers are not scoped
+  to a repository, and any tier counts, so the bridge can say yes where
+  `git verify-commit` against the default export (contributor and
+  above) would not.
+- **That the key was valid when the commit was made.** verify-trust
+  never sends `context.time`, so every commit is judged against the
+  registry as it is now.
+- **Anything about FIDO, P-256 or RSA signers.** verify-trust accepts
+  only plain `ssh-ed25519` signatures and refuses the rest as
+  `malformed` before it asks the bridge
+  (https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169).
+  kernel.org issues `ed25519-sk` keys by default, so a kernel.org-issued
+  key fails verify-trust until that is fixed.
+- **Tags.** verify-trust checks commit ranges only.
+
+A stale bridge (no sync for 24 hours) or a down one makes verify-trust
+fail closed.

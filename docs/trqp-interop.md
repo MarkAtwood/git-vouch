@@ -3,7 +3,9 @@
 **Status:** research spike for `git-vouch-trqp` (bead vouch-faq3.1),
 2026-10-22. It records what OpenVTC's `verify-trust` actually sends and
 accepts, read from source. It decides nothing: the mapping choices
-belong to vouch-faq3.2.
+belong to vouch-faq3.2. The bridge it planned now exists: DESIGN.md,
+TRQP bridge, records its behaviour, and `docs/bridge-deployment.md`
+how to run it.
 
 ## Verdict
 
@@ -273,10 +275,11 @@ call, and the document has the shape vgi-core requires.
   `vgi-core/src/did.rs:10-78` (multicodec prefix at 10, controller
   check at 36-40, `assertionMethod` walk at 55-76).
 
-**Not exercised end to end.** No verify-trust test signs a commit as a
-did:key signer. The did:key used in `verify-trust/tests/verify_trust_e2e.rs:1755`
-is only a secret's key id. This answer comes from reading the code;
-vouch-faq3.7 should prove it.
+**Proved end to end** by vouch-faq3.7 (`tests/trqp/test_verify_trust.py`):
+verify-trust 0.24.0 reports an `ssh-ed25519` did:key signer `trusted`
+through the bridge. No verify-trust test of its own signs as a did:key
+signer; the did:key in `verify-trust/tests/verify_trust_e2e.rs:1755` is
+only a secret's key id.
 
 P-256 did:keys resolve too (did-common `src/did_method/resolve.rs:85-87`),
 but vgi-core extracts only Ed25519 keys. Such a signer is reported as
