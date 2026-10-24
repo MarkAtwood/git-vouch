@@ -73,7 +73,7 @@ short enough to read in a sitting.
 |---|---|---|
 | `git-vouch` | The core: registry rules, records, export | `git`, `ssh-keygen` |
 | `git-vouch-migrate` | Flag day only: drafts person files and endorsements from the frozen `pgpkeys.git` | `gpg`, `git-vouch` |
-| `git-vouch-attest` | Verifies a FIDO key's attestation against a vendor root the user supplies | `openssl` |
+| `git-vouch-attest` | Verifies a FIDO key's attestation against a vendor root the user supplies | `openssl` (OpenSSL 3.0 or later; `openssl verify -no-CAstore` needs 3.0) |
 | patatt fork | patatt with a `vouch:` keyring source, so b4 checks patch signatures against the registry ([github.com/MarkAtwood/patatt](https://github.com/MarkAtwood/patatt)) | `git vouch keys` |
 | `git-vouch-trqp` | Optional TRQP bridge so OpenVTC's `verify-trust` can ask whether a DID may sign for the kernel; a thin shim over `git-vouch` | `git-vouch` |
 
@@ -533,8 +533,17 @@ with `ssh-keygen -O challenge=<file> -O write-attestation=<file>` comes
 with the authenticator manufacturer's certificate chain saying the key
 was created inside a device of a given model. `git-vouch-attest` checks
 it, doing the X.509 work through the `openssl` CLI against a vendor root
-the user supplies; no roots are bundled. It is cross-validated against
-OpenSSH's `regress/misc/ssh-verify-attestation`. `git-vouch` itself
+the user supplies; no roots are bundled. A `--ca` file whose
+certificates do not all parse is refused. The attestation certificate
+must meet the WebAuthn 8.2.1 packed profile: X.509 v3, subject OU
+"Authenticator Attestation", basicConstraints CA:FALSE, and, if present,
+a non-critical id-fido-gen-ce-aaguid extension (1.3.6.1.4.1.45724.1.1.4)
+matching the authData AAGUID. `git-vouch-attest` is stricter than
+WebAuthn and requires the extension always, because without it the
+printed AAGUID would rest only on authData, which whoever holds the
+certificate's key wrote. It is to be cross-validated against OpenSSH's
+`regress/misc/ssh-verify-attestation` (expected verdicts are predicted
+from source and not yet run; see vouch-ey47.15). `git-vouch` itself
 checks only the shape. The attestation exists only if it was captured
 at generation, and PIV, Secure Enclave, TPM and software keys have
 nothing equivalent that SSH exposes. Note also that `ssh-keygen -Y
