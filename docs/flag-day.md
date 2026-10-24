@@ -154,8 +154,8 @@ Pick your route:
 | An ed25519, P-256 or RSA (2048+) authentication key or subkey on your pgpkeys key | Use it as your SSH key | The subkey signs your person file |
 | No pgpkeys key, or one revoked by the freeze commit | Register fresh | None |
 
-Every route needs an SSH key: ed25519, P-256, or RSA of 2048 to 16384
-bits. In `pgpkeys.git` at af88128 (2026-10-20), 602 of 645 unexpired
+Every route needs an SSH key: ed25519, P-256, or RSA of 2048 to 4096
+bits (no live RSA authentication key in pgpkeys is larger). In `pgpkeys.git` at af88128 (2026-10-20), 602 of 645 unexpired
 keys are RSA and 4 are DSA; 188 have a reusable authentication key, so
 most holders make a new key. If you do, or if
 yours is RSA, now is a good time to upgrade: `ed25519-sk` on a token,

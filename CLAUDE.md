@@ -64,7 +64,7 @@ Edit loop (about 40 s; skips the doc walkthroughs marked slow by `SLOW` in
 `tests/conftest.py`):
 
 ```bash
-uv run --python 3.12 --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl python -m pytest -q -p no:cacheprovider -n 6 -m "not slow" --basetemp=$(mktemp -d /tmp/gv.XXXX) tests
+uv run --python 3.12 --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl --with rfc3339-validator --with rfc3986-validator python -m pytest -q -p no:cacheprovider -n 6 -m "not slow" --basetemp=$(mktemp -d /tmp/gv.XXXX) tests
 ```
 
 Pre-commit gate: the same command without `-m "not slow"`, on `--python 3.12`

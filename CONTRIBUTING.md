@@ -27,7 +27,7 @@ Fast edit loop (about 40-55 s; skips the doc-walkthrough modules listed in
 `SLOW` in `tests/conftest.py`):
 
 ```sh
-uv run --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl python -m pytest -q -n 6 -m "not slow" tests
+uv run --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl --with rfc3339-validator --with rfc3986-validator python -m pytest -q -n 6 -m "not slow" tests
 ```
 
 Before pushing, run the same command without `-m "not slow"` (about 2.5

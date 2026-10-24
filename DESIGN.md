@@ -547,7 +547,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
-| `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |
+| `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown. `git vouch query --all [--at TIME]` prints one JSON object mapping every did:key listed in a person file to that answer, from one registry check (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |
 | `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
@@ -582,7 +582,7 @@ Supported key types:
 | `sk-ssh-ed25519@openssh.com` | `ed25519-pub` (0xed); the FIDO wrapping is a signing detail that `ssh-keygen` handles |
 | `ecdsa-sha2-nistp256` | `p256-pub` (0x1200), compressed point |
 | `sk-ecdsa-sha2-nistp256@openssh.com` | `p256-pub` (0x1200) |
-| `ssh-rsa`, 2048 to 16384 bits, odd e with 3 ≤ e < n, n not prime, not a prime power and with no factor below 2^16 | `rsa-pub` (0x1205), PKCS#1 RSAPublicKey DER |
+| `ssh-rsa`, 2048 to 4096 bits, odd e with 3 ≤ e < n, n not prime, not a prime power and with no factor below 2^16 | `rsa-pub` (0x1205), PKCS#1 RSAPublicKey DER |
 
 A did:key does not record whether the key is an `sk-` key, and drops
 its FIDO application string, so one did:key can match two SSH keys.
@@ -590,8 +590,14 @@ its FIDO application string, so one did:key can match two SSH keys.
 itself resolves a did:key only by looking it up in the registry.
 
 DSA, P-384, P-521 and RSA below 2048 bits are not accepted. The RSA
-floor is the kernel's (`maintainer-pgp-guide.rst`), the ceiling
-OpenSSH's, and the exponent range PKCS#1's. RSA is accepted so nobody
+floor is the kernel's (`maintainer-pgp-guide.rst`) and the exponent
+range PKCS#1's. The ceiling, 4096 bits, is below OpenSSH's 16384 to
+bound what a hostile person file costs: every RSA modulus is tested for
+being a prime or prime power while parsing, before any signature check,
+which takes about 0.15 s at 4096 bits but 7 s at 16384, so 16 such keys
+in one file would cost every `check` about 2 minutes. No live RSA
+authentication key in pgpkeys is above 4096 bits (119 in all: 43 of
+2048, 2 of 3072, 74 of 4096). RSA is accepted so nobody
 is forced off a working key, but the guides recommend upgrading. SSH
 base64, mpints and DER must be canonical and minimal, so each key has
 exactly one did:key and a revocation cannot be dodged by re-encoding.
@@ -743,6 +749,14 @@ itself stays a CLI. Facts about `verify-trust` come from
 - **Freshness:** it syncs on a timer and refuses to answer, with an
   error that makes `verify-trust` fail closed, once 24 hours pass
   without a successful sync.
+- **Caching:** answers for now come from one `git vouch query --all`
+  run shared by every DID and every concurrent request, rerun when the
+  served copy's commit changes and after 60 seconds, since validity at
+  now changes when a retirement or tier end passes with no commit. The
+  first request after a sync or a minute waits for a whole check (about
+  12 s for 600 people); the rest answer in milliseconds, and an answer
+  can be up to 60 s old. A served copy with local changes, and a request
+  with `context.time`, run a check each time.
 - **Serving:** `--bind` takes an IPv4 address, a host name, `''` (all
   IPv4 interfaces) or an IPv6 literal. Only an address containing `:`
   listens on IPv6; a host name always binds IPv4, so `localhost` is
