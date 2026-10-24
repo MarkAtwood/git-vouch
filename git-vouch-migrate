@@ -33,6 +33,8 @@ from typing import NamedTuple, Optional
 
 def _load_vouch() -> ModuleType:
     """Return the git-vouch script next to this one (or else on PATH), loaded as a module."""
+    # Loaded, never copied: migrate parses and checks with git-vouch's own
+    # code, so the two tools cannot disagree about a record (vouch-xlha.10).
     # ponytail: a ModuleType, so every vouch.* use is Any to a type checker
     # and a rename in git-vouch breaks migrate only at run time (the tests
     # catch it). Upgrade path: ship git-vouch as an importable module too.

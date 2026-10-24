@@ -2,13 +2,15 @@
   "id": "vouch-s9w2.4",
   "title": "Keep: bridge judges nothing, git vouch query decides",
   "description": "git-vouch-trqp:202-254. The bridge shells out to `git vouch query` and maps only its documented contract: exit 0 or 1 with a JSON object is an answer, and anything else (OSError, timeout, other exit code, unparseable output) is a retryable unavailable. decide() adds only policy that belongs to the bridge (authority, action, did:key shape, automation, endorsed email). It never reads registry files.\n\nDo NOT \"simplify\" this by importing git-vouch's check_registry in-process or by reading people/*.json directly. That creates a second judge of who holds which key, which DESIGN.md's TRQP bridge section rules out, and it loses fail-closed-by-construction: any surprise in the subprocess becomes unavailable, never authorized. If performance needs work, memoize answers above this boundary (vouch-s9w2.1) rather than moving the boundary.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "decision",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:15:52.502942798Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:15:52.502942798Z",
+  "updated_at": "2026-10-24T03:57:41.693293663Z",
+  "closed_at": "2026-10-24T03:57:41.693293663Z",
+  "close_reason": "Kept (Mark 2026-10-23); boundary stated in git-vouch-trqp query() docstring: speed-ups above it (the per-commit cache), never across",
   "labels": [
     "review"
   ],

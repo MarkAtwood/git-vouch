@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
@@ -325,3 +326,31 @@ def test_key_fixture_signs_and_verifies(any_key: Key, tmp_path: Path) -> None:
             capture_output=True,
             check=True,
         )
+
+
+def test_every_registry_git_run_is_pinned() -> None:
+    """Only GIT itself and git config may spell out a bare git (vouch-xlha.9).
+
+    Any other git run must start with GIT or GIT_LOG, so neither a
+    verifier's ~/.gitconfig nor refs/replace/* changes the history judged.
+    """
+    tree = ast.parse(Path(SCRIPT).read_text())
+    gits = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "GIT" for t in node.targets)
+    }
+    bare = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+            continue
+        first, *rest = node.elts
+        if not (isinstance(first, ast.Constant) and first.value == "git"):
+            continue
+        is_config = (
+            rest and isinstance(rest[0], ast.Constant) and rest[0].value == "config"
+        )
+        if node not in gits and not is_config:
+            bare.append(node.lineno)
+    assert bare == [], f"bare git runs at git-vouch lines {bare}; use GIT or GIT_LOG"

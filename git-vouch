@@ -157,6 +157,10 @@ def validate_handle(name: object) -> str:
     return name
 
 
+# Registry trees come from pull requests, so reads stay fd-relative,
+# O_NOFOLLOW, fstat-checked and capped: no symlink escape, no swap between
+# check and open, no FIFO hanging the merge gate, no huge blob in memory.
+# Path.read_bytes() or git show would each lose one (vouch-xlha.8).
 def _open_below(root: Path, rel: str, last_flags: int) -> int:
     """Open ``rel`` below ``root`` one component at a time with O_NOFOLLOW; return the fd.
 
@@ -241,7 +245,12 @@ class Version(NamedTuple):
     data: Optional[bytes]  # content at ``commit``; None if it deleted the path
 
 
-# Neither the user's config nor replace refs may change what is read.
+# Neither the user's config nor replace refs may change what is read, so two
+# verifiers judge the same history: --no-replace-objects ignores
+# refs/replace/*, --literal-pathspecs stops a path acting as a glob, and the
+# -c pins override a ~/.gitconfig log.follow or log.showSignature. Every git
+# run that reads the registry starts with GIT or GIT_LOG; only git config
+# runs bare (tests/test_skeleton.py enforces this; vouch-xlha.9).
 GIT = ["git", "--no-replace-objects"]
 GIT_LOG = [
     *GIT,
@@ -1304,9 +1313,11 @@ class History(NamedTuple):
     --reverse HEAD``; position ``final`` is the working tree, a child of
     HEAD, so uncommitted changes are judged as if committed next. A
     registry that is not a git work tree has only that position. Positions
-    are ordered by ancestry, never by index: on a branched history the
-    index depends on how the branches were merged, which the author of a
-    change controls.
+    are ordered by ancestry, never by index or date: on a branched history
+    the index and the dates depend on how the branches were merged, which
+    the author of a change controls. Dates enter only as effective dates
+    (``query --at``, export valid-before), clamped along the first-parent
+    line (vouch-faq3.13, vouch-xlha.10).
 
     A version is a position whose content differs from that of some parent,
     so the content anywhere is that of its nearest versions.

@@ -2,13 +2,15 @@
   "id": "vouch-xlha.10",
   "title": "Keep: history judged by ancestry, never by list order",
   "description": "git-vouch:1096-1177 (History) and check_registry's lowered() at 1755-1767. Positions are compared only with before()/concurrent() over the ancestor bitsets, never by topo index or committer date. Where two concurrent branches race (authority lost on one, used on the other), the record is void until re-approved, because git does not record which came first. The index and the dates are controlled by whoever authors the merge, so 'simplifying' to index or date order would let a contributor choose the outcome by how they merge. vouch-faq3.13 (dates for query --at) is the one place dates decide anything, and it is tracked as a weakness, not a model to copy. Separately, git-vouch-migrate loading git-vouch as a module (git-vouch-migrate:35-50) instead of copying its parsers is what keeps the two tools agreeing; keep it.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "decision",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:23:41.599638908Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:23:41.599638908Z",
+  "updated_at": "2026-10-24T03:57:39.705123531Z",
+  "closed_at": "2026-10-24T03:57:39.705123531Z",
+  "close_reason": "Kept (Mark 2026-10-23); History docstring now says ancestry, never index or date, dates only as faq3.13 effective dates; comment at git-vouch-migrate _load_vouch on loading, not copying",
   "labels": [
     "review"
   ],

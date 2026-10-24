@@ -2,13 +2,15 @@
   "id": "vouch-s9w2.6",
   "title": "Keep: non-blocking slot cap returns retryable 503",
   "description": "git-vouch-trqp:37-41, :213-222. When every slot is busy, the bridge refuses immediately with a retryable unavailable instead of queueing. This is a constraint, not a mechanism: there is no queue depth, fairness or wait timeout to tune, and verify-trust already fails closed on unavailable, so CI retries. A blocking acquire() would instead pile threads up behind slow checks; with a thread per connection (line 10) that is the exhaustion the cap exists to prevent.\n\nDo NOT \"improve\" this to a blocking or timed acquire. If capacity is short, make each check cheaper (vouch-s9w2.1).",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "decision",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:15:52.95459864Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:15:52.95459864Z",
+  "updated_at": "2026-10-24T03:57:46.02029817Z",
+  "closed_at": "2026-10-24T03:57:46.02029817Z",
+  "close_reason": "Kept (Mark 2026-10-23); QUERY_SLOTS comment says it refuses rather than queues on purpose, and to make checks cheaper instead",
   "labels": [
     "review"
   ],

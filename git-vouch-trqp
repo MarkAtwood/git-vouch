@@ -53,7 +53,10 @@ EXT = "org.kernel.git-vouch"  # the response's ext namespace
 # QUERY_TIMEOUT every such request gets a retryable 503 however light the load.
 # QUERY_SLOTS caps concurrent git runs (past it, a retryable 503). The upgrade
 # path is to check in the background after each sync and on a timer, so no
-# request waits for a check.
+# request waits for a check. A full slot set refuses at once instead of
+# queueing, on purpose: verify-trust fails closed and retries, and a blocking
+# acquire would pile one thread per connection behind slow checks. If capacity
+# runs short, make each check cheaper; never wait for a slot (vouch-s9w2.6).
 QUERY_SLOTS = threading.BoundedSemaphore(4)
 # ponytail: an answer for now is reused for ANSWER_TTL seconds, so a key whose
 # retired instant or tier end passes with no commit stays valid that long;
@@ -287,6 +290,11 @@ latest: Optional[Answers] = None  # the newest map for now; guarded by ANSWERS_L
 
 def query(entity: str, at: Optional[datetime]) -> dict[str, object]:
     """Return ``git vouch query``'s answer for the did:key ``entity``.
+
+    The boundary: the bridge judges nothing itself. It never reads registry
+    files or imports git-vouch's checker, and anything but query's documented
+    answer is unavailable, never authorized. Speed-ups go above this line, as
+    the per-commit cache does, never across it (vouch-s9w2.4).
 
     For now (``at`` None) the answer comes from ``answers_now``, where a DID
     no person file lists gets ``handle`` null, as ``git vouch query``

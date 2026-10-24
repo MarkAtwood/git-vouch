@@ -2,13 +2,15 @@
   "id": "vouch-xlha.8",
   "title": "Keep: registry reads are fd-relative, capped, O_NOFOLLOW",
   "description": "git-vouch:128-200 (_open_below, read_capped, list_dir) and 225-258 (read_blobs). Working-tree records are opened one component at a time relative to the parent fd with O_NOFOLLOW and O_NONBLOCK, fstat-checked as regular, and read to at most MAX_FILE_SIZE+1. Historical blobs are size-checked with cat-file --batch-check before any byte is read. The registry is attacker-writable through pull requests, so this closes symlink escapes, check/open swaps, FIFOs that hang the merge gate, and memory blowups from huge blobs. Do not 'simplify' to Path.read_bytes() or git show \u003crev\u003e:\u003cpath\u003e: each loses one of those guarantees, and no test would notice except the specific hostile-tree ones.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "decision",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:23:41.457806466Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:23:41.457806466Z",
+  "updated_at": "2026-10-24T03:57:35.38001228Z",
+  "closed_at": "2026-10-24T03:57:35.38001228Z",
+  "close_reason": "Kept (Mark 2026-10-23); the four threats are now a comment above _open_below",
   "labels": [
     "review"
   ],
