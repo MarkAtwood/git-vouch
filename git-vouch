@@ -2219,6 +2219,23 @@ class _Judge:
                 f"{rel}: void: accountable changed to {now} after the record"
                 " was added; needs a new approval"
             )
+        # Lowering someone needs authority over the tier they held when the
+        # record landed, judged from history, so its own date cannot pick
+        # the moment: a peer maintainer cannot demote another (vouch-xlha.21).
+        # Last, so only an otherwise valid record judges the tier before it.
+        for a in added:
+            for p in history.parents[a]:
+                held = self.tier_at(t.subject, p)
+                if (
+                    held is not None
+                    and demotes(held, t.tier)
+                    and not self.may_grant(t.approver, a, held)
+                ):
+                    raise Void(
+                        f"{rel}: void: {t.approver}"
+                        f" ({self.claimed_at(t.approver, a) or 'no tier'})"
+                        f" may not lower {t.subject} from {held}"
+                    )
         return t.tier
 
     def standing(self, handle: str, i: int) -> list[tuple[int, Union[str, Void, None]]]:

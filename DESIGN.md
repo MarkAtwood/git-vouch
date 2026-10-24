@@ -100,7 +100,11 @@ contributors. The registry records that tree directly.
 the approver signs (see The registry), never by the person's own file, so
 nobody can promote themselves. The one way round this is an unsigned key
 change that review lets through (see Merging needs one person). The approver must sit above the tier they
-grant, as in the table, at the commit that adds the tier record.
+grant, as in the table, at the commit that adds the tier record. To
+lower someone, they must also sit above the tier that person held just
+before that commit, judged from history and not from the record's own
+date: only an anchor can demote a maintainer, and a record by a peer is
+void (vouch-xlha.21).
 
 **Endorsements are evidence, not a count.** There is no minimum number.
 The approver reads the endorsements and decides. `git vouch check` verifies
@@ -272,8 +276,8 @@ review instead, as accepted risks:
   on that version, and git history.
 - **Deleting a tier record**, which is an unsigned git change, so any
   merger can remove anyone's tier (see Tier record). Restoring an older
-  lower-tier record over a promotion is the same kind of unsigned change
-  and rests on review too.
+  lower-tier record over a promotion is void unless its approver sits
+  above the promoted tier, so it too only ends the tier, like a deletion.
 
 The remaining host attack is to withhold updates, such as a revocation.
 Two git behaviours address that:
@@ -322,7 +326,10 @@ Two git behaviours address that:
   `date`. An export with `--min-tier` above the new tier keeps the key
   with that `valid-before`. A replacement record that does not verify
   ends nothing: the tier before it stands until a valid record replaces
-  it or the file is deleted.
+  it or the file is deleted. A lowering record whose approver does not
+  sit above the tier it replaces is void; putting it in the old record's
+  place ends that tier at the commit's effective date, like a deletion,
+  so a peer cannot choose the date.
 - **Restoring:** a tier record cannot come back, by a commit or by a
   merge (including `--no-ff` resolved to the old side, or `-s ours`),
   over a demotion committed after it. If a version that demotes it
@@ -331,9 +338,10 @@ Two git behaviours address that:
   commit being judged, `check` fails ("restores an earlier record ...
   needs a new approval"). Deleting the demotion first changes nothing.
   The signature covers the exact bytes, so only the approver can make a
-  newer record. Bringing back a same-tier or lower-tier record, or one
-  over a record that did not verify, is not flagged: like a deletion it
-  only takes authority away, and review is the gate.
+  newer record. Bringing back a same-tier record, or one over a
+  record that did not verify, is not flagged. A lower-tier one is void
+  unless its approver sits above the tier it replaces (see Demotion);
+  like a deletion it only takes authority away, and review is the gate.
 
 ### Person file
 

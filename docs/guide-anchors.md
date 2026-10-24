@@ -323,7 +323,10 @@ check them sync.
 ### Approve and demote maintainers
 
 Approving is the step under Approve the first maintainers. Demoting
-replaces the tier record with a lower one (here as `lena`):
+replaces the tier record with a lower one. Only someone above the tier
+being taken away may sign it, so only an anchor can demote a
+maintainer; a maintainer's record lowering a peer is void (here as
+`lena`):
 
 <!-- as lena -->
 ```sh

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 
@@ -1748,11 +1749,13 @@ def test_old_tier_record_brought_back_does_not_undo_a_demotion(
     assert "gregkh" not in result.tiers
 
 
-def test_lower_tier_record_brought_back_over_a_promotion_stands(
+def test_lower_tier_record_brought_back_over_a_promotion_is_void(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
 ) -> None:
-    # Undoing a promotion takes authority away, like deleting a tier record;
-    # it is review's call, not a signature's.
+    # The old contributor record is gregkh's, and gregkh is not above the
+    # maintainer tier it would lower alice from (vouch-xlha.21), so it is void.
+    # Putting it back only takes authority away, like deleting the record:
+    # a void, not a failed check.
     old = {
         rel: (reg.root / rel).read_bytes()
         for rel in ("tiers/alice.json", "tiers/alice.json.sig")
@@ -1763,8 +1766,9 @@ def test_lower_tier_record_brought_back_over_a_promotion_stands(
         (reg.root / rel).write_bytes(data)
     reg.commit()
     result = vouch.check_registry(reg.root)
-    assert result.problems == [] and result.voids == []
-    assert result.tiers["alice"] == "contributor"
+    assert result.problems == []
+    assert has(result.voids, "tiers/alice.json", "may not lower alice from maintainer")
+    assert "alice" not in result.tiers
 
 
 def test_many_versions_of_a_record_do_not_deepen_the_recursion(
@@ -1858,3 +1862,39 @@ def test_check_verifies_a_block_only_against_its_own_key(
     people = [r for r in runs if r[1] in owner]
     assert sorted(r[1] for r in people) == sorted(owner)
     assert all(r[3].split()[2] == owner[r[1]] for r in people)
+
+
+@pytest.mark.parametrize("date", [ADDED, AFTER])
+def test_peer_maintainer_cannot_demote_a_maintainer(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key], date: str
+) -> None:
+    """Only someone above a person's current tier may lower it (vouch-xlha.21).
+
+    dave, a maintainer like gregkh, signs gregkh down to contributor. The
+    record is void, and replacing the old one only ends gregkh's tier at
+    the commit, as a deletion would: dating the record earlier, or later,
+    does not move that end.
+    """
+    reg.tier("dave", "maintainer", "torvalds", key("torvalds"))
+    reg.commit()
+    reg.tier("gregkh", "contributor", "dave", key("dave"), date)
+    reg.commit()  # 2026-01-03
+    result = vouch.check_registry(reg.root)
+    assert has(
+        result.voids, "tiers/gregkh.json", "may not lower gregkh from maintainer"
+    )
+    assert result.problems == []
+    assert "gregkh" not in result.tiers
+    assert result.ended["gregkh"]["maintainer"] == datetime(
+        2026, 1, 3, tzinfo=timezone.utc
+    )
+
+
+def test_an_anchor_may_demote_a_maintainer(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    reg.tier("gregkh", "contributor", "torvalds", key("torvalds"), AFTER)
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.voids == []
+    assert result.tiers["gregkh"] == "contributor"

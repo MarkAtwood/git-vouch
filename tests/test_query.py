@@ -310,13 +310,14 @@ def test_dropped_accountable_does_not_revive_an_ended_tier(
     """alice, a maintainer, is made automation on the second day (ending
     maintainer then), drops her accountable maintainer on the third and
     restores it on the fourth. On the third the automation record does not
-    verify, but maintainer has still ended."""
+    verify, but maintainer has still ended. torvalds signs the change: only
+    someone above maintainer may lower alice from it (vouch-xlha.21)."""
     r = base(tmp_path, keys)
     r.person("alice", keys("alice"))
     r.tier("alice", "maintainer", "torvalds", keys("torvalds"))
     r.commit()
     r.person("alice", keys("alice"), accountable="gregkh")
-    r.tier("alice", "automation", "gregkh", keys("gregkh"), T1)
+    r.tier("alice", "automation", "torvalds", keys("torvalds"), T1)
     r.commit()
     r.person("alice", keys("alice"))
     r.commit()
