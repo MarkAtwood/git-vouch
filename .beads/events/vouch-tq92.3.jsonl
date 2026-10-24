@@ -1,1 +1,2 @@
 {"id":"01a169cd-a6b9-742e-9296-489e387d997f","issue_id":"vouch-tq92.3","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T17:27:27.673274845Z"}
+{"id":"01a16c66-fba4-7123-8a6a-38b74badc71b","issue_id":"vouch-tq92.3","event_type":"closed","actor":"agent","old_value":"","new_value":"Floors git 2.35, OpenSSH 9.1 measured and cited in DESIGN Constraints item 2, Upstream path, decisions summary, and for-kernel-reviewers","created_at":"2026-10-24T05:34:10.852075719Z"}

@@ -3,13 +3,15 @@
   "title": "State minimum git and OpenSSH versions",
   "description": "Neither DESIGN nor the code states a git or OpenSSH floor, yet the docs mention the OpenSSH 9.6 DST bug. Determine the real floors from what git-vouch uses: git gpg.format=ssh and gpg.ssh.allowedSignersFile (git 2.34), ssh-keygen -Y sign/verify/find-principals and valid-after/valid-before in allowed_signers (OpenSSH 8.x), sk- key support, namespaces= option, -Y match-principals if used, RSA rsa-sha2-512 signing. Verify each against upstream release notes (cite them) and, where possible, test against an older binary. Add the floors to DESIGN and the cover note; consider a runtime version check in git vouch setup only if one is cheap.",
   "acceptance_criteria": "DESIGN and cover note state git and OpenSSH minimums with cited release notes; claims checked; tests pass.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T17:27:27.668455839Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T17:27:27.668455839Z",
+  "updated_at": "2026-10-24T05:34:10.846821798Z",
+  "closed_at": "2026-10-24T05:34:10.846821798Z",
+  "close_reason": "Floors git 2.35, OpenSSH 9.1 measured and cited in DESIGN Constraints item 2, Upstream path, decisions summary, and for-kernel-reviewers",
   "dependencies": [
     {
       "issue_id": "vouch-tq92.3",

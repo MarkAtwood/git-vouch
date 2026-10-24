@@ -36,8 +36,9 @@ Tools, each one standard-library Python file: `git-vouch`;
 attestation (DESIGN: Tools). Patch mail uses published forks,
 github.com/MarkAtwood/patatt and github.com/MarkAtwood/b4 (branch
 `git-vouch`), not yet upstream (DESIGN: Patch signing). Needs Python
-3.9; no git or OpenSSH floor beyond git's SSH signing is set (DESIGN:
-Constraints, Upstream path).
+3.9, git 2.35 and OpenSSH 9.1: older git checks key lifetimes against
+the current time, and older OpenSSH rejects the UTC times on every
+exported line (DESIGN: Constraints).
 
 ## What it costs
 

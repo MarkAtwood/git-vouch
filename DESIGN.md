@@ -60,6 +60,22 @@ short enough to read in a sitting.
    deletions) instead of inventing records for what git already
    records. `git-vouch` only does what they cannot: check who approved
    whom and generate their input files.
+
+   The floors are git 2.35 and OpenSSH 9.1. git 2.35 is the first release
+   that passes ssh-keygen the signature's own time (`-Overify-time`); git
+   2.34 checks `valid-after` and `valid-before` against the current time,
+   so it rejects a signature made inside its key's window once that
+   window has closed, and accepts one dated before its key was added.
+   OpenSSH 9.1 is the first to read a time ending in `Z` as UTC (9.1
+   release notes), and every time `git vouch export` writes ends in `Z`;
+   OpenSSH 8.8 and 9.0 reject each such line, so nothing verifies. Every
+   other feature git-vouch uses needs less: `ssh-keygen -Y sign` and
+   `-Y verify` with namespaces (OpenSSH 8.1), `-Y find-principals`, FIDO
+   `sk-` keys and `-O write-attestation` (8.2), allowed-signers validity
+   intervals (8.7, which git 2.34's release notes call broken), and
+   `log.diffMerges` (git 2.32). Measured with git 2.34.0 and 2.35.0 and
+   OpenSSH 8.8p1, 9.0p1, 9.1p1 and 9.6p1 built from release tarballs;
+   FIDO keys are untested on hardware.
 3. **Python standard library only.** Kernel builds already need Python 3
    (for arm/arm64 and several config options). The floor is the kernel's
    documented minimum, Python 3.9 (`Documentation/process/changes.rst`).
@@ -924,7 +940,8 @@ the window length. The late cutoff is six months after the flag day.
 
 ## Upstream path
 
-Version 1 needs nothing from git beyond SSH signing. The formats are
+Version 1 needs nothing from git beyond SSH signing that checks key
+lifetimes at signing time, git 2.35 (Constraints). The formats are
 chosen so that git could later take over what `git-vouch` does, one piece at
 a time, with no change to the registry:
 
@@ -1043,7 +1060,8 @@ Decided 2026-10-22:
 - **Revocations:** never fail `check`; `sync` always writes them; one
   signed by a key revoked later counts if committed first; deleting one
   has no effect.
-- **Keys:** hardware recommended, not required; Python floor 3.9;
+- **Keys:** hardware recommended, not required; floors Python 3.9, git
+  2.35, OpenSSH 9.1;
   delegated signing scopes out of v1; FIDO attestation is `{blob,
   challenge}`, shape-checked by `git-vouch` and verified only by
   `git-vouch-attest` against a user-supplied root.
