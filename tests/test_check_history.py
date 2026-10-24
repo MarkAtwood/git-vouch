@@ -21,6 +21,7 @@ import pytest
 
 from conftest import Key, run_script
 from test_check import ADDED, AFTER, RETIRED, Registry, did, has, keys  # noqa: F401 (keys is a fixture)
+from test_signatures import count_verifies
 from test_export import export, repo, sign_file, ssh_verify, tag, verifies  # noqa: F401 (repo is a fixture)
 
 
@@ -1684,3 +1685,62 @@ def test_many_versions_of_a_record_do_not_deepen_the_recursion(
         sys.setrecursionlimit(limit)
     assert result.problems == []
     assert result.tiers["gregkh"] == "maintainer"
+
+
+def test_check_verifies_each_signature_once(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One check never runs ssh-keygen twice on the same signature (vouch-xlha.3).
+
+    The history re-signs person files and grants tiers in later commits, so
+    the same tier record is judged at many positions.
+    """
+    reg.person("dave", key("dave"), key("dave2"))
+    reg.commit()
+    reg.tier("dave", "contributor", "gregkh", key("gregkh"))
+    reg.commit()
+    reg.person("alice", key("alice2"), retired=(key("alice"),))
+    reg.commit()
+    runs = count_verifies(vouch, monkeypatch)
+    result = vouch.check_registry(reg.root)
+    assert result.problems == []
+    assert result.tiers["dave"] == "contributor"
+    assert runs and len(runs) == len(set(runs))
+
+
+def test_check_verifies_a_block_only_against_its_own_key(
+    vouch: ModuleType,
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settling a key claimed by two files runs no block against another key (vouch-xlha.3).
+
+    dave and mallory list dave2 as current in the same commit, so check
+    proves which files dave2 signed. Each .sig holds one block per current
+    key, in the order the keys are listed; a run pairing a block with
+    another key could never verify.
+    """
+    signers = {
+        "dave": (key("dave"), key("dave2")),
+        "mallory": (key("mallory"), key("dave2")),
+    }
+    for handle, current in signers.items():
+        reg.person(handle, *current)
+    reg.commit()
+    end = b"-----END SSH SIGNATURE-----\n"
+    owner = {}
+    for handle, current in signers.items():
+        sig = (reg.root / f"people/{handle}.json.sig").read_bytes()
+        blocks = [b + end for b in sig.split(end)[:-1]]
+        assert len(blocks) == 2
+        owner.update((b, k.pubkey.split()[1]) for b, k in zip(blocks, current))
+    runs = count_verifies(vouch, monkeypatch)
+    result = vouch.check_registry(reg.root)
+    assert any(f"{did(key('dave2'))} is listed" in p for p in result.problems)
+    people = [r for r in runs if r[1] in owner]
+    assert sorted(r[1] for r in people) == sorted(owner)
+    assert all(r[3].split()[2] == owner[r[1]] for r in people)

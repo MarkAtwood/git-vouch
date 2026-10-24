@@ -266,3 +266,182 @@ def test_unsafe_path_refused(vouch: ModuleType, repo: Path, rel: str) -> None:
     """A path that is not a plain relative path is rejected before git runs."""
     with pytest.raises(vouch.VouchError, match="not a plain path"):
         vouch.file_history(repo, rel)
+
+
+def plumbing_history(
+    repo: Path, rel: str
+) -> dict[str, tuple[tuple[str, ...], bytes | None]]:
+    """Return rel's versions, commit -> (parents, content), read with git plumbing alone.
+
+    The oracle for ``file_histories``: a commit is a version if its entry for
+    ``rel`` (``git ls-tree``) differs from that of every parent, or, for a
+    root commit, if it has one.
+    """
+
+    def entry(commit: str) -> str:
+        return git(repo, "ls-tree", "--full-tree", commit, "--", rel)
+
+    found = {}
+    for line in git(repo, "rev-list", "--parents", "HEAD").splitlines():
+        commit, *parents = line.split()
+        here = entry(commit)
+        if all(entry(p) != here for p in parents) and (parents or here):
+            data = None
+            if here:
+                data = subprocess.run(
+                    ["git", "-C", str(repo), "cat-file", "blob", here.split()[2]],
+                    capture_output=True,
+                    check=True,
+                ).stdout
+            found[commit] = (tuple(parents), data)
+    return found
+
+
+def test_combined_log_matches_each_paths_own_history(
+    vouch: ModuleType, repo: Path
+) -> None:
+    """One log over the registry gives every path the versions git plumbing finds.
+
+    The history branches and merges with a conflict, an evil merge, ``-s
+    ours``, an octopus, deletions on branches and in a merge, and a re-add.
+    """
+    a, b, c = "people/a.json", "people/b.json", "people/c.json"
+    t, r, s = "tiers/a.json", "revocations/r-1.json", "revocations/s-1.json"
+    commit(
+        repo, "2026-01-01T00:00:00Z", {a: b"a1\n", b: b"b1\n", c: b"c1\n", t: b"t1\n"}
+    )
+    git(repo, "checkout", "-q", "-b", "side1")
+    commit(repo, "2026-01-02T00:00:00Z", {a: b"a2\n", b: None, r: b"r1\n"})
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "2026-01-03T00:00:00Z", {b: b"b2\n", t: b"t2\n"})
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "merge", "-q", "side1"], capture_output=True
+    )
+    assert proc.returncode != 0  # b: modified on main, deleted on side1
+    commit(repo, "2026-01-04T00:00:00Z", {b: b"b3\n"})
+    git(repo, "checkout", "-q", "-b", "side2")
+    commit(repo, "2026-01-05T00:00:00Z", {a: b"EVIL\n", s: b"s1\n"})
+    commit(repo, "2026-01-06T00:00:00Z", {a: b"a2\n"})
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "2026-01-07T00:00:00Z", {"README": b"r\n"})
+    git(repo, "merge", "-q", "-s", "ours", "-m", "ours", "side2")
+    git(repo, "checkout", "-q", "-b", "side3")
+    commit(repo, "2026-01-08T00:00:00Z", {t: b"t3\n"})
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "2026-01-09T00:00:00Z", {"README": b"r2\n"})
+    git(repo, "merge", "-q", "--no-commit", "side3", date="2026-01-10T00:00:00Z")
+    commit(repo, "2026-01-10T00:00:00Z", {a: b"a3\n", c: None})  # evil merge
+    for n, rel in enumerate((a, r), 4):
+        git(repo, "checkout", "-q", "-b", f"oct{n}", "main")
+        commit(repo, f"2026-01-1{n}T00:00:00Z", {rel: f"oct{n}\n".encode()})
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "-m", "octopus", "oct4", "oct5")
+    commit(repo, "2026-01-20T00:00:00Z", {c: b"c2\n"})
+    rels = [a, b, c, t, r, s, "people/never.json"]
+    sources = ["people", "tiers", "revocations"]
+    combined = vouch.file_histories(repo, rels, sources)
+    assert sorted(combined) == sorted(rels)
+    for rel in rels:
+        got = {v.commit: (v.parents, v.data) for v in combined[rel]}
+        assert got == plumbing_history(repo, rel), rel
+        assert combined[rel] == vouch.file_history(repo, rel), rel
+        commits = [v.commit for v in combined[rel]]
+        for i, earlier in enumerate(commits):
+            for later in commits[i + 1 :]:
+                proc = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(repo),
+                        "merge-base",
+                        "--is-ancestor",
+                        later,
+                        earlier,
+                    ]
+                )
+                assert proc.returncode == 1, (rel, earlier, later)
+    assert {v.data for v in combined[c]} == {b"c1\n", None, b"c2\n"}
+    assert combined["people/never.json"] == []
+
+
+def test_path_outside_sources_refused(vouch: ModuleType, repo: Path) -> None:
+    """A path the combined log does not cover is an error, not an empty history."""
+    commit(repo, "2026-01-01T00:00:00Z", {PATH: b"v1\n"})
+    with pytest.raises(vouch.VouchError, match="not below tiers"):
+        vouch.file_histories(repo, [PATH], ["tiers"])
+
+
+@pytest.mark.parametrize("n", [2, 12])
+def test_registry_history_git_runs_do_not_grow_with_paths(
+    vouch: ModuleType, repo: Path, monkeypatch: pytest.MonkeyPatch, n: int
+) -> None:
+    """Reading the history of n person files costs the same few git runs for any n.
+
+    It used to cost four git runs per file and per .sig (vouch-xlha.2).
+    """
+    files: dict[str, bytes | None] = {"anchors.json": b"[]"}
+    for i in range(n):
+        files[f"people/p{i}.json"] = b"{}"
+        files[f"people/p{i}.json.sig"] = b"sig"
+    commit(repo, "2026-01-01T00:00:00Z", files)
+    commit(
+        repo, "2026-01-02T00:00:00Z", {f"people/p{i}.json": b"{ }" for i in range(n)}
+    )
+    runs: list[list[str]] = []
+    real = subprocess.run
+
+    def counting(argv: list[str], *args: object, **kwargs: object) -> object:
+        runs.append(argv)
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(vouch.subprocess, "run", counting)
+    history = vouch.registry_history(repo, [p for p in files if p.endswith(".json")])
+    monkeypatch.undo()
+    assert len(history.versions) == 2 * n + 1
+    assert all(len(history.versions[f"people/p{i}.json"]) == 2 for i in range(n))
+    assert len([a for a in runs if a[0] == "git"]) <= 9
+
+
+def test_gitlink_naming_a_files_blob_is_not_that_file(
+    vouch: ModuleType, repo: Path
+) -> None:
+    """A gitlink whose hash is another file's blob is unreadable, not that file's content.
+
+    Blobs are read once for all paths, so content must be looked up only for
+    file entries, both in a commit's own log and in a merge's.
+    """
+    data = b'{"handle": "carol"}\n'
+    commit(repo, "2026-01-01T00:00:00Z", {"README": b"r\n"})
+    git(repo, "checkout", "-q", "-b", "side")
+    commit(repo, "2026-01-02T00:00:00Z", {"people/carol.json": data})
+    blob = git(repo, "rev-parse", "HEAD:people/carol.json")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{blob},people/bob.json")
+    git(repo, "commit", "-q", "-m", "gitlink", date="2026-01-03T00:00:00Z")
+    side = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "2026-01-04T00:00:00Z", {"README": b"r2\n"})
+    git(
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "merge",
+        "side",
+        date="2026-01-05T00:00:00Z",
+    )
+    merge = git(repo, "rev-parse", "HEAD")
+    assert git(repo, "ls-tree", "HEAD", "--", "people/bob.json").startswith(
+        f"160000 commit {blob}\t"
+    )
+    rels = ["people/bob.json", "people/carol.json"]
+    unreadable: list[str] = []
+    logs = vouch.file_histories(repo, rels, ["people"], unreadable)
+    assert data not in [v.data for v in logs["people/bob.json"]]
+    assert [u for u in unreadable if u.startswith("people/bob.json:")] != []
+    unreadable = []
+    history = vouch.registry_history(repo, rels, unreadable=unreadable)
+    assert data in [d for _, d in history.versions["people/carol.json"]]
+    assert data not in [d for _, d in history.versions["people/bob.json"]]
+    bob = [u for u in unreadable if u.startswith("people/bob.json:")]
+    assert any(side in u for u in bob) and any(merge in u for u in bob)

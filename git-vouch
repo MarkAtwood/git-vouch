@@ -26,6 +26,10 @@ from typing import NamedTuple, Optional, Union
 
 HANDLE_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,38}")
 MAX_FILE_SIZE = 64 * 1024
+# Each signature block costs check one ssh-keygen run per distinct version;
+# keys cost only parsing, so retired ones, kept for the export, are not capped.
+MAX_KEYS = 16  # current keys per person file
+MAX_SIGNATURES = 4  # blocks per .sig file
 TIERS = ("anchor", "maintainer", "contributor", "automation")
 CONTEXT = "https://w3id.org/git-vouch/v1"
 DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
@@ -330,9 +334,41 @@ def file_history(
             a directory, a symlink, a submodule or too large. A commit dated
             beyond what datetime can hold is dated LAST_SECOND.
     """
-    parts = rel.split("/")
-    if any(p in ("", ".", "..") for p in parts) or not rel.isprintable():
-        raise VouchError(f"{rel!r}: not a plain path below the registry")
+    return file_histories(root, [rel], [rel], unreadable)[rel]
+
+
+def file_histories(
+    root: Path,
+    rels: Iterable[str],
+    sources: Sequence[str],
+    unreadable: Optional[list[str]] = None,
+) -> dict[str, list[Version]]:
+    """Return ``file_history`` of each path in ``rels``, from one git log over ``sources``.
+
+    With ``--full-history``, git lists a commit's raw line for each path on
+    its own, so one log over many paths gives each the lines its own log
+    would.
+
+    Args:
+        root: As for ``file_history``.
+        rels: The paths, each one of ``sources`` or below one.
+        sources: The paths whose log is read.
+        unreadable: As for ``file_history``.
+
+    Raises:
+        VouchError: As for ``file_history``, or a path is not below ``sources``.
+    """
+    # commit -> (commit, committer time, parents, result mode, result blob), per path
+    found: dict[str, dict[str, tuple[str, str, tuple[str, ...], str, str]]] = {}
+    for rel in rels:
+        parts = rel.split("/")
+        if any(p in ("", ".", "..") for p in parts) or not rel.isprintable():
+            raise VouchError(f"{rel!r}: not a plain path below the registry")
+        if not any(rel == s or rel.startswith(s + "/") for s in sources):
+            raise VouchError(f"{rel}: not below {', '.join(sources)}")
+        found[rel] = {}
+    if not found:
+        return {}
     if run([*GIT, "rev-parse", "--is-shallow-repository"], cwd=root).strip() == b"true":
         raise VouchError(f"{root}: shallow clone; the registry needs its full history")
     # -c prints a merge's raw line only when it differs from every parent;
@@ -352,11 +388,9 @@ def file_history(
             "-z",
             "--format=%H %ct %P",
         ],
-        values=[rel],
+        values=sources,
         cwd=root,
     )
-    # commit -> (commit, committer time, parents, result mode, result blob)
-    found: dict[str, tuple[str, str, tuple[str, ...], str, str]] = {}
     tokens = iter(log.split(b"\0"))
     for token in tokens:
         token = token.lstrip(b"\n")
@@ -365,38 +399,41 @@ def file_history(
         if not token.startswith(b":"):
             commit, ctime, *parents = token.decode().split()
             continue
-        path = next(tokens, b"")
+        path = next(tokens, b"").decode(errors="surrogateescape")
         n = len(token) - len(token.lstrip(b":"))
         fields = token[n:].decode().split()
         mode, blob = fields[n], fields[2 * n + 1]
         entry = (commit, ctime, tuple(parents), mode, blob)
-        if path.startswith(rel.encode() + b"/"):
-            # A directory at rel: git lists the files below it, beside rel's
-            # own deletion. A file added or changed there means a directory
-            # version; only files deleted there mean rel is gone.
+        for i in (i for i, c in enumerate(path) if c == "/"):
+            # A directory at a path: git lists the files below it, beside the
+            # path's own deletion. A file added or changed there means a
+            # directory version; only files deleted there mean the path is gone.
+            below = found.get(path[:i])
+            if below is None:
+                continue
             if mode != "000000":
-                found[commit] = (commit, ctime, tuple(parents), "040000", commit)
+                below[commit] = (commit, ctime, tuple(parents), "040000", commit)
             else:
-                found.setdefault(commit, entry)
-        elif path == rel.encode():
-            if found.get(commit, entry)[3] != "040000":
-                found[commit] = entry
-        else:
-            raise VouchError(f"{rel} at {commit}: not a regular file")
-    contents = read_blobs(
-        root, rel, [f[4] for f in found.values() if f[3] in FILE_MODES], skip=True
-    )
-    versions = []
-    for commit, ctime, parents, mode, blob in found.values():
-        try:
-            date = datetime.fromtimestamp(int(ctime), timezone.utc)
-        except (ValueError, OverflowError, OSError):
-            date = LAST_SECOND
-        data = None if mode == "000000" else contents.get(blob)
-        if mode != "000000" and data is None:
-            data = _unreadable(rel, commit, blob, unreadable)
-        versions.append(Version(commit, date, parents, data))
-    return versions
+                below.setdefault(commit, entry)
+        at = found.get(path)
+        if at is not None and at.get(commit, entry)[3] != "040000":
+            at[commit] = entry
+    blobs = {f[4] for at in found.values() for f in at.values() if f[3] in FILE_MODES}
+    contents = read_blobs(root, ", ".join(sources), sorted(blobs), skip=True)
+    histories = {}
+    for rel, at in found.items():
+        versions = []
+        for commit, ctime, parents, mode, blob in at.values():
+            try:
+                date = datetime.fromtimestamp(int(ctime), timezone.utc)
+            except (ValueError, OverflowError, OSError):
+                date = LAST_SECOND
+            data = contents.get(blob) if mode in FILE_MODES else None
+            if mode != "000000" and data is None:
+                data = _unreadable(rel, commit, blob, unreadable)
+            versions.append(Version(commit, date, parents, data))
+        histories[rel] = versions
+    return histories
 
 
 def b58encode(data: bytes) -> str:
@@ -859,6 +896,8 @@ def _person(obj: Mapping[str, object], stem: str) -> Person:
     name = _text(obj, "name")
     emails = _emails("emails", _list(obj, "emails"))
     keys = tuple(_person_key(k, f"keys[{i}]") for i, k in enumerate(_list(obj, "keys")))
+    if sum(k.retired is None for k in keys) > MAX_KEYS:
+        raise VouchError(f"keys: more than {MAX_KEYS} current")
     if len({k.did for k in keys}) != len(keys):
         raise VouchError("keys: the same key is listed twice")
     accountable = (
@@ -1022,15 +1061,18 @@ def require_accountable(person: Person) -> None:
 def split_signatures(sig: bytes) -> list[bytes]:
     """Return the armored SSH signatures that make up a ``.sig`` file, in order.
 
-    The file must be nothing but one or more ``ssh-keygen -Y sign`` blocks,
-    each ending in a newline.
+    The file must be nothing but one to MAX_SIGNATURES ``ssh-keygen -Y
+    sign`` blocks, each ending in a newline.
 
     Raises:
-        VouchError: The file is empty or holds anything else.
+        VouchError: The file is empty, holds more blocks, or anything else.
     """
     if not SIGS_RE.fullmatch(sig):
         raise VouchError("not a sequence of armored SSH signatures")
-    return SIG_RE.findall(sig)
+    blocks = SIG_RE.findall(sig)
+    if len(blocks) > MAX_SIGNATURES:
+        raise VouchError(f"more than {MAX_SIGNATURES} signatures")
+    return blocks
 
 
 def _verifies(data: bytes, sig: bytes, namespace: str, key: PersonKey) -> bool:
@@ -1039,9 +1081,18 @@ def _verifies(data: bytes, sig: bytes, namespace: str, key: PersonKey) -> bool:
     Raises:
         VouchError: ssh-keygen cannot be run.
     """
+    return _ssh_verifies(data, sig, namespace, key.ssh)
+
+
+# ponytail: check still runs ssh-keygen once per distinct signature in the
+# registry's history, about 5 ms each (1,948 runs, 11 s, for 600 people with
+# history), and the cache lives as long as the process; a cache kept on disk
+# across runs, keyed by content, is the upgrade path.
+@functools.lru_cache(maxsize=None)
+def _ssh_verifies(data: bytes, sig: bytes, namespace: str, ssh: str) -> bool:
     with tempfile.TemporaryDirectory() as tmp:
         allowed = Path(tmp, "allowed_signers")
-        allowed.write_text(f"signer {key.ssh}\n")
+        allowed.write_text(f"signer {ssh}\n")
         sig_file = Path(tmp, "sig")
         sig_file.write_bytes(sig)
         cmd = ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", "signer"]
@@ -1053,11 +1104,26 @@ def _verifies(data: bytes, sig: bytes, namespace: str, key: PersonKey) -> bool:
     return proc.returncode == 0
 
 
+def _signed_by(sig: bytes) -> Optional[bytes]:
+    """Return the public key blob an armored SSH signature names, or None if unreadable.
+
+    This is the SSHSIG blob's first wire string (OpenSSH PROTOCOL.sshsig):
+    parsing only; ssh-keygen still decides whether the signature is valid.
+    """
+    try:
+        blob = base64.b64decode(b"".join(sig.splitlines()[1:-1]), validate=True)
+        strings = _ssh_strings(blob[10:]) if blob.startswith(b"SSHSIG") else []
+    except (ValueError, VouchError):
+        return None
+    return strings[0] if strings else None
+
+
 def _signer(
     data: bytes, sig: bytes, namespace: str, keys: Sequence[PersonKey]
 ) -> Optional[PersonKey]:
-    # ponytail: one ssh-keygen run per candidate; fine for a handful of keys.
-    return next((k for k in keys if _verifies(data, sig, namespace, k)), None)
+    blob = _signed_by(sig)
+    key = next((k for k in keys if base64.b64decode(k.ssh.split()[1]) == blob), None)
+    return key if key is not None and _verifies(data, sig, namespace, key) else None
 
 
 def signer_of(
@@ -1417,27 +1483,23 @@ def registry_history(
                 for top in (rel[:i] for i, c in enumerate(rel) if c == "/"):
                     if pattern.fullmatch(top):
                         kept.setdefault(top, []).append((merge, "040000", merge))
-    versions: dict[str, list[tuple[int, Optional[bytes]]]] = {}
-    # ponytail: one file_history (four git runs) per path, so a registry of
-    # thousands of files takes seconds; one combined git log would be faster.
-    for rel in sorted(n for n in names if pattern.fullmatch(n)):
-        found = (
-            {order[v.commit]: v.data for v in file_history(root, rel, unreadable)}
-            if commits
-            else {}
-        )
-        merges: dict[str, tuple[str, str]] = {}  # merge -> (mode, blob)
+    wanted = sorted(n for n in names if pattern.fullmatch(n))
+    logs = file_histories(root, wanted, sources, unreadable) if commits else {}
+    merged: dict[str, dict[str, tuple[str, str]]] = {}  # rel -> merge -> (mode, blob)
+    for rel in wanted:
+        merges = merged.setdefault(rel, {})
         for m, mode, blob in kept.get(rel, []):
             if merges.get(m, ("",))[0] != "040000":
                 merges[m] = (mode, blob)
-        contents = read_blobs(
-            root,
-            rel,
-            sorted({b for mode, b in merges.values() if mode in FILE_MODES}),
-            True,
-        )
-        for m, (mode, blob) in sorted(merges.items()):
-            data = None if mode == "000000" else contents.get(blob)
+    blobs = {
+        b for ms in merged.values() for mode, b in ms.values() if mode in FILE_MODES
+    }
+    contents = read_blobs(root, ", ".join(sources), sorted(blobs), True)
+    versions: dict[str, list[tuple[int, Optional[bytes]]]] = {}
+    for rel in wanted:
+        found = {order[v.commit]: v.data for v in logs.get(rel, ())}
+        for m, (mode, blob) in sorted(merged[rel].items()):
+            data = contents.get(blob) if mode in FILE_MODES else None
             if mode != "000000" and data is None:
                 data = _unreadable(rel, m, blob, unreadable)
             found.setdefault(order[m], data)
@@ -1765,7 +1827,7 @@ def check_registry(root: Path) -> CheckResult:
                     pass  # an unsigned listing proves nothing
                 else:
                     signed[handle, i, did] = any(
-                        _verifies(body, block, NAMESPACES["people"], key)
+                        _signer(body, block, NAMESPACES["people"], [key])
                         for block in split_signatures(signature)
                     )
         return signed[handle, i, did]

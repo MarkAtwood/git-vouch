@@ -378,3 +378,111 @@ def test_missing_ssh_keygen_is_an_error_not_a_bad_signature(
         vouch.signer_of("people/alice.json", data, sig, person.keys)
     with pytest.raises(vouch.VouchError, match="cannot run ssh-keygen"):
         vouch.verify_person(person, data, sig)
+
+
+def count_verifies(
+    vouch: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[bytes, bytes, str, str]]:
+    """Record (data, signature, namespace, allowed key) for each ssh-keygen -Y verify run.
+
+    The verification cache is cleared first, so runs earlier in the process
+    do not hide any.
+    """
+    vouch._ssh_verifies.cache_clear()
+    runs: list[tuple[bytes, bytes, str, str]] = []
+    real = subprocess.run
+
+    def recording(argv: list[str], *args: object, **kwargs: object) -> object:
+        if argv[:3] == ["ssh-keygen", "-Y", "verify"]:
+            opt = dict(zip(argv[3::2], argv[4::2]))
+            runs.append(
+                (
+                    kwargs["input"],
+                    Path(opt["-s"]).read_bytes(),
+                    opt["-n"],
+                    Path(opt["-f"]).read_text(),
+                )
+            )
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(vouch.subprocess, "run", recording)
+    return runs
+
+
+def test_each_block_is_verified_once_by_the_key_it_names(
+    vouch: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Four keys signing in reverse order cost four ssh-keygen runs, not ten (vouch-xlha.3, .25).
+
+    Each block is checked only against the key its SSHSIG blob names, and a
+    signature already verified is not verified again.
+    """
+    keys = [make_key(tmp_path, f"k{i}", ["-t", "ed25519"]) for i in range(4)]
+    data = person_bytes(*keys)
+    person = vouch.parse_record("people/alice.json", data)
+    sig = b"".join(
+        sign(k, "git-vouch-register", data, tmp_path) for k in reversed(keys)
+    )
+    runs = count_verifies(vouch, monkeypatch)
+    assert vouch.verify_person(person, data, sig) is True
+    assert vouch.verify_person(person, data, sig) is True
+    assert len(runs) == 4
+    assert sorted(r[3] for r in runs) == sorted(
+        f"signer {' '.join(k.pubkey.split()[:2])}\n" for k in keys
+    )
+
+
+def test_block_naming_no_allowed_key_runs_no_ssh_keygen(
+    vouch: ModuleType,
+    ed25519_key: Key,
+    second_key: Key,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signature by a key not on the allowed list is refused without trying each key."""
+    data = person_bytes(ed25519_key)
+    person = vouch.parse_record("people/alice.json", data)
+    sig = sign(second_key, "git-vouch-register", data, tmp_path)
+    runs = count_verifies(vouch, monkeypatch)
+    with pytest.raises(vouch.VouchError, match="invalid, by a non-current key"):
+        vouch.verify_person(person, data, sig)
+    assert runs == []
+
+
+def test_block_naming_the_key_still_needs_ssh_keygen(
+    vouch: ModuleType, ed25519_key: Key, tmp_path: Path
+) -> None:
+    """Picking the key from the blob proves nothing: a tampered record still fails."""
+    data = person_bytes(ed25519_key)
+    person = vouch.parse_record("people/alice.json", data)
+    sig = sign(ed25519_key, "git-vouch-register", data, tmp_path)
+    with pytest.raises(vouch.VouchError, match="invalid, by a non-current key"):
+        vouch.verify_person(person, data.replace(b"Alice", b"Mallory"), sig)
+
+
+def test_more_than_sixteen_current_keys_refused(
+    vouch: ModuleType, tmp_path: Path
+) -> None:
+    """A person file may list at most 16 current keys; retired ones do not count (vouch-xlha.25)."""
+    keys = [make_key(tmp_path, f"k{i}", ["-t", "ed25519"]) for i in range(17)]
+    person = vouch.parse_record(
+        "people/alice.json", person_bytes(*keys[:16], retired=keys[16])
+    )
+    assert len(person.keys) == 17
+    with pytest.raises(vouch.VouchError, match="keys: more than 16 current"):
+        vouch.parse_record("people/alice.json", person_bytes(*keys))
+
+
+def test_more_than_four_signature_blocks_refused(
+    vouch: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A .sig file may hold at most four blocks, and five are refused unverified (vouch-xlha.25)."""
+    keys = [make_key(tmp_path, f"k{i}", ["-t", "ed25519"]) for i in range(5)]
+    data = person_bytes(*keys)
+    person = vouch.parse_record("people/alice.json", data)
+    blocks = [sign(k, "git-vouch-register", data, tmp_path) for k in keys]
+    assert vouch.verify_person(person, data, b"".join(blocks[:4])) is True
+    runs = count_verifies(vouch, monkeypatch)
+    with pytest.raises(vouch.VouchError, match="more than 4 signatures"):
+        vouch.verify_person(person, data, b"".join(blocks))
+    assert runs == []
