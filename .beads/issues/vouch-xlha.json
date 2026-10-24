@@ -1,17 +1,17 @@
 {
   "id": "vouch-xlha",
   "title": "Review: git-vouch core tools @4237c43 2026-10-23",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "issue_type": "epic",
   "assignee": "agent",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:18:58.344882291Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:18:58.464758311Z",
+  "updated_at": "2026-10-24T04:43:40.736923379Z",
   "started_at": "2026-10-23T19:18:58.464758311Z",
-  "lease_expires_at": "2026-10-23T19:23:58.464758311Z",
-  "heartbeat_at": "2026-10-23T19:18:58.464758311Z",
+  "closed_at": "2026-10-24T04:43:40.736923379Z",
+  "close_reason": "all review findings fixed or kept as recorded decisions (2026-10-23)",
   "labels": [
     "review"
   ]
