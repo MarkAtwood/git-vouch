@@ -206,8 +206,8 @@ git config --global gpg.ssh.allowedSignersFile
 git vouch status
 ```
 
-From now on plain `git verify-tag` and `git pull` verification apply the
-tier. A maintainer signs a tag for a pull (here as `alice`):
+From now on plain `git verify-tag` applies the tier. A maintainer signs
+a tag for a pull (here as `alice`):
 
 <!-- as alice -->
 ```sh
@@ -227,8 +227,34 @@ cd linux
 git verify-tag alice-6.99
 ```
 
-A signer below maintainer gets "No principal matched". From the flag
-day, a GPG-signed tag or pull is not accepted.
+A tag from a key below maintainer tier and a tag from a key the registry
+does not hold fail the same way. `git verify-tag` exits 1 and prints:
+
+    Good "git" signature with ED25519 key SHA256:<fingerprint>
+    No principal matched.
+
+"Good" means only that the signature matches the key; "No principal
+matched" means the key is not in your export. `git pull` of that tag does
+not fail. It merges, exits 0, and puts the same two lines in the merge
+message only as `#` comments; `git log --show-signature` repeats them
+under `merged tag '<tag>'`. `git pull --verify-signatures` checks commit
+signatures, not the tag, so it rejects even a maintainer's good tag on
+unsigned commits. Run `git verify-tag` on the tag before you merge it.
+
+Reply to the sender with what they must do; `git vouch status` shows
+them their own tier:
+
+- **Not registered:** register, collect endorsements, and get approved
+  as maintainer. Then re-sign the tag: git checks the tag's signing time
+  against the key's registration time, so a tag signed before the
+  registration merge keeps failing.
+- **Below maintainer:** an anchor approves them as maintainer. The
+  existing tag then verifies.
+- **Approved, but your copy predates it:** nothing; you run
+  `git vouch sync`.
+
+Run `git vouch sync` before you verify again. From the flag day, a
+GPG-signed tag or pull is not accepted.
 
 ### Release tooling and the first SSH release tag
 

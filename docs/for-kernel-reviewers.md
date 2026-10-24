@@ -44,8 +44,11 @@ exported line (DESIGN: Constraints).
 
 Linus runs `git vouch setup --min-tier maintainer` once; `git vouch
 sync` refreshes the files (DESIGN: Commands). After the flag day, a tag
-from anyone below maintainer tier fails `git verify-tag` (DESIGN: What
-git and OpenSSH already do).
+from an unregistered or below-maintainer key fails `git verify-tag` with
+"No principal matched.", the same message for both, while `git pull`
+still merges it and shows that line only in the merge message
+(measured, git 2.55.0, OpenSSH 9.6p1; guide-anchors: Switch Linus's
+git).
 
 A maintainer runs `git vouch register`, collects endorsements made with
 `git vouch endorse`, and an anchor runs
