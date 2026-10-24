@@ -35,7 +35,7 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
         cd registry
         git fetch -q origin "$1"
         git diff --name-status HEAD...FETCH_HEAD
-        git merge -q --no-edit FETCH_HEAD
+        git merge -q --no-ff --no-edit FETCH_HEAD
         git vouch check .
         git push -q origin main
     )

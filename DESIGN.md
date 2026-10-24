@@ -227,8 +227,10 @@ approver. Either signer could backdate them; review is the check.
 **Merging needs one person.** A registry maintainer merges a change once
 `git vouch check` passes. Endorsements, tier records and revocations are
 signed by the key that makes them, so the merger cannot forge one for a
-key they do not control. Three things rest on review instead, as
-accepted risks:
+key they do not control. Registry maintainers merge with `git merge
+--no-ff`, so every commit on the main line's first-parent chain carries
+the maintainer's committer date, not the submitter's. Three things rest
+on review instead, as accepted risks:
 
 - **`anchors.json`** (see Anchors).
 - **A person file change not signed by any key from the previous

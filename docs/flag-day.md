@@ -133,7 +133,9 @@ git push -q origin main
 ```
 
 Order matters: `check` fails if `anchors.json` names a handle that has no
-person file, so the anchors' person files go in first.
+person file, so the anchors' person files go in first. This first merge
+is the only fast-forward: the registry is still empty, and git cannot
+make a merge commit into an empty branch.
 
 ### Everyone else registers
 
@@ -242,14 +244,16 @@ git push -q origin HEAD:register-carol
 
 The registry maintainer merges each submitted branch the same way: list
 the paths it touches, merge, and push only if `git vouch check` exits 0
-and the list is right:
+and the list is right. `--no-ff` makes every merge a commit of its own,
+so the commits on the registry's main line carry the maintainer's
+committer dates, not ones the submitter set:
 
 ```sh
 branch=register-alice
 cd registry
 git fetch -q origin "$branch"
 git diff --name-status HEAD...FETCH_HEAD
-git merge -q --no-edit FETCH_HEAD
+git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 git push -q origin main
 ```

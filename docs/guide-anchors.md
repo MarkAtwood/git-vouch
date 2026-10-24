@@ -140,7 +140,7 @@ branch=register-alice
 cd registry
 git fetch -q origin "$branch"
 git diff --name-status HEAD...FETCH_HEAD
-git merge -q --no-edit FETCH_HEAD
+git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 ```
 
