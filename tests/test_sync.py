@@ -445,3 +445,82 @@ def test_status_before_setup_fails(home: Path) -> None:
     proc = run_script("status")
     assert proc.returncode == 1
     assert "git vouch setup" in proc.stderr
+
+
+def test_unwritable_data_dir_is_a_clean_error(home: Path, remote: Path) -> None:
+    data = data_dir(home)
+    data.mkdir(parents=True)
+    data.chmod(0o555)
+    try:
+        proc = run_script("setup", "--registry", str(remote))
+    finally:
+        data.chmod(0o755)
+    assert proc.returncode == 1
+    assert "git-vouch: error: cannot update the registry copy at" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_unreadable_fetch_time_is_a_clean_error(home: Path, remote: Path) -> None:
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    copy = data_dir(home) / "registry"
+    stamp = copy / ".git" / "vouch-fetched"
+    stamp.unlink()
+    stamp.symlink_to("vouch-fetched")  # stat fails with ELOOP, not ENOENT
+    proc = run_script("check", str(copy))
+    assert proc.returncode == 1
+    assert "git-vouch: error: cannot read the fetch time" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_registry_url_not_utf8_is_a_clean_error(home: Path) -> None:
+    cmd = [b"git", b"config", b"--global", b"vouch.registry", b"/srv/reg-\xff"]
+    assert subprocess.run(cmd).returncode == 0
+    proc = run_script("sync")
+    assert proc.returncode == 1
+    assert "git-vouch: error: git config vouch.registry: not UTF-8" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_sync_output_paths_need_not_be_utf8(
+    home: Path, remote: Path, tmp_path: Path
+) -> None:
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    signers = os.fsencode(tmp_path) + b"/signers-\xff"
+    revocations = os.fsencode(tmp_path) + b"/revoked-\xfe"
+    for name, value in (
+        (b"gpg.ssh.allowedSignersFile", signers),
+        (b"gpg.ssh.revocationFile", revocations),
+    ):
+        cmd = [b"git", b"config", b"--global", name, value]
+        assert subprocess.run(cmd).returncode == 0
+    proc = run_script("sync")
+    assert proc.returncode == 0, proc.stderr
+    with open(signers, "rb") as f:
+        assert b"torvalds@example.org" in f.read()
+    assert os.path.exists(revocations)
+
+
+def test_saved_registry_url_not_utf8_is_a_clean_error(home: Path, remote: Path) -> None:
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    (data_dir(home) / "registry" / ".git" / "vouch-url").write_bytes(b"\xff")
+    proc = run_script("sync")
+    assert proc.returncode == 1
+    assert "git-vouch: error: cannot update the registry copy at" in proc.stderr
+    assert "Traceback" not in proc.stderr
+
+
+def test_check_a_worktree_under_a_non_utf8_directory(
+    remote: Path, tmp_path: Path
+) -> None:
+    """A linked worktree's git-common-dir is an absolute path, here not UTF-8."""
+    clone = os.fsencode(tmp_path) + b"/r-\xff"
+    worktree = os.fsencode(tmp_path) + b"/worktree"
+    for cmd in (
+        [b"git", b"clone", b"-q", os.fsencode(remote), clone],
+        [b"git", b"-C", clone, b"worktree", b"add", b"-q", worktree],
+    ):
+        proc = subprocess.run(cmd, capture_output=True)
+        assert proc.returncode == 0, proc.stderr
+    proc = run_script("check", os.fsdecode(worktree))
+    assert proc.returncode == 0, proc.stderr
+    assert "torvalds" in proc.stdout

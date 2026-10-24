@@ -2456,15 +2456,21 @@ def revocation_list(result: CheckResult) -> str:
 
 def _write_atomic(path: Path, text: str) -> None:
     # git may verify while we write; it must see the old file or the new, never half.
-    f = tempfile.NamedTemporaryFile(
-        "w", dir=path.parent, prefix=f".{path.name}.", delete=False
-    )
+    # The files are public: keep the old file's mode, else 0o666 less the umask.
     try:
-        with f:
+        mode: Optional[int] = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = None
+    tmp = path.with_name(f".{path.name}.{os.urandom(6).hex()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "w") as f:
+            if mode is not None:
+                os.fchmod(f.fileno(), mode)
             f.write(text)
-        os.replace(f.name, path)
+        os.replace(tmp, path)
     except BaseException:
-        os.unlink(f.name)
+        os.unlink(tmp)
         raise
 
 
@@ -2472,10 +2478,11 @@ def _output_path(given: Optional[str], option: str, config: str) -> Path:
     if given:
         return Path(given)
     try:
-        value = run(["git", "config", "--get", "--type=path", config]).decode().strip()
+        value = run(["git", "config", "--get", "--type=path", config])
     except VouchError as e:
         raise VouchError(f"no output file: pass {option} or set {config}") from e
-    return Path(value)
+    # A path need not be UTF-8; surrogateescape gives os and subprocess its bytes back.
+    return Path(value.decode(errors="surrogateescape").strip())
 
 
 def cmd_export(args: argparse.Namespace) -> int:
@@ -2556,7 +2563,13 @@ def _config(name: str, kind: str = "") -> Optional[str]:
     if proc.returncode != 0:
         err = proc.stderr.decode(errors="replace").strip()
         raise VouchError(f"git config --get {name} failed: {err}")
-    return proc.stdout.decode().strip()
+    if kind == "path":
+        # A path need not be UTF-8; surrogateescape gives os and subprocess its bytes back.
+        return proc.stdout.decode(errors="surrogateescape").strip()
+    try:
+        return proc.stdout.decode().strip()
+    except UnicodeDecodeError as e:
+        raise VouchError(f"git config {name}: not UTF-8") from e
 
 
 def _set_config(name: str, value: str) -> None:
@@ -2575,10 +2588,13 @@ def _fetched(root: Path) -> Optional[datetime]:
         git_dir = run([*GIT, "rev-parse", "--git-common-dir"], cwd=root)
     except VouchError:
         return None  # not a repository, so not the copy sync keeps
+    stamp = root / git_dir.decode(errors="surrogateescape").strip() / "vouch-fetched"
     try:
-        mtime = (root / git_dir.decode().strip() / "vouch-fetched").stat().st_mtime
+        mtime = stamp.stat().st_mtime
     except FileNotFoundError:
         return None
+    except OSError as e:
+        raise VouchError(f"cannot read the fetch time: {e}") from e
     when = datetime.fromtimestamp(mtime, timezone.utc)
     age = datetime.now(timezone.utc) - when
     if age > STALE_AFTER:
@@ -2600,6 +2616,8 @@ def _fetch(url: str, copy: Path) -> None:
 
     Raises:
         VouchError: The fetch fails or is refused, or the checkout fails.
+        OSError: ``copy`` cannot be created or written.
+        UnicodeDecodeError: The URL saved in ``copy`` is not UTF-8.
     """
     git_dir = copy / ".git"
     if not git_dir.is_dir():
@@ -2660,7 +2678,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
         paths.append(Path(value))
     revocations, signers = paths
     copy = registry_copy()
-    _fetch(url, copy)
+    try:
+        _fetch(url, copy)
+    except (OSError, UnicodeDecodeError) as e:
+        raise VouchError(f"cannot update the registry copy at {copy}: {e}") from e
     result = check_registry(copy)
     _report(result)
     try:
@@ -3245,9 +3266,39 @@ def _endorse_draft(args: argparse.Namespace) -> int:
         raise VouchError("nobody can endorse themselves")
     d = f"endorsements/{subject}"
     rel = f"{d}/{endorser}-{_next_seq(root, d, endorser)}.json"
-    parse_record(rel, data)
+    record = parse_record(rel, data)
+    assert isinstance(record, Endorsement)  # the path decides the kind
+    try:
+        listed = _load_person(root, subject).keys
+    except VouchError:
+        listed = ()  # check refuses it later; the display says it is not listed
+    _show_endorsement(record, listed)
     _write_signed(rel, data, key)
     return 0
+
+
+def _show_endorsement(record: Endorsement, keys: Iterable[PersonKey]) -> None:
+    """Print to stderr the subject, key, name and emails ``record`` binds.
+
+    The key is shown with the SHA256 fingerprint ``ssh-keygen -l`` prints
+    for its line in ``keys`` (the subject's person file), so the endorser
+    can compare it with the one they checked. A did:key drops a FIDO key's
+    sk- type, so a key missing from ``keys`` is shown as the plain type.
+    """
+    ssh = next((k.ssh for k in keys if k.did == record.subject_key), None)
+    unlisted = ""
+    if ssh is None:
+        ssh = did_to_ssh(record.subject_key)
+        unlisted = f" (not in people/{record.subject}.json; shown as {ssh.split()[0]})"
+    blob = base64.b64decode(ssh.split()[1])
+    digest = base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
+    print(
+        f"git-vouch: signing an endorsement of {record.subject}\n"
+        f"  key:    SHA256:{digest} {record.subject_key}{unlisted}\n"
+        f"  name:   {record.subject_name}\n"
+        f"  emails: {', '.join(record.subject_emails)}",
+        file=sys.stderr,
+    )
 
 
 def cmd_endorse(args: argparse.Namespace) -> int:
@@ -3284,7 +3335,10 @@ def cmd_endorse(args: argparse.Namespace) -> int:
     if args.note is not None:
         obj["note"] = args.note
     obj["date"] = _now()
-    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    data, record = _record_bytes(rel, obj)
+    assert isinstance(record, Endorsement)  # the path decides the kind
+    _show_endorsement(record, current)
+    _write_signed(rel, data, key)
     return 0
 
 
@@ -3416,7 +3470,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("key", metavar="KEY", help=".pub file, key text or did:key")
     p.set_defaults(func=cmd_retire_key)
     p = signing("endorse", "write and sign an endorsement")
-    p.add_argument("handle", nargs="?")
+    p.add_argument(
+        "handle",
+        nargs="?",
+        help="whose current key, name and emails to endorse, as the checkout"
+        " has them: check out the merged registry, not a pull request",
+    )
     p.add_argument(
         "--from",
         dest="from_file",

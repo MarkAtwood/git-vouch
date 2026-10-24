@@ -447,3 +447,44 @@ def test_refuses_shared_email(
     assert "alice and gregkh both list the email" in proc.stderr
     assert not signers.exists()
     assert not (tmp_path / "revoked_keys").exists()
+
+
+def test_export_keeps_the_mode_of_existing_files(reg: Registry, tmp_path: Path) -> None:
+    """Rewriting keeps a file's mode: git run by another user must still read it."""
+    for path in (tmp_path / "allowed_signers", tmp_path / "revoked_keys"):
+        path.write_text("previous\n")
+        path.chmod(0o640)
+    out = export(reg, tmp_path)
+    for path in (out.signers, out.revocations):
+        assert oct(path.stat().st_mode & 0o777) == oct(0o640), path
+    assert "torvalds@example.org" in out.signers.read_text()
+
+
+def test_export_creates_new_files_world_readable(reg: Registry, tmp_path: Path) -> None:
+    old = os.umask(0o022)
+    try:
+        out = export(reg, tmp_path)
+    finally:
+        os.umask(old)
+    for path in (out.signers, out.revocations):
+        assert oct(path.stat().st_mode & 0o777) == oct(0o644), path
+
+
+def test_output_path_from_git_config_need_not_be_utf8(
+    reg: Registry, tmp_path: Path
+) -> None:
+    signers = os.fsencode(tmp_path) + b"/signers-\xff"
+    revocations = os.fsencode(tmp_path) + b"/revoked-\xfe"
+    for name, value in (
+        (b"gpg.ssh.allowedSignersFile", signers),
+        (b"gpg.ssh.revocationFile", revocations),
+    ):
+        assert (
+            subprocess.run([b"git", b"config", b"--global", name, value]).returncode
+            == 0
+        )
+    proc = run_script("export", str(reg.root))
+    assert proc.returncode == 0, proc.stderr
+    with open(signers, "rb") as f:
+        assert b"torvalds@example.org" in f.read()
+    assert os.path.exists(revocations)

@@ -16,6 +16,7 @@ for verifying attestations.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pty
@@ -908,3 +909,129 @@ def test_signs_through_the_agent(
     verify(reg / "endorsements/torvalds/gregkh-1.json", gregkh, "git-vouch-endorse")
     result = check(reg)
     assert result.returncode == 0, result.stderr
+
+
+def fingerprint(public: Path) -> str:
+    """Return the SHA256 fingerprint ``ssh-keygen -l`` prints for the key in ``public``."""
+    out = subprocess.run(
+        ["ssh-keygen", "-l", "-f", str(public)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.split()[1]
+
+
+def shown(stderr: str) -> dict[str, str]:
+    """Return the fields endorse printed before signing."""
+    lines = stderr.splitlines()
+    start = next(i for i, x in enumerate(lines) if "signing an endorsement" in x)
+    fields = (x.split(":", 1) for x in lines[start + 1 : start + 4])
+    return {name.strip(): value.strip() for name, value in fields}
+
+
+def test_endorse_shows_the_subject_it_signs(tree: Path, keys: dict[str, Key]) -> None:
+    """alice has two current keys: endorse names the one it signs (vouch-xlha.26)."""
+    ok(
+        tree,
+        "add-key",
+        str(keys["alice2"].public),
+        "--sign-with",
+        str(keys["alice"].private),
+    )
+    commit(tree)
+    result = vouch(
+        tree, "endorse", "alice", "--sign-with", str(keys["torvalds"].private)
+    )
+    assert result.returncode == 0, result.stderr
+    assert "signing an endorsement of alice" in result.stderr
+    obj = load(tree / "endorsements/alice/torvalds-1.json")
+    signed = (
+        keys["alice"] if obj["subjectKey"] == did(keys["alice"]) else keys["alice2"]
+    )
+    assert obj["subjectKey"] == did(signed)
+    assert shown(result.stderr) == {
+        "key": f"{fingerprint(signed.public)} {did(signed)}",
+        "name": "Alice",
+        "emails": "alice@example.org",
+    }
+    verify(
+        tree / "endorsements/alice/torvalds-1.json",
+        keys["torvalds"],
+        "git-vouch-endorse",
+    )
+
+
+def test_endorse_from_a_draft_shows_the_subject_it_signs(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    result = vouch(
+        tree,
+        "endorse",
+        "--from",
+        str(path),
+        "--sign-with",
+        str(keys["torvalds"].private),
+    )
+    assert result.returncode == 0, result.stderr
+    assert shown(result.stderr) == {
+        "key": f"{fingerprint(keys['alice'].public)} {did(keys['alice'])}",
+        "name": "Alice",
+        "emails": "alice@example.org",
+    }
+    assert (
+        tree / "endorsements/alice/torvalds-1.json"
+    ).read_bytes() == path.read_bytes()
+
+
+def sk_did(public: Path) -> str:
+    """Return the did:key of the sk-ssh-ed25519 key in ``public``.
+
+    The blob is type, key, application; the 32-byte key is put in a plain
+    ssh-ed25519 line for test_check.did, which reads its last 32 bytes.
+    """
+    blob = base64.b64decode(public.read_text().split()[1])
+    fields = []
+    while blob:
+        n = int.from_bytes(blob[:4], "big")
+        fields.append(blob[4 : 4 + n])
+        blob = blob[4 + n :]
+    assert fields[0] == b"sk-ssh-ed25519@openssh.com" and len(fields[1]) == 32
+    plain = b"".join(len(f).to_bytes(4, "big") + f for f in (b"ssh-ed25519", fields[1]))
+    line = "ssh-ed25519 " + base64.b64encode(plain).decode()
+    return did(Key(public, public, line))
+
+
+def endorse_draft_of(
+    tree: Path, keys: dict[str, Key], tmp_path: Path, subject_key: str
+) -> subprocess.CompletedProcess[str]:
+    """Sign torvalds' draft endorsement of alice, naming ``subject_key``."""
+    path = endorsement_draft(tmp_path, "torvalds", keys["torvalds"], keys["alice"])
+    obj = load(path)
+    obj["subjectKey"] = subject_key
+    path.write_text(json.dumps(obj, indent=2) + "\n")
+    sign = ["--sign-with", str(keys["torvalds"].private)]
+    return vouch(tree, "endorse", "--from", str(path), *sign)
+
+
+def test_endorse_shows_a_fido_key_as_ssh_keygen_does(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    """A did:key drops the sk- type, so the fingerprint comes from the person file."""
+    ok(tree, "add-key", str(SK_PUB), "--sign-with", str(keys["alice"].private))
+    commit(tree)
+    result = endorse_draft_of(tree, keys, tmp_path, sk_did(SK_PUB))
+    assert result.returncode == 0, result.stderr
+    assert shown(result.stderr)["key"] == f"{fingerprint(SK_PUB)} {sk_did(SK_PUB)}"
+
+
+def test_endorse_says_when_the_key_is_not_in_the_person_file(
+    tree: Path, keys: dict[str, Key], tmp_path: Path
+) -> None:
+    result = endorse_draft_of(tree, keys, tmp_path, did(keys["alice2"]))
+    assert result.returncode == 0, result.stderr
+    assert shown(result.stderr)["key"] == (
+        f"{fingerprint(keys['alice2'].public)} {did(keys['alice2'])}"
+        " (not in people/alice.json; shown as ssh-ed25519)"
+    )
