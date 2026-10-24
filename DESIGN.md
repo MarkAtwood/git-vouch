@@ -230,11 +230,24 @@ datetime, and gives OpenSSH four-digit years.
 
 **Git history is part of the registry.** Order and removal come from the
 commits rather than from a field anyone could write: which commit first
-listed a key, which commit deleted a tier record and its committer date,
+listed a key, which commit deleted a tier record and its effective date,
 which revocations were ever committed, and what a person file said in
 the previous version. Two times come from signed fields instead: a key's
 `retired`, written by its holder, and a demotion's `date`, written by the
 approver. Either signer could backdate them; review is the check.
+
+**Effective dates.** Every commit on HEAD's first-parent line has an
+effective date: the later of its committer date and its first parent's
+effective date, so the dates on that line never go backwards. A commit
+off that line (a side-branch commit) takes the effective date of the
+first commit on HEAD's first-parent line that has it as an ancestor, so
+a branch merged with `--no-ff` counts from its merge, and so does a
+deletion merged from a branch. `check` refuses (an error, not a warning)
+any commit in HEAD's history whose committer date is more than 5
+minutes after the time `check` runs: `commit <id>: committer date is in
+the future`. Such a commit would move every later effective date, so it
+fails `check`, and so `export`, even when it touches no registry file;
+`sync` then writes only the revocation file.
 
 **Merging needs one person.** A registry maintainer merges a change once
 `git vouch check` passes. Endorsements, tier records and revocations are
@@ -242,8 +255,13 @@ signed by the key that makes them, so the merger cannot forge one for a
 key they do not control. A replayed or merged-back tier record that
 undoes a demotion is caught by `check` (see Tier record), so it is not a
 review-gated risk. Registry maintainers merge with `git merge --no-ff`,
-so every commit on the main line's first-parent chain carries the
-maintainer's committer date, not the submitter's. Three things rest on
+never a fast-forward, so every commit on the main line's first-parent
+chain carries the maintainer's committer date, not the submitter's.
+That includes never fast-forwarding a contributor's merge of main:
+`--no-ff` is the only protection against such a "foxtrot" merge, whose
+first parent is the contributor's own backdated branch. No date clamp
+can catch it, because the contributor's commits would then form the
+first-parent line. Three things rest on
 review instead, as accepted risks:
 
 - **`anchors.json`** (see Anchors).
@@ -292,11 +310,13 @@ Two git behaviours address that:
   is void, with a warning, until someone re-approves it. When two keys
   revoke each other on concurrent branches, both revocations count.
 - **Removal:** when `tiers/<handle>.json` is deleted, the export uses
-  the committer date of the deleting commit as `valid-before` for that
-  person's keys, provided the record verified at the parent commit.
+  the effective date of the deleting commit as `valid-before` for that
+  person's keys, provided the record verified at the parent commit; a
+  deletion merged from a branch counts from its merge. Replacing the
+  record with one that has no effect ends the tier the same way.
   Earlier signatures stay valid. The deletion is unsigned; review is the
   gate. Dropping a handle from `anchors.json` likewise ends the anchor
-  tier at the committer date of the commit that dropped it.
+  tier at the effective date of the commit that dropped it.
 - **Demotion:** when a record is replaced by a lower tier, or by one
   across the automation line, the old tier ends at the new record's own
   `date`. An export with `--min-tier` above the new tier keeps the key
@@ -362,7 +382,9 @@ Two git behaviours address that:
   an email covered by at least one valid endorsement (see Endorsement)
   is exported. An unendorsed email stays in the file, is not exported,
   and `check` warns about it.
-- **`keys`** holds every key the person has used, oldest first. A key
+- **`keys`** holds every key the person has used, oldest first. At most
+  16 of them may be current (no `retired`); retired keys do not count
+  toward the limit. A key
   with `retired` set becomes `valid-before` in the export. Its did:key
   is not stored; `git-vouch` derives it. If a key appears in two files,
   a listing as a current key (proven by the file's signature) beats any
@@ -391,7 +413,8 @@ Two git behaviours address that:
   extra DID or checks that it links back. A DID that also lists the
   person's did:key in its own `alsoKnownAs` is a stronger claim, but
   checking that is left to tools that resolve DIDs.
-- **The `.sig` file** needs a signature from any one key current in the
+- **The `.sig` file** (at most 4 signature blocks) needs a signature
+  from any one key current in the
   previous version, so backup tokens can stay in a drawer. The first
   version must be signed by at least one of its own keys. Adding a key
   is therefore signed by an existing key, which is how rotation works.
@@ -474,10 +497,13 @@ on. This never blocks `check`, `export` or `sync`, so revocations and
 tier removals keep spreading. Files in the working tree are still
 reported as problems. A commit whose committer date is beyond what
 `git-vouch` can represent (year 10000 or later) is read as
-9999-12-31T23:59:59Z. Where `check` uses that date it reports the
-problem `commit <id>: committer date out of range`, so `allowed_signers`
-is not exported, but the history is still read and `sync` still writes
-the revocation file.
+9999-12-31T23:59:59Z. `check` reports it as in the future (see
+Effective dates) and, where it uses that date, also as `commit <id>:
+committer date out of range`; the commits after it, which inherit that
+effective date, are not reported as out of range. Either way
+`allowed_signers` is not exported, but the history is still read and
+`sync` still writes the revocation file. A commit dated 9999-12-31 is
+refused as in the future too, so no such date reaches the export.
 
 Nothing has to be repaired for an unreadable version. It stays in
 history, `check` warns about it on every run naming the commit, and
@@ -485,14 +511,16 @@ history is not rewritten (`sync` refuses rewinds). Registry maintainers
 refuse such commits in review, and the warning on the branch is the
 signal. If a registry ever wants the warning gone, the only route is a
 coordinated history rewrite after which every user reruns `git vouch
-setup`; that is not recommended. A commit dated past year 9999 is
-different: it blocks `allowed_signers`, and repairing it needs that same
-rewrite, so maintainers must refuse such commits.
+setup`; that is not recommended. A commit dated in the future is
+different: it blocks `allowed_signers` until that time passes, which for
+a far date (past year 9999, say) is in practice forever, so repairing it
+needs that same rewrite, and maintainers must refuse such commits.
 
 Removing someone without suspecting their key is different: their tier
 record is deleted in a reviewed merge, and the export gives
-their keys `valid-before` set to the deleting commit's committer date,
-so their earlier signatures stay valid.
+their keys `valid-before` set to the deleting commit's effective date (a
+deletion merged from a branch counts from its merge), so their earlier
+signatures stay valid.
 
 ## Anchors
 
@@ -514,12 +542,12 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch status` | Shows registry commit, fetch age (warns past 7 days), and your own tier |
 | `git vouch register [--from FILE]` | Writes your person file from an SSH public key, or completes a draft such as one from `git-vouch-migrate`, and signs it through the agent |
 | `git vouch add-key` / `retire-key` | Rotation: edits your person file and re-signs it |
-| `git vouch endorse <handle>` / `--from FILE` | Writes and signs an endorsement, or signs a draft such as one from `git-vouch-migrate drafts` once its `endorser` and `endorserKey` are the signer's |
+| `git vouch endorse <handle>` / `--from FILE` | Writes and signs an endorsement, or signs a draft such as one from `git-vouch-migrate drafts` once its `endorser` and `endorserKey` are the signer's. Before signing, prints to stderr the subject, the key (the SHA256 fingerprint `ssh-keygen -l` shows for the person file's ssh line, and its did:key), the name and the emails it signs; if the person file does not list the key, it says so. Run it on the merged registry, not a pull-request checkout |
 | `git vouch approve <handle> <tier>` | Writes and signs a tier record |
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
-| `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown (used by `git-vouch-trqp`) |
+| `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |
 | `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
@@ -529,7 +557,10 @@ of the registry repository is therefore as sensitive as an anchor key.
 fetch stamp `vouch-fetched` lives in the repository's common git dir
 (`git rev-parse --git-common-dir`), which all its worktrees share.
 `register`, `endorse`, `approve` and `revoke` write files for a registry
-merge request; they never push. `--help` is the documentation; there is
+merge request; they never push. `export` and `sync` replace the
+allowed-signers and revocation files atomically, keeping an existing
+file's mode, and create a new one with mode 0666 minus the umask: the
+files are public, and git reads them. `--help` is the documentation; there is
 no man page.
 
 ## did:key
@@ -703,7 +734,12 @@ itself stays a CLI. Facts about `verify-trust` come from
   the bridge answers as of that time (`git vouch query --at`), with the
   tier, automation status and emails held then, read from the registry's
   git history, less any tier the current history ends at or before then;
-  export answers for now, so the two can differ for past times.
+  export answers for now, so the two can differ for past times. The
+  registry then is the newest commit on HEAD's first-parent line whose
+  effective date (see Effective dates) is at or before that time. A tier
+  record deleted, or replaced with one that has no effect, and an anchor
+  dropped from `anchors.json` end at the effective date of that commit,
+  which is also the export's `valid-before`.
 - **Freshness:** it syncs on a timer and refuses to answer, with an
   error that makes `verify-trust` fail closed, once 24 hours pass
   without a successful sync.
@@ -827,7 +863,11 @@ the window length. The late cutoff is six months after the flag day.
   shell: `git`, `ssh-keygen`.
 - **Input is untrusted:** registry files come from other people. Handles
   and file names match `^[a-z0-9][a-z0-9_-]{0,38}$`; each file has a
-  size cap (64 KiB); git-vouch's own terms are checked strictly for type and
+  size cap (64 KiB); a person file lists at most 16 current keys
+  (retired keys are not counted) and a `.sig` file holds at most 4
+  signature blocks, so each costs `check` a bounded number of
+  `ssh-keygen` runs; a file over either cap is a problem like any other
+  that does not parse; git-vouch's own terms are checked strictly for type and
   format, and all other terms are ignored; no registry value is ever put
   on a command line except as a single argument after `--`. Record dates
   must fall in the years 1970 to 9998.
@@ -921,7 +961,8 @@ Decided 2026-10-22:
   approver's demotion is void with a warning; mutual concurrent
   revocations both count; a tier record before its person file is
   ignored; removal ends at the
-  deleting commit's committer date (leaving `anchors.json` too),
+  deleting commit's effective date, a merged branch's at its merge
+  (leaving `anchors.json` too),
   demotion at the new record's date; the export adds an hour to every
   end for an OpenSSH 9.6 DST bug.
 - **Person files:** a change needs one signature from any key current in
