@@ -425,7 +425,7 @@ def file_histories(
     histories = {}
     for rel, at in found.items():
         versions = []
-        for commit, ctime, parents, mode, blob in at.values():
+        for commit, ctime, commit_parents, mode, blob in at.values():
             try:
                 date = datetime.fromtimestamp(int(ctime), timezone.utc)
             except (ValueError, OverflowError, OSError):
@@ -433,7 +433,7 @@ def file_histories(
             data = contents.get(blob) if mode in FILE_MODES else None
             if mode != "000000" and data is None:
                 data = _unreadable(rel, commit, blob, unreadable)
-            versions.append(Version(commit, date, parents, data))
+            versions.append(Version(commit, date, commit_parents, data))
         histories[rel] = versions
     return histories
 
@@ -622,8 +622,8 @@ def ssh_to_did(pubkey: str) -> str:
         )
     try:
         blob = base64.b64decode(fields[1], validate=True)
-    except ValueError as e:
-        raise VouchError(f"invalid base64 in SSH public key: {e}") from e
+    except ValueError as err:
+        raise VouchError(f"invalid base64 in SSH public key: {err}") from err
     # OpenSSH refuses stray padding bits and would skip this line in allowed_signers.
     if base64.b64encode(blob).decode() != fields[1]:
         raise VouchError(f"SSH public key base64 is not canonical; {NEW_KEY_HINT}")
@@ -1590,64 +1590,75 @@ def _in_validity(rel: str, key: PersonKey, date: datetime) -> None:
         raise VouchError(f"{rel}: dated outside the validity of {key.did}")
 
 
-def check_registry(root: Path) -> CheckResult:
-    """Validate every record in the registry checkout at ``root`` and compute every tier.
+def _record_at(history: History, rel: str, i: int) -> Optional[Record]:
+    """Return the record ``rel`` at position ``i``; None if absent or it does not parse."""
+    data = history.at(rel, i)
+    try:
+        return None if data is None else parse_record(rel, data)
+    except VouchError:
+        return None  # only the working tree's version is reported on
 
-    Records are judged by the registry's git history (see ``History``). A
-    tier record is valid if its approver held the authority at the commit
-    that added it, so an approver stepping down voids nothing. A key listed
-    in two person files belongs to the one whose commit listed it first. A
-    revocation counts once committed, even if later deleted, unless the key
-    that signed it was revoked in an ancestor commit. "Earlier" and "first"
-    always mean ancestry, never the order git lists branched commits in.
 
-    A problem is a record that is malformed, wrongly signed, or made by
-    someone without the authority to make it. A void record is valid in
-    itself but has no effect: it was signed by a key since revoked, it
-    depends on a record that is void or has a problem, or it is a tier
-    record committed before its subject's person file or concurrently with
-    a commit that took its approver's authority. An email may be
-    listed in only one person file, ignoring case; it is endorsed if a
-    valid endorsement lists it in ``subjectEmails``, and an unendorsed
-    email is a warning. So is every version of a person file that no
-    unrevoked key current in its previous version signed (for a merge that
-    kept one side's version, the concurrent change it dropped), and every person
-    file whose ``migratedFrom`` fingerprint another one also claims
-    (ignoring case), whichever merged first. Void records and
-    warnings do not fail the check, so a revocation never blocks the export
-    that spreads it.
+def _person_at(history: History, handle: str, i: int) -> Optional[Person]:
+    """Return the person file of ``handle`` at position ``i``, if it parses."""
+    person = _record_at(history, f"people/{handle}.json", i)
+    return person if isinstance(person, Person) else None
 
-    A tier ends where a commit deleted its record or replaced it with one
-    that has no effect, at that commit's effective date (a commit merged
-    from a branch counts from its merge), or where a lower
-    tier or one across the automation line replaced it, at the new record's
-    ``date``, provided the record verified at the parent commit. A record
-    that does not verify ends nothing. An anchor ends at the effective date
-    of the commit that dropped them from ``anchors.json``. A commit's
-    effective date is the later of its committer date and its first
-    parent's effective date; a commit dated more than FUTURE_SLACK after
-    check runs is a problem.
 
-    ``held_at(handle, when)`` is what a valid person held at ``when``, for
-    ``query --at``: the registry then is the newest commit on HEAD's
-    first-parent line dated at or before ``when``. Their tier there, or a
-    tier that ended after ``when`` as that commit's history has it, whichever
-    ranks highest (a human tier wins over automation); automation if that
-    tier is or that commit's person file names an accountable maintainer;
-    the emails that person file lists and that an endorsement in that
-    commit endorses, judged as the working tree's are (none, with a
-    warning, if their history cannot be read; check never reads it). None if
-    no person file of theirs parses at that commit. Revocations count at
-    every time, as everywhere. Export answers for now instead, so it can
-    differ for past times.
+def _keys_at(history: History, handle: str, i: int) -> Optional[Person]:
+    """Return the person file at ``i``, or only its keys if it no longer parses strictly.
 
-    Raises:
-        VouchError: ssh-keygen cannot be run, or the history cannot be read.
+    Continuity depends on keys alone, so an older version that a stricter
+    git-vouch rejects still chains its successors.
     """
-    problems: list[str] = []
-    voids: list[str] = []
-    warnings: list[str] = []
-    unchained: dict[str, list[str]] = {}
+    person = _person_at(history, handle, i)
+    data = history.at(f"people/{handle}.json", i)
+    if person is not None or data is None:
+        return person
+    try:
+        obj = _load_json(data)
+        if not isinstance(obj, dict):
+            return None
+        keys = tuple(_person_key(k, "keys") for k in _list(obj, "keys"))
+    except VouchError:
+        return None
+    return Person(handle, handle, (), keys, None, None)
+
+
+def _anchors_at(history: History, i: int) -> tuple[str, ...]:
+    """Return the anchors at position ``i``; none if anchors.json is absent or bad."""
+    data = history.at("anchors.json", i)
+    try:
+        return () if data is None else parse_anchors(data)
+    except VouchError:
+        return ()
+
+
+def _pair_at(
+    history: History, rel: str, i: int
+) -> tuple[Optional[bytes], Optional[bytes]]:
+    """Return ``rel`` and its .sig at position ``i``."""
+    return history.at(rel, i), history.at(rel + ".sig", i)
+
+
+def _adding(history: History, rel: str, i: int) -> list[int]:
+    """Return the latest commits that gave ``rel`` and its .sig their content at ``i``."""
+    found = {*history.added(rel, i), *history.added(rel + ".sig", i)}
+    return [a for a in found if not any(history.before(a, b) for b in found)]
+
+
+class _Records(NamedTuple):
+    """The records in the working tree, as ``_load_records`` read them."""
+
+    anchors: tuple[str, ...]
+    paths: list[str]  # every record path, as from ``_record_paths``
+    parsed: dict[str, tuple[Person, bytes, bytes]]  # handle -> (person, data, sig)
+    tier_records: list[tuple[str, Tier, bytes, bytes]]  # (rel, tier, data, sig)
+    endorsements: list[tuple[str, Endorsement, bytes, bytes]]  # (rel, ..., sig)
+
+
+def _load_records(root: Path, problems: list[str]) -> _Records:
+    """Read and parse every record in the working tree, adding a problem for each bad one."""
     try:
         anchors = parse_anchors(read_capped(root, "anchors.json"))
     except VouchError as e:
@@ -1682,70 +1693,39 @@ def check_registry(root: Path) -> CheckResult:
                 problems.append(
                     f"people/{handle}.json: {other} and {handle} both list the email {email}"
                 )
+    return _Records(anchors, paths, parsed, tier_records, endorsements)
 
-    # A past version git-vouch cannot read counts as one that does not parse:
-    # a warning, so it never blocks the export for good.
-    unreadable: list[str] = []
-    history = registry_history(root, paths, unreadable=unreadable)
-    warnings += dict.fromkeys(unreadable)
-    final = history.final
 
-    def record_at(rel: str, i: int) -> Optional[Record]:
-        data = history.at(rel, i)
-        try:
-            return None if data is None else parse_record(rel, data)
-        except VouchError:
-            return None  # only the working tree's version is reported on
+# (handle, position, previous keys or None, keys to name as old)
+_PersonVersion = tuple[str, int, Optional[list[PersonKey]], list[PersonKey]]
 
-    def person_at(handle: str, i: int) -> Optional[Person]:
-        person = record_at(f"people/{handle}.json", i)
-        return person if isinstance(person, Person) else None
 
-    def keys_at(handle: str, i: int) -> Optional[Person]:
-        """Return the person file at ``i``, or only its keys if it no longer parses strictly.
+class _Continuity(NamedTuple):
+    """What ``_person_continuity`` found."""
 
-        Continuity depends on keys alone, so an older version that a stricter
-        git-vouch rejects still chains its successors.
-        """
-        person = person_at(handle, i)
-        data = history.at(f"people/{handle}.json", i)
-        if person is not None or data is None:
-            return person
-        try:
-            obj = _load_json(data)
-            if not isinstance(obj, dict):
-                return None
-            keys = tuple(_person_key(k, "keys") for k in _list(obj, "keys"))
-        except VouchError:
-            return None
-        return Person(handle, handle, (), keys, None, None)
+    people: dict[str, Person]  # person files whose working-tree version is valid
+    versions: list[_PersonVersion]  # every version of every person file
+    # merges that kept one side's version over a concurrent change to it
+    restored: list[_PersonVersion]
 
-    def anchors_at(i: int) -> tuple[str, ...]:
-        data = history.at("anchors.json", i)
-        try:
-            return () if data is None else parse_anchors(data)
-        except VouchError:
-            return ()
 
-    def pair_at(rel: str, i: int) -> tuple[Optional[bytes], Optional[bytes]]:
-        return history.at(rel, i), history.at(rel + ".sig", i)
+def _person_continuity(
+    history: History,
+    parsed: Mapping[str, tuple[Person, bytes, bytes]],
+    problems: list[str],
+) -> _Continuity:
+    """Verify each person file's working-tree version against the keys before it.
 
-    def adding(rel: str, i: int) -> list[int]:
-        """Return the latest commits that gave ``rel`` and its .sig their content at ``i``."""
-        found = {*history.added(rel, i), *history.added(rel + ".sig", i)}
-        return [a for a in found if not any(history.before(a, b) for b in found)]
-
-    # Every version of a person file needs a signature by a key current at
-    # one of its parents. One without, or with no .sig at all, is let
-    # through by review, never an error, but warned about loudly once
-    # revocations are known. The working tree's file is judged at the latest
-    # version that gave it its content, not against itself.
+    Every version of a person file needs a signature by a key current at
+    one of its parents. One without, or with no .sig at all, is let
+    through by review, never an error, but warned about loudly once
+    revocations are known (see ``_warn_unchained``). The working tree's
+    file is judged at the latest version that gave it its content, not
+    against itself.
+    """
     people: dict[str, Person] = {}
-    # (handle, position, previous keys or None, keys to name as old)
-    person_versions: list[
-        tuple[str, int, Optional[list[PersonKey]], list[PersonKey]]
-    ] = []
-    restored: list[tuple[str, int, Optional[list[PersonKey]], list[PersonKey]]] = []
+    person_versions: list[_PersonVersion] = []
+    restored: list[_PersonVersion] = []
     for rel in sorted(history.versions):
         if not (rel.startswith("people/") and rel.endswith(".json")):
             continue
@@ -1759,21 +1739,22 @@ def check_registry(root: Path) -> CheckResult:
                     + history.versions.get(rel + ".sig", [])
                 }
             )
-            if pair_at(rel, i)[0] is not None
-            and pair_at(rel, i) not in [pair_at(rel, p) for p in history.parents[i]]
+            if _pair_at(history, rel, i)[0] is not None
+            and _pair_at(history, rel, i)
+            not in [_pair_at(history, rel, p) for p in history.parents[i]]
         ]
         now = parsed.get(handle)
-        origins = [j for j in changes if now and pair_at(rel, j) == now[1:]]
+        origins = [j for j in changes if now and _pair_at(history, rel, j) == now[1:]]
         origin = max(
             (j for j in origins if not any(history.before(j, k) for k in origins)),
             default=None,
         )
         for i in changes:
-            version = keys_at(handle, i)
-            body, signature = pair_at(rel, i)
+            version = _keys_at(history, handle, i)
+            body, signature = _pair_at(history, rel, i)
             if version is None or body is None:
                 continue  # the working tree's version is already reported
-            was = [keys_at(handle, p) for p in history.parents[i]]
+            was = [_keys_at(history, handle, p) for p in history.parents[i]]
             old = [k for v in was if v for k in v.keys if k.retired is None]
             # Only a version no other one precedes or runs concurrently with
             # is a first version, so a branch that never saw the file cannot
@@ -1782,7 +1763,7 @@ def check_registry(root: Path) -> CheckResult:
                 v
                 for j, d in history.versions[rel]
                 if d is not None and j != i and not history.before(i, j)
-                for v in [keys_at(handle, j)]
+                for v in [_keys_at(history, handle, j)]
                 if v
             ]
             previous = old if prior else None
@@ -1800,46 +1781,57 @@ def check_registry(root: Path) -> CheckResult:
         # the warning only: the change may have retired the kept version's
         # signer.
         for i in sorted({i for i, _ in history.versions[rel]}):
-            pair = pair_at(rel, i)
+            pair = _pair_at(history, rel, i)
             if len(history.parents[i]) < 2 or pair[0] is None or i in changes:
                 continue
-            kept = adding(rel, i)
-            others = [
+            kept = _adding(history, rel, i)
+            dropped = [
                 v
                 for q in history.parents[i]
-                if pair_at(rel, q) != pair
+                if _pair_at(history, rel, q) != pair
                 and any(
                     not any(s == k or history.before(s, k) for k in kept)
-                    for s in adding(rel, q)
+                    for s in _adding(history, rel, q)
                 )
-                for v in [keys_at(handle, q)]
+                for v in [_keys_at(history, handle, q)]
                 if v
             ]
-            if others:
-                old = [k for v in others for k in v.keys if k.retired is None]
+            if dropped:
+                old = [k for v in dropped for k in v.keys if k.retired is None]
                 restored.append((handle, i, old, old))
+    return _Continuity(people, person_versions, restored)
 
-    # A key belongs to one person, or export would credit their signatures to
-    # another. Listing a key as current, in a validly signed version of a
-    # person file that the key itself signed, is proven by that signature; any
-    # other listing proves nothing, so a proven listing always wins. Among current listings, or among
-    # retired ones when there is no current listing, the first wins: first
-    # means in an ancestor commit, and files that listed it in one commit, or
-    # on branches merged together, are tied. Losing to a current listing
-    # drops the lister.
+
+def _key_owners(
+    history: History,
+    people: Mapping[str, Person],
+    person_versions: Sequence[_PersonVersion],
+    problems: list[str],
+) -> tuple[Callable[[str, str], bool], set[str]]:
+    """Return ``owns(handle, did)`` and the people to drop for listing another's key.
+
+    A key belongs to one person, or export would credit their signatures to
+    another. Listing a key as current, in a validly signed version of a
+    person file that the key itself signed, is proven by that signature; any
+    other listing proves nothing, so a proven listing always wins. Among
+    current listings, or among retired ones when there is no current
+    listing, the first wins: first means in an ancestor commit, and files
+    that listed it in one commit, or on branches merged together, are tied.
+    Losing to a current listing drops the lister.
+    """
     # ponytail: a key only ever retired, and first listed by two tied files,
     # is reported but evicts nobody.
     first: dict[str, dict[str, int]] = {}  # did -> handle -> first listing
     for rel, found in history.versions.items():
         if rel.startswith("people/") and rel.endswith(".json"):
             for i, _ in found:
-                version = person_at(rel[7:-5], i)
+                version = _person_at(history, rel[7:-5], i)
                 for key in version.keys if version else ():
                     first.setdefault(key.did, {}).setdefault(rel[7:-5], i)
     # did -> each version listing it current: (handle, position, previous keys)
     listings: dict[str, list[tuple[str, int, Optional[list[PersonKey]]]]] = {}
     for handle, i, previous, _ in sorted(person_versions, key=lambda v: v[1]):
-        version = person_at(handle, i)
+        version = _person_at(history, handle, i)
         for key in version.keys if version else ():
             if key.retired is None:
                 listings.setdefault(key.did, []).append((handle, i, previous))
@@ -1850,8 +1842,8 @@ def check_registry(root: Path) -> CheckResult:
     ) -> bool:
         """Return whether version ``i`` is valid and signed by the key ``did``."""
         if (handle, i, did) not in signed:
-            version = person_at(handle, i)
-            body, signature = pair_at(f"people/{handle}.json", i)
+            version = _person_at(history, handle, i)
+            body, signature = _pair_at(history, f"people/{handle}.json", i)
             signed[handle, i, did] = False
             if version and body is not None and signature is not None:
                 key = next(k for k in version.keys if k.did == did)
@@ -1909,15 +1901,26 @@ def check_registry(root: Path) -> CheckResult:
                 problems.append(
                     f"people/{handle}.json: {key.did} is also listed by {others[0]}"
                 )
-    for handle in claimants:
-        del people[handle]
+    return owns, claimants
 
-    # Every revocation ever committed counts, even if its file was later
-    # deleted, unless the key that signed it was revoked in an ancestor
-    # commit; revocations in one commit, or on branches merged together, all
-    # count. Signers are judged by the person files and anchors of the commit
-    # that added the revocation, and every key must belong to the person
-    # listing it. A rejected one that is no longer in the tree is a warning.
+
+def _revocations(
+    history: History,
+    owns: Callable[[str, str], bool],
+    problems: list[str],
+    voids: list[str],
+    warnings: list[str],
+) -> dict[str, str]:
+    """Return every revoked key: did:key -> "type base64" as the person file lists it.
+
+    Every revocation ever committed counts, even if its file was later
+    deleted, unless the key that signed it was revoked in an ancestor
+    commit; revocations in one commit, or on branches merged together, all
+    count. Signers are judged by the person files and anchors of the commit
+    that added the revocation, and every key must belong to the person
+    listing it (``owns``). A rejected one that is no longer in the tree is a
+    warning.
+    """
     committed: dict[tuple[str, bytes, bytes], int] = {}
     for rel, found in history.versions.items():
         if not rel.startswith("revocations/") or rel.endswith(".sig"):
@@ -1936,20 +1939,17 @@ def check_registry(root: Path) -> CheckResult:
             continue  # the working tree's version is already reported
         if not isinstance(rev, Revocation):
             continue
-        is_current = (data, sig) == (
-            history.at(rel, final),
-            history.at(rel + ".sig", final),
-        )
+        is_current = (data, sig) == _pair_at(history, rel, history.final)
         try:
-            subject = person_at(rev.subject, i)
+            subject = _person_at(history, rev.subject, i)
             if subject is None:
                 raise VouchError(f"{rel}: no person file for {rev.subject}")
             key = next((k for k in subject.keys if k.did == rev.key), None)
             if key is None or not owns(rev.subject, key.did):
                 raise VouchError(f"{rel}: {rev.key} is not a key of {rev.subject}")
             signers = [key]
-            for handle in (rev.subject, *anchors_at(i)):
-                version = person_at(handle, i)
+            for handle in (rev.subject, *_anchors_at(history, i)):
+                version = _person_at(history, handle, i)
                 signers += [
                     k
                     for k in (version.keys if version else ())
@@ -1970,10 +1970,26 @@ def check_registry(root: Path) -> CheckResult:
         except Void as e:
             if is_current:
                 voids.append(str(e))
+    return revoked
 
-    for handle, i, previous, gone in person_versions + restored:
+
+def _warn_unchained(
+    history: History,
+    person_versions: Iterable[_PersonVersion],
+    revoked: Mapping[str, str],
+    warnings: list[str],
+) -> dict[str, list[str]]:
+    """Warn about each person file version no unrevoked previous key signed.
+
+    Return handle -> each commit (or "the working tree") with such a version.
+    """
+    unchained: dict[str, list[str]] = {}
+    for handle, i, previous, gone in person_versions:
         rel = f"people/{handle}.json"
-        version, (body, signature) = keys_at(handle, i), pair_at(rel, i)
+        version, (body, signature) = (
+            _keys_at(history, handle, i),
+            _pair_at(history, rel, i),
+        )
         if version is None or body is None:
             continue  # not in person_versions; narrows the types
         try:
@@ -1993,77 +2009,112 @@ def check_registry(root: Path) -> CheckResult:
                 " by any unrevoked key current in the previous version; only registry"
                 f" review let it through (old keys: {old_dids}; new keys: {new_dids})"
             )
+    return unchained
+
+
+class _Judge:
+    """Judge tier records and endorsements by the history, remembering each judgement.
+
+    Its inputs are fixed once person files, key owners and revocations are
+    known, so a judgement at a position never changes and is made once.
+    """
+
+    def __init__(
+        self,
+        history: History,
+        parsed: Mapping[str, tuple[Person, bytes, bytes]],
+        people: Mapping[str, Person],
+        revoked: Mapping[str, str],
+    ) -> None:
+        self.history = history
+        self.parsed = parsed
+        self.people = people
+        self.revoked = revoked
+        self.judged: dict[tuple[str, int], Union[str, VouchError, Void]] = {}
+        self.stood: dict[tuple[str, int], list[tuple[int, Union[str, Void, None]]]] = {}
 
     def check_signer(
-        rel: str, record: Union[Tier, Endorsement], data: bytes, sig: bytes, signer: str
+        self,
+        rel: str,
+        record: Union[Tier, Endorsement],
+        data: bytes,
+        sig: bytes,
+        signer: str,
     ) -> None:
-        if signer not in parsed:
+        """Raise unless a current, unrevoked key of ``signer`` signed ``record``."""
+        if signer not in self.parsed:
             raise VouchError(f"{rel}: no person file for {signer}")
-        if signer not in people:
+        if signer not in self.people:
             raise Void(f"{rel}: void: the person file of {signer} is invalid")
-        key = verify_approval(rel, record, data, sig, people[signer])
+        key = verify_approval(rel, record, data, sig, self.people[signer])
         # Revoked first: a revoked key's dates prove nothing either way.
-        if key.did in revoked:
+        if key.did in self.revoked:
             raise Void(f"{rel}: void: {key.did} of {signer} is revoked")
         _in_validity(rel, key, record.date)
 
-    def claimed_at(handle: str, i: int) -> Optional[str]:
-        if handle in anchors_at(i):
+    def claimed_at(self, handle: str, i: int) -> Optional[str]:
+        """Return the tier ``handle`` claims at ``i``, valid or not."""
+        if handle in _anchors_at(self.history, i):
             return "anchor"
-        record = record_at(f"tiers/{handle}.json", i)
+        record = _record_at(self.history, f"tiers/{handle}.json", i)
         return record.tier if isinstance(record, Tier) else None
 
-    def may_grant(approver: str, i: int, tier: str) -> bool:
-        claim = claimed_at(approver, i)
+    def may_grant(self, approver: str, i: int, tier: str) -> bool:
+        """Return whether ``approver`` claims a tier above ``tier`` at ``i``."""
+        claim = self.claimed_at(approver, i)
         return claim is not None and RANK[claim] < RANK[tier]
 
-    def lowered(handle: str, tier: str, added: tuple[int, ...]) -> list[int]:
-        # Commits concurrent with ``added`` that took from ``handle`` the
-        # authority to grant ``tier``: which of the two came first is not
-        # recorded.
+    def lowered(self, handle: str, tier: str, added: tuple[int, ...]) -> list[int]:
+        """Return the commits concurrent with ``added`` that lowered ``handle`` below ``tier``.
+
+        Each took from ``handle`` the authority to grant ``tier``, and which
+        of the two came first is not recorded.
+        """
+        history = self.history
         return [
             j
             for path in ("anchors.json", f"tiers/{handle}.json")
             for j, _ in history.versions.get(path, [])
             if any(history.concurrent(j, a) for a in added)
-            and not may_grant(handle, j, tier)
-            and any(may_grant(handle, p, tier) for p in history.parents[j])
+            and not self.may_grant(handle, j, tier)
+            and any(self.may_grant(handle, p, tier) for p in history.parents[j])
         ]
 
-    def tier_at(handle: str, i: int) -> Optional[str]:
-        if handle in anchors_at(i):
-            return "anchor" if handle in people else None
-        result = judge(handle, i)
+    def tier_at(self, handle: str, i: int) -> Optional[str]:
+        """Return the valid tier of ``handle`` at ``i``, or None."""
+        if handle in _anchors_at(self.history, i):
+            return "anchor" if handle in self.people else None
+        result = self.judge(handle, i)
         return result if isinstance(result, str) else None
 
-    judged: dict[tuple[str, int], Union[str, VouchError, Void]] = {}
-
-    def judge(handle: str, i: int) -> Union[str, VouchError, Void]:
-        if (handle, i) not in judged:
+    def judge(self, handle: str, i: int) -> Union[str, VouchError, Void]:
+        """Return the tier the record of ``handle`` at ``i`` grants, or why it grants none."""
+        if (handle, i) not in self.judged:
             try:
-                judged[handle, i] = judge_tier(handle, i)
+                self.judged[handle, i] = self._judge_tier(handle, i)
             except (VouchError, Void) as e:
-                judged[handle, i] = e
-        return judged[handle, i]
+                self.judged[handle, i] = e
+        return self.judged[handle, i]
 
-    def judge_tier(handle: str, i: int) -> str:
+    def _judge_tier(self, handle: str, i: int) -> str:
         # Each approver judged here claims a strictly higher tier than the
         # record they approved, so the recursion through tier_at ends.
+        history = self.history
         rel = f"tiers/{handle}.json"
-        data, sig = history.at(rel, i), history.at(rel + ".sig", i)
-        t = record_at(rel, i)
+        data, sig = _pair_at(history, rel, i)
+        t = _record_at(history, rel, i)
         if data is None or sig is None or not isinstance(t, Tier):
             raise VouchError(f"{rel}: no valid tier record at that commit")
         added = history.added(rel, i)
-        if t.subject not in parsed:
+        if t.subject not in self.parsed:
             raise VouchError(f"{rel}: no person file for {t.subject}")
         if t.approver == t.subject:
             raise VouchError(f"{rel}: {t.subject} cannot approve themselves")
         # The approver must have held the authority where the record was added.
         for a in added:
-            if not may_grant(t.approver, a, t.tier):
+            if not self.may_grant(t.approver, a, t.tier):
                 raise VouchError(
-                    f"{rel}: {t.approver} ({claimed_at(t.approver, a) or 'no tier'})"
+                    f"{rel}: {t.approver} ({self.claimed_at(t.approver, a) or 'no tier'})"
                     f" may not grant {t.tier}"
                 )
         # These bytes may not come back, by a commit or a merge, over a
@@ -2091,7 +2142,7 @@ def check_registry(root: Path) -> CheckResult:
             if (
                 was_tier is not None
                 and demotes(t.tier, was_tier)
-                and not isinstance(judge(handle, w), VouchError)
+                and not isinstance(self.judge(handle, w), VouchError)
             ):
                 raise VouchError(
                     f"{rel}: restores an earlier record at {history.name(i)},"
@@ -2105,22 +2156,24 @@ def check_registry(root: Path) -> CheckResult:
         accountables: list[tuple[str, int]] = []
         if t.tier == "automation":
             # The person file at i, so a bot since made human was one then.
-            require_accountable(person_at(t.subject, i) or parsed[t.subject][0])
+            require_accountable(
+                _person_at(history, t.subject, i) or self.parsed[t.subject][0]
+            )
             for a in added:
-                person = person_at(t.subject, a)
+                person = _person_at(history, t.subject, a)
                 accountable = (person.accountable if person else None) or ""
                 # A maintainer or anchor is exactly who may grant contributor.
-                if not may_grant(accountable, a, "contributor"):
+                if not self.may_grant(accountable, a, "contributor"):
                     raise VouchError(
                         f"people/{t.subject}.json: accountable: {accountable}"
                         " is not a maintainer or anchor"
                     )
                 accountables.append((accountable, a))
-        check_signer(rel, t, data, sig, t.approver)
+        self.check_signer(rel, t, data, sig, t.approver)
         # Authority lost on a branch merged in alongside may have been lost
         # first, which git does not record: void until re-approved. The
         # accountable is judged like the approver.
-        concurrent = lowered(t.approver, t.tier, added)
+        concurrent = self.lowered(t.approver, t.tier, added)
         if concurrent:
             raise Void(
                 f"{rel}: void: {t.approver} lost the authority to grant {t.tier}"
@@ -2128,23 +2181,23 @@ def check_registry(root: Path) -> CheckResult:
                 " needs a new approval"
             )
         for accountable, a in accountables:
-            concurrent = lowered(accountable, "contributor", (a,))
+            concurrent = self.lowered(accountable, "contributor", (a,))
             if concurrent:
                 raise Void(
                     f"{rel}: void: accountable {accountable} stopped being a"
                     " maintainer or anchor in concurrent commit"
                     f" {history.name(concurrent[0])}; needs a new approval"
                 )
-        if any(tier_at(t.approver, a) is None for a in added):
+        if any(self.tier_at(t.approver, a) is None for a in added):
             raise Void(f"{rel}: void: {t.approver} has no valid tier")
-        if t.subject not in people:
+        if t.subject not in self.people:
             raise Void(f"{rel}: void: the person file of {t.subject} is invalid")
         for accountable, a in accountables:
-            if tier_at(accountable, a) not in ("anchor", "maintainer"):
+            if self.tier_at(accountable, a) not in ("anchor", "maintainer"):
                 raise Void(f"{rel}: void: {accountable} has no valid tier")
         # The accountable is judged only with an approval, so naming another
         # one needs a new approval.
-        person = person_at(t.subject, i)
+        person = _person_at(history, t.subject, i)
         now = person.accountable if person else None
         if any(accountable != now for accountable, _ in accountables):
             raise Void(
@@ -2153,16 +2206,18 @@ def check_registry(root: Path) -> CheckResult:
             )
         return t.tier
 
-    stood: dict[tuple[str, int], list[tuple[int, Union[str, Void, None]]]] = {}
+    def standing(self, handle: str, i: int) -> list[tuple[int, Union[str, Void, None]]]:
+        """Return the versions of the tier record of ``handle`` in effect at ``i``.
 
-    def standing(handle: str, i: int) -> list[tuple[int, Union[str, Void, None]]]:
-        # The versions of the tier record in effect at i: a record that does
-        # not verify changes nothing, so the ones before it stand. Walked,
-        # not recursed, so merges of unverified records cannot blow it up.
+        A record that does not verify changes nothing, so the ones before it
+        stand. Walked, not recursed, so merges of unverified records cannot
+        blow it up.
+        """
         # ponytail: each position walks its own unverified run, so a long
         # run costs quadratic time; share the walk if that bites.
+        history = self.history
         rel = f"tiers/{handle}.json"
-        if (handle, i) not in stood:
+        if (handle, i) not in self.stood:
             found: dict[int, Union[str, Void, None]] = {}
             todo, seen = [i], set()
             while todo:
@@ -2170,48 +2225,35 @@ def check_registry(root: Path) -> CheckResult:
                 if j in seen:
                     continue
                 seen.add(j)
-                held = None if history.at(rel, j) is None else judge(handle, j)
+                held = None if history.at(rel, j) is None else self.judge(handle, j)
                 if isinstance(held, VouchError):
-                    todo += [p for a in adding(rel, j) for p in history.parents[a]]
+                    todo += [
+                        p for a in _adding(history, rel, j) for p in history.parents[a]
+                    ]
                 else:
                     found[j] = held
-            stood[handle, i] = list(found.items())
-        return stood[handle, i]
+            self.stood[handle, i] = list(found.items())
+        return self.stood[handle, i]
 
-    tiers: dict[str, str] = {}
-    for a in anchors:
-        if a not in parsed:
-            problems.append(f"anchors.json: no person file for {a}")
-        elif a in people:
-            tiers[a] = "anchor"
-    for rel, t, _, _ in tier_records:
-        if t.subject in anchors:
-            problems.append(f"{rel}: {t.subject} is an anchor")
-            continue
-        result = judge(t.subject, final)
-        if isinstance(result, str):
-            tiers[t.subject] = result
-        elif isinstance(result, Void):
-            voids.append(str(result))
-        else:
-            problems.append(str(result))
+    def tier_ends(self, handle: str, start: int) -> dict[str, datetime]:
+        """Return tier -> when it ended, walking back from ``start`` through the tier record.
 
-    def tier_ends(handle: str, start: int) -> dict[str, datetime]:
-        # Walk back from ``start`` through every version of the tier record;
-        # a tier held more than once ends at its latest end.
+        A tier held more than once ends at its latest end.
+        """
+        history = self.history
         rel = f"tiers/{handle}.json"
         ends: dict[str, datetime] = {}
-        todo, seen = [j for j, _ in standing(handle, start)], set()
+        todo, seen = [j for j, _ in self.standing(handle, start)], set()
         while todo:
             i = todo.pop()
             if i in seen:
                 continue
             seen.add(i)
-            held = standing(handle, i)[0][1]
-            record = record_at(rel, i)
-            for a in adding(rel, i):
+            held = self.standing(handle, i)[0][1]
+            record = _record_at(history, rel, i)
+            for a in _adding(history, rel, i):
                 for p in history.parents[a]:
-                    for j, was in standing(handle, p):
+                    for j, was in self.standing(handle, p):
                         todo.append(j)
                         if not isinstance(was, str):
                             continue
@@ -2224,60 +2266,117 @@ def check_registry(root: Path) -> CheckResult:
                         ends[was] = max(end, ends.get(was, end))
         return ends
 
-    def anchor_ends(start: int) -> dict[str, datetime]:
-        # Like a deleted tier record, an anchor ends at the latest effective
-        # date of a commit at or before ``start`` that dropped them from
-        # anchors.json.
+    def anchor_ends(self, start: int) -> dict[str, datetime]:
+        """Return handle -> when they stopped being an anchor, as of ``start``.
+
+        Like a deleted tier record, an anchor ends at the latest effective
+        date of a commit at or before ``start`` that dropped them from
+        anchors.json.
+        """
         # ponytail: an anchors.json version that does not parse lists nobody,
         # so it ends every anchor its parent listed; review keeps it out.
+        history = self.history
         ends: dict[str, datetime] = {}
         for j, _ in history.versions.get("anchors.json", []):
             if j != start and not history.before(j, start):
                 continue
             for a in history.added("anchors.json", j):
                 for p in history.parents[a]:
-                    for handle in set(anchors_at(p)) - set(anchors_at(j)):
+                    dropped = set(_anchors_at(history, p)) - set(
+                        _anchors_at(history, j)
+                    )
+                    for handle in dropped:
                         end = history.date(a)
                         ends[handle] = max(end, ends.get(handle, end))
         return ends
 
-    ended: dict[str, dict[str, datetime]] = {}
-    for rel in history.versions:
-        handle = rel[len("tiers/") : -len(".json")]
-        if rel == f"tiers/{handle}.json" and handle in people and handle not in anchors:
-            ends = tier_ends(handle, final)
-            if ends:
-                ended[handle] = ends
-    for handle, end in anchor_ends(final).items():
-        if handle in people and handle not in anchors:
-            ends = ended.setdefault(handle, {})
-            ends["anchor"] = max(end, ends.get("anchor", end))
-
-    claimed: dict[str, str] = {t.subject: t.tier for _, t, _, _ in tier_records}
-    automation = {h for h, tier in claimed.items() if tier == "automation"}
-    automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
-
-    def judge_endorsement(
-        rel: str, e: Endorsement, data: bytes, sig: bytes, subject: Person
+    def endorsement(
+        self,
+        rel: str,
+        endorsement: Endorsement,
+        data: bytes,
+        sig: bytes,
+        subject: Person,
+        automation: Collection[str],
     ) -> None:
+        """Raise unless ``endorsement`` of ``subject`` is valid and has effect."""
+        e = endorsement
         if e.endorser in automation:
             raise VouchError(f"{rel}: {e.endorser} is automation and cannot endorse")
         if e.subject_key not in {k.did for k in subject.keys}:
             raise VouchError(f"{rel}: {e.subject_key} is not a key of {e.subject}")
         # Only a revoked endorser key voids it; like the tier, an
         # endorsement carries over to the subject's later keys.
-        check_signer(rel, e, data, sig, e.endorser)
+        self.check_signer(rel, e, data, sig, e.endorser)
         if e.subject_name != subject.name:
             raise Void(f"{rel}: void: endorses the name {e.subject_name!r:.60}")
         if e.endorser == e.subject:
             raise Void(f"{rel}: void: {e.subject} cannot endorse themselves")
 
-    endorsed: dict[str, set[str]] = {}  # handle -> lowercased endorsed emails
+
+def _judge_tiers(
+    judge: _Judge,
+    anchors: Sequence[str],
+    tier_records: Iterable[tuple[str, Tier, bytes, bytes]],
+    problems: list[str],
+    voids: list[str],
+) -> dict[str, str]:
+    """Return handle -> tier for every anchor and valid tier record in the working tree."""
+    tiers: dict[str, str] = {}
+    for a in anchors:
+        if a not in judge.parsed:
+            problems.append(f"anchors.json: no person file for {a}")
+        elif a in judge.people:
+            tiers[a] = "anchor"
+    for rel, t, _, _ in tier_records:
+        if t.subject in anchors:
+            problems.append(f"{rel}: {t.subject} is an anchor")
+            continue
+        result = judge.judge(t.subject, judge.history.final)
+        if isinstance(result, str):
+            tiers[t.subject] = result
+        elif isinstance(result, Void):
+            voids.append(str(result))
+        else:
+            problems.append(str(result))
+    return tiers
+
+
+def _ended(judge: _Judge, anchors: Sequence[str]) -> dict[str, dict[str, datetime]]:
+    """Return handle -> tier -> when it ended, for valid people who are not anchors now."""
+    history = judge.history
+    ended: dict[str, dict[str, datetime]] = {}
+    for rel in history.versions:
+        handle = rel[len("tiers/") : -len(".json")]
+        if (
+            rel == f"tiers/{handle}.json"
+            and handle in judge.people
+            and handle not in anchors
+        ):
+            ends = judge.tier_ends(handle, history.final)
+            if ends:
+                ended[handle] = ends
+    for handle, end in judge.anchor_ends(history.final).items():
+        if handle in judge.people and handle not in anchors:
+            ends = ended.setdefault(handle, {})
+            ends["anchor"] = max(end, ends.get("anchor", end))
+    return ended
+
+
+def _endorsed(
+    judge: _Judge,
+    endorsements: Iterable[tuple[str, Endorsement, bytes, bytes]],
+    automation: Collection[str],
+    problems: list[str],
+    voids: list[str],
+) -> dict[str, set[str]]:
+    """Return handle -> lowercased emails a valid working-tree endorsement endorses."""
+    endorsed: dict[str, set[str]] = {}
     for rel, e, data, sig in endorsements:
         try:
-            if e.subject not in parsed:
+            if e.subject not in judge.parsed:
                 raise VouchError(f"{rel}: no person file for {e.subject}")
-            judge_endorsement(rel, e, data, sig, parsed[e.subject][0])
+            judge.endorsement(rel, e, data, sig, judge.parsed[e.subject][0], automation)
             endorsed.setdefault(e.subject, set()).update(
                 m.lower() for m in e.subject_emails
             )
@@ -2285,7 +2384,16 @@ def check_registry(root: Path) -> CheckResult:
             problems.append(str(err))
         except Void as err:
             voids.append(str(err))
+    return endorsed
 
+
+def _exported_emails(
+    people: Mapping[str, Person],
+    endorsed: Mapping[str, Collection[str]],
+    revoked: Mapping[str, str],
+    warnings: list[str],
+) -> dict[str, tuple[str, ...]]:
+    """Return handle -> endorsed emails, warning about revoked current keys and the rest."""
     emails: dict[str, tuple[str, ...]] = {}
     for handle, person in sorted(people.items()):
         for key in person.keys:
@@ -2300,7 +2408,11 @@ def check_registry(root: Path) -> CheckResult:
                 warnings.append(
                     f"people/{handle}.json: {email} is not endorsed, so not exported"
                 )
+    return emails
 
+
+def _warn_migrated(people: Mapping[str, Person], warnings: list[str]) -> None:
+    """Warn about every ``migratedFrom`` fingerprint that two person files claim."""
     claims: dict[str, list[str]] = {}
     for handle, person in sorted(people.items()):
         if person.migrated_from is not None:
@@ -2313,40 +2425,138 @@ def check_registry(root: Path) -> CheckResult:
                 f" is also claimed by {others}"
             )
 
-    def endorsed_at(person: Person, i: int) -> set[str]:
-        # The emails endorsed at position i, by endorsements as they were
-        # there, judged as the working tree's are. Their history is read
-        # only here, for one subject, so check never pays for it, and a
-        # past version git-vouch cannot read fails this query alone, closed.
-        prefix = f"endorsements/{person.handle}"
+
+def _endorsed_at(
+    root: Path,
+    paths: Sequence[str],
+    judge: _Judge,
+    automation: Collection[str],
+    person: Person,
+    i: int,
+) -> set[str]:
+    """Return the lowercased emails of ``person`` endorsed at position ``i``.
+
+    By endorsements as they were there, judged as the working tree's are.
+    Their history is read only here, for one subject, so check never pays
+    for it, and a past version git-vouch cannot read fails this query
+    alone, closed.
+    """
+    prefix = f"endorsements/{person.handle}"
+    try:
+        past = registry_history(
+            root,
+            [p for p in paths if p.startswith(prefix + "/")],
+            [prefix],
+            ENDORSEMENT_RE,
+        )
+    except VouchError as err:
+        print(
+            f"git-vouch: warning: {err}; so no email of {person.handle}"
+            " counts as endorsed then",
+            file=sys.stderr,
+        )
+        return set()
+    ok: set[str] = set()
+    for rel in past.versions:
+        data, sig = _pair_at(past, rel, i)
+        if rel.endswith(".sig") or data is None or sig is None:
+            continue
         try:
-            past = registry_history(
-                root,
-                [p for p in paths if p.startswith(prefix + "/")],
-                [prefix],
-                ENDORSEMENT_RE,
-            )
-        except VouchError as e:
-            print(
-                f"git-vouch: warning: {e}; so no email of {person.handle}"
-                " counts as endorsed then",
-                file=sys.stderr,
-            )
-            return set()
-        ok: set[str] = set()
-        for rel in past.versions:
-            data, sig = past.at(rel, i), past.at(rel + ".sig", i)
-            if rel.endswith(".sig") or data is None or sig is None:
+            endorsement = parse_record(rel, data)
+            if not isinstance(endorsement, Endorsement):
                 continue
-            try:
-                e = parse_record(rel, data)
-                if not isinstance(e, Endorsement):
-                    continue
-                judge_endorsement(rel, e, data, sig, person)
-            except (VouchError, Void):
-                continue  # counts for nothing, as in the working tree
-            ok.update(m.lower() for m in e.subject_emails)
-        return ok
+            judge.endorsement(rel, endorsement, data, sig, person, automation)
+        except (VouchError, Void):
+            continue  # counts for nothing, as in the working tree
+        ok.update(m.lower() for m in endorsement.subject_emails)
+    return ok
+
+
+def check_registry(root: Path) -> CheckResult:
+    """Validate every record in the registry checkout at ``root`` and compute every tier.
+
+    Records are judged by the registry's git history (see ``History``). A
+    tier record is valid if its approver held the authority at the commit
+    that added it, so an approver stepping down voids nothing. A key listed
+    in two person files belongs to the one whose commit listed it first. A
+    revocation counts once committed, even if later deleted, unless the key
+    that signed it was revoked in an ancestor commit. "Earlier" and "first"
+    always mean ancestry, never the order git lists branched commits in.
+
+    A problem is a record that is malformed, wrongly signed, or made by
+    someone without the authority to make it. A void record is valid in
+    itself but has no effect: it was signed by a key since revoked, it
+    depends on a record that is void or has a problem, or it is a tier
+    record committed before its subject's person file or concurrently with
+    a commit that took its approver's authority. An email may be
+    listed in only one person file, ignoring case; it is endorsed if a
+    valid endorsement lists it in ``subjectEmails``, and an unendorsed
+    email is a warning. So is every version of a person file that no
+    unrevoked key current in its previous version signed (for a merge that
+    kept one side's version, the concurrent change it dropped), and every person
+    file whose ``migratedFrom`` fingerprint another one also claims
+    (ignoring case), whichever merged first. Void records and
+    warnings do not fail the check, so a revocation never blocks the export
+    that spreads it.
+
+    A tier ends where a commit deleted its record or replaced it with one
+    that has no effect, at that commit's effective date (a commit merged
+    from a branch counts from its merge), or where a lower
+    tier or one across the automation line replaced it, at the new record's
+    ``date``, provided the record verified at the parent commit. A record
+    that does not verify ends nothing. An anchor ends at the effective date
+    of the commit that dropped them from ``anchors.json``. A commit's
+    effective date is the later of its committer date and its first
+    parent's effective date; a commit dated more than FUTURE_SLACK after
+    check runs is a problem.
+
+    ``held_at(handle, when)`` is what a valid person held at ``when``, for
+    ``query --at``: the registry then is the newest commit on HEAD's
+    first-parent line dated at or before ``when``. Their tier there, or a
+    tier that ended after ``when`` as that commit's history has it, whichever
+    ranks highest (a human tier wins over automation); automation if that
+    tier is or that commit's person file names an accountable maintainer;
+    the emails that person file lists and that an endorsement in that
+    commit endorses, judged as the working tree's are (none, with a
+    warning, if their history cannot be read; check never reads it). None if
+    no person file of theirs parses at that commit. Revocations count at
+    every time, as everywhere. Export answers for now instead, so it can
+    differ for past times.
+
+    Raises:
+        VouchError: ssh-keygen cannot be run, or the history cannot be read.
+    """
+    problems: list[str] = []
+    voids: list[str] = []
+    warnings: list[str] = []
+    records = _load_records(root, problems)
+    anchors, parsed = records.anchors, records.parsed
+    # A past version git-vouch cannot read counts as one that does not parse:
+    # a warning, so it never blocks the export for good.
+    unreadable: list[str] = []
+    history = registry_history(root, records.paths, unreadable=unreadable)
+    warnings += dict.fromkeys(unreadable)
+    final = history.final
+    # Phase order matters: key owners need every person version, revocations
+    # need key owners, and everything after needs revocations.
+    continuity = _person_continuity(history, parsed, problems)
+    people = continuity.people
+    owns, claimants = _key_owners(history, people, continuity.versions, problems)
+    for handle in claimants:
+        del people[handle]
+    revoked = _revocations(history, owns, problems, voids, warnings)
+    unchained = _warn_unchained(
+        history, continuity.versions + continuity.restored, revoked, warnings
+    )
+    judge = _Judge(history, parsed, people, revoked)
+    tiers = _judge_tiers(judge, anchors, records.tier_records, problems, voids)
+    ended = _ended(judge, anchors)
+    claimed = {t.subject: t.tier for _, t, _, _ in records.tier_records}
+    automation = {h for h, tier in claimed.items() if tier == "automation"}
+    automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
+    endorsed = _endorsed(judge, records.endorsements, automation, problems, voids)
+    emails = _exported_emails(people, endorsed, revoked, warnings)
+    _warn_migrated(people, warnings)
 
     def held_at(handle: str, when: Optional[datetime]) -> Optional[Held]:
         # The registry at ``when`` is the newest commit on HEAD's first-parent
@@ -2358,23 +2568,33 @@ def check_registry(root: Path) -> CheckResult:
         if when is not None and history.commits:
             while i is not None and history.date(i) > when:
                 i = history.parents[i][0] if history.parents[i] else None
-        person = None if i is None else person_at(handle, i)
+        person = None if i is None else _person_at(history, handle, i)
         if i is None or person is None or handle not in people:
             return None
-        ok = endorsed.get(handle, set()) if when is None else endorsed_at(person, i)
+        ok = (
+            endorsed.get(handle, set())
+            if when is None
+            else _endorsed_at(root, records.paths, judge, automation, person, i)
+        )
         when = when or datetime.now(timezone.utc)
-        held = [t for _, t in standing(handle, i) if isinstance(t, str)]
-        if handle in anchors_at(i):
+        held = [t for _, t in judge.standing(handle, i) if isinstance(t, str)]
+        if handle in _anchors_at(history, i):
             held.append("anchor")
-        ends = {**tier_ends(handle, i), "anchor": anchor_ends(i).get(handle, when)}
+        ends = {
+            **judge.tier_ends(handle, i),
+            "anchor": judge.anchor_ends(i).get(handle, when),
+        }
         held += [t for t, end in ends.items() if when < end]
         # An end committed after ``when`` still counts from its own date, as
         # in export, so query never grants more than export for ``when``.
         # ponytail: a tier ended, granted again and ended again keeps only
         # its latest end, so an earlier end committed after ``when`` is
         # missed; record every end per tier if that bites.
-        gone = {**tier_ends(handle, final), "anchor": anchor_ends(final).get(handle)}
-        gone = {t for t, end in gone.items() if end is not None and end <= when}
+        ends_now = {
+            **judge.tier_ends(handle, final),
+            "anchor": judge.anchor_ends(final).get(handle),
+        }
+        gone = {t for t, end in ends_now.items() if end is not None and end <= when}
         held = [t for t in held if t not in gone]
         humans = [t for t in held if t != "automation"]
         tier = min(humans, key=RANK.__getitem__) if humans else None
