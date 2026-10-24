@@ -182,14 +182,19 @@ client appends `/trust-tasks` itself.
   `verify-trust/src/registry.rs:189-192`. `--registry-url` is the
   explicit override (`verify-trust/src/lib.rs:94-110`).
 
-The minimal entry, shaped like verify-trust's own test fixture (VGI
-`verify-trust/src/registry.rs:1364-1396`):
+The minimal document, as `git-vouch-trqp did-document --did
+did:web:registry.example --endpoint https://registry.example` prints
+it. It is shaped like verify-trust's own test fixture (VGI
+`verify-trust/src/registry.rs:1364-1396`), with the service `id` made
+absolute: affinidi-did-common 0.4.3 parses `Service.id` as a URL, so a
+relative `#rest` fails (`tests/trqp/test_did_document.py`).
 
 ```json
 {
+  "@context": ["https://www.w3.org/ns/did/v1"],
   "id": "did:web:registry.example",
   "service": [
-    { "id": "#rest", "type": "TRQPRest",
+    { "id": "did:web:registry.example#rest", "type": "TRQPRest",
       "serviceEndpoint": "https://registry.example" }
   ]
 }

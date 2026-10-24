@@ -741,7 +741,13 @@ itself stays a CLI. Facts about `verify-trust` come from
   errors use a `trust-task-error` body. It serves the path directly,
   never by redirect.
 - **Authority DID:** configured by the operator: `did:web` on a domain
-  of their choosing, or `did:webvh`. `git-vouch-trqp did-document`
+  of their choosing, or `did:webvh`. For the kernel we propose
+  `did:web:registry.kernel.org`, its document at
+  `https://registry.kernel.org/.well-known/did.json`, served by whoever
+  runs the bridge (expected: LF devops); kernel.org decides.
+  `did:web:kernel.org` would spend the domain-wide name, and `did:webvh`
+  adds machinery an optional bridge does not need.
+  `git-vouch-trqp did-document`
   prints the document with one `TRQPRest` service entry whose endpoint
   must be `https://`. For `did:webvh` the operator signs the log with an
   existing webvh tool; our tools add no cryptography. Queries naming any
