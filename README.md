@@ -56,6 +56,7 @@ and tested. Nothing is tagged as a release. Formats may still change.
   [docs/guide-captains.md](docs/guide-captains.md),
   [docs/guide-anchors.md](docs/guide-anchors.md): how to use it
 - [docs/vouching.md](docs/vouching.md): what vouching for someone means
+- [docs/rationale.md](docs/rationale.md): why each choice the guides make was made
 - [docs/vs-openvtc.md](docs/vs-openvtc.md): how it compares with OpenVTC
 
 ## License
