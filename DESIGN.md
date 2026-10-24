@@ -12,8 +12,8 @@ things that already exist and one small script:
 
 - **git's SSH signing** (`gpg.format=ssh`) signs and verifies tags and
   commits.
-- **`ssh-keygen -Y`** signs and verifies everything else: release files
-  and the registry's own records.
+- **`ssh-keygen -Y`** signs and verifies the registry's own records
+  and, through patatt, patch emails.
 - **A registry git repository** holds one signed file per person and one
   per endorsement. Changes arrive as reviewed merges; `git fetch`
   distributes them.
@@ -24,6 +24,17 @@ things that already exist and one small script:
 The switch happens on one flag day: `pgpkeys.git` is frozen and ported
 into the registry, everyone re-signs with SSH keys, and GPG-signed tags
 and pulls stop being accepted (see Flag day).
+
+**Scope:** tags, commits, patch emails and the registry's own records.
+Release files (tarball `.tar.sign`, `sha256sums.asc`, the checksum
+autosigner) and kup upload authentication are out of scope; kernel.org
+keeps them on GPG. git-vouch replaces the keyring, not every use of
+`gpg`. A handful of release signers is not a keyring, and endorsements,
+tiers and continuity do not apply to them. A release tarball is
+`git archive` of a signed tag, which git-vouch covers, so anyone can
+regenerate it and compare. Moving distributions' `gpg --verify` scripts
+to `ssh-keygen` would cost them a lot for little gain. Rejected: SSH
+signatures on release files alongside GPG during an overlap.
 
 Every person is identified by DIDs, and person files are JSON-LD that
 people can extend with more DIDs and any metadata they like.
@@ -126,8 +137,8 @@ an attacker would have to infiltrate two social graphs, not one.
 Nobody can endorse themselves: a self-endorsement is reported as void
 and counts for nothing, but never fails `check`.
 
-**Automation identities** can sign files (the `file` namespace:
-tarballs, checksums) and patches (see Patch signing), never git tags or
+**Automation identities** can sign files (the `file` namespace)
+and patches (see Patch signing), never git tags or
 commits. They cannot endorse or
 approve anyone. Their person file must name the accountable maintainer,
 who must hold the maintainer or anchor tier at the commit that adds the
@@ -145,7 +156,7 @@ accountable maintainer later steps down, the bot keeps its tier.
 | Key expiry and retirement | `valid-after=` / `valid-before=` on each allowed-signers line | Writes them from the registry and its history |
 | Compromised keys | `gpg.ssh.revocationFile` | Generates the file |
 | Limit a key's purpose | `namespaces=` on each allowed-signers line | Writes `namespaces="git,file"`, or `namespaces="file"` for automation |
-| Sign release files | `ssh-keygen -Y sign -n file` / `-Y verify` | None |
+| Sign other files | `ssh-keygen -Y sign -n file` / `-Y verify` | None; kernel release files stay on GPG (see Summary) |
 | Hardware keys | The SSH agent; FIDO `sk-` keys; `gpg.ssh.defaultKeyCommand` | None |
 | Distribution | `git fetch` | `git vouch sync` = fetch, refuse a rewind, re-export |
 | Audit trail, ordering, removal dates | Registry history: commit order, committer dates, deletions | Reads it |
@@ -868,8 +879,9 @@ maintainers have no GPG key and register fresh.
 them uses `gpg` with the archived pgpkeys at the freeze commit. There is
 no manifest.
 
-**Out of scope.** Encryption keys (the remail and security lists).
-kernel.org keeps a small encryption-only GPG keyring. Patch signing is
+**Out of scope.** Release files and kup (see Summary), and encryption
+keys (the remail and security lists). kernel.org keeps a small
+encryption-only GPG keyring. Patch signing is
 covered separately (see Patch signing): the patatt fork reads the
 registry, with the frozen GPG keyring as a warned fallback until the late
 cutoff.
@@ -941,8 +953,8 @@ specification for anyone reviewing an upstream patch.
   prerequisite.** Version 1 must work on today's git; see Upstream path.
 - **JCS canonicalisation.** Signatures cover the file's exact bytes,
   which allows arbitrary JSON-LD metadata without canonicalising it.
-- **minisign output.** `ssh-keygen -Y sign -n file` signs files, and
-  everyone who verifies already has `ssh-keygen`.
+- **minisign for the registry's records.** `ssh-keygen -Y sign` signs
+  them, and everyone who verifies already has `ssh-keygen`.
 - **A `tier` field in the person's own file.** The person signs their
   own file, so they could promote themselves. The tier is a separate
   record signed by the approver.

@@ -12,8 +12,9 @@ Flag day).
 Release files are out of scope: tarball signatures (`.tar.sign`,
 `sha256sums.asc`) and kup upload authentication stay with kernel.org,
 as they are today. A release tarball is `git archive` of a signed tag,
-so the tag signature already covers its content. If you ever want
-`ssh-keygen -Y` signatures on release files too, that is your call.
+so the tag signature already covers its content (DESIGN: Summary). If
+you ever want `ssh-keygen -Y` signatures on release files too, that is
+your call.
 
 ## What it is
 

@@ -8,7 +8,8 @@ vouch for, and may their key sign here? It does that with tools you
 already have:
 
 - **git's SSH signing** signs and verifies tags and commits.
-- **`ssh-keygen -Y`** signs everything else.
+- **`ssh-keygen -Y`** signs patch emails and the registry's records.
+  Release files stay with kernel.org.
 - **A registry git repository** holds one signed file per person, per
   endorsement and per tier grant. Changes arrive as reviewed merges, and
   `git fetch` distributes them.
