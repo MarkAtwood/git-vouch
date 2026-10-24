@@ -188,12 +188,17 @@ def serve(
 def schema_oracle() -> tuple[ModuleType, ModuleType]:
     """Return the ``jsonschema`` and ``referencing`` modules, or fail the test.
 
-    Imported lazily so that collecting the other test directories never
-    needs them.
+    A missing oracle package fails the run, never skips it, or the suite
+    would quietly stop checking (vouch-s9w2.5). That includes the format
+    packages: without rfc3339-validator and rfc3986-validator, jsonschema
+    passes any date-time or uri. Imported lazily so that collecting the
+    other test directories never needs them.
     """
     try:
         import jsonschema
         import referencing
+        import rfc3339_validator  # noqa: F401 (enables format date-time)
+        import rfc3986_validator  # noqa: F401 (enables format uri)
     except ImportError as e:
         pytest.fail(f"the schema oracle is missing: {e}; see tests/trqp/conftest.py")
     return jsonschema, referencing

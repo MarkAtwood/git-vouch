@@ -756,19 +756,15 @@ def test_spec_invalid_payloads_fail_the_schema(
 
 
 @pytest.mark.parametrize(
-    ("change", "validator"),
+    "change",
     [
-        ({"issuedAt": "not a date"}, "rfc3339_validator"),
-        ({"issuedAt": "2026-10-22 12:00:00"}, "rfc3339_validator"),
-        ({"type": "not a uri"}, "rfc3986_validator"),
+        {"issuedAt": "not a date"},  # needs rfc3339-validator
+        {"issuedAt": "2026-10-22 12:00:00"},
+        {"type": "not a uri"},  # needs rfc3986-validator
     ],
 )
-def test_oracle_checks_formats(
-    check_schema: Checker, change: dict[str, str], validator: str
-) -> None:
-    """Guard the oracle: with its format package installed, jsonschema checks
-    the format; without it the case skips, naming the package."""
-    pytest.importorskip(validator)
+def test_oracle_checks_formats(check_schema: Checker, change: dict[str, str]) -> None:
+    """Guard the oracle: jsonschema really checks formats (vouch-s9w2.5)."""
     jsonschema = schema_oracle()[0]
     check_schema(with_doc(), "request")
     with pytest.raises(jsonschema.ValidationError):

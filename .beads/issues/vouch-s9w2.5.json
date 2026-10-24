@@ -2,13 +2,15 @@
   "id": "vouch-s9w2.5",
   "title": "Keep: pinned upstream schemas; missing oracle fails",
   "description": "tests/trqp/conftest.py:1-25, :133-187; tests/trqp/test_trqp.py:244-288, :577-584. The conformance oracle is the upstream Trust Task JSON schemas, copied verbatim and pinned to a commit. A missing jsonschema or referencing fails the run instead of skipping it. The oracle is itself guarded: test_spec_invalid_payloads_fail_the_schema proves the validator rejects the spec's own invalid examples. The resource vectors are ported from vgi-core resource.rs's unit tests, not derived from is_resource.\n\nDo NOT change this to pytest.importorskip, regenerate the expected values from the bridge, or replace the schemas with hand-written assertions. Each of those would turn the suite into the code under test acting as its own oracle.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "decision",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T19:15:52.839555342Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:15:52.839555342Z",
+  "updated_at": "2026-10-24T03:57:43.893522079Z",
+  "closed_at": "2026-10-24T03:57:43.893522079Z",
+  "close_reason": "Kept (Mark 2026-10-23); dde4c26's importorskip reverted: schema_oracle now requires rfc3339-validator and rfc3986-validator and fails without them",
   "labels": [
     "review"
   ],
