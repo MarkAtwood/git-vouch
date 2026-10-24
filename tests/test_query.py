@@ -591,3 +591,77 @@ def test_rejects_bad_time(
     proc = query(reg.root, did(keys("alice")), "--at", at)
     assert proc.returncode == 2
     assert proc.stdout == "" and "RFC 3339" in proc.stderr
+
+
+FIXTURE_KEYS = ("torvalds", "gregkh", "gregkh-old", "alice", "alice2", "bot", "dave")
+
+
+def same_answer(
+    entry: object, one: subprocess.CompletedProcess[str], at: str | None
+) -> None:
+    """Assert ``entry`` is the answer ``one`` printed, with its exit status.
+
+    For now (``at`` None) the ``at`` member is left out: each run reads the clock.
+    """
+    alone = json.loads(one.stdout)
+    assert isinstance(entry, dict)
+    assert one.returncode == (0 if entry["handle"] is not None else 1), one.stderr
+    if at is None:
+        alone.pop("at")
+        entry = {k: v for k, v in entry.items() if k != "at"}
+    assert entry == alone
+
+
+@pytest.mark.parametrize("at", [BEFORE_ADDED, BEFORE, AFTER, None])
+def test_all_answers_as_each_query_does(
+    reg: Registry,  # noqa: F811
+    keys: Callable[[str], Key],  # noqa: F811
+    at: str | None,
+) -> None:
+    """A current, retired, revoked, automation and unendorsed key, and an anchor's."""
+    options = ["--at", at] if at else []
+    proc = query(reg.root, "--all", *options)
+    assert proc.returncode == 0, proc.stderr
+    got = json.loads(proc.stdout)
+    assert set(got) == {did(keys(name)) for name in FIXTURE_KEYS}
+    assert len({entry["at"] for entry in got.values()}) == 1
+    for subject, entry in got.items():
+        same_answer(entry, query(reg.root, subject, *options), at)
+
+
+def test_all_answers_a_key_whose_person_had_no_file_then(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """gregkh's person file arrives in the second commit, so at T0 he is unknown."""
+    r = GitRegistry(tmp_path / "registry")
+    r.anchors("torvalds")
+    r.person("torvalds", keys("torvalds"))
+    r.commit()
+    r.person("gregkh", keys("gregkh"))
+    r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
+    r.commit()
+    got = answer(r.root, "--all", "--at", T0)
+    gregkh, torvalds = did(keys("gregkh")), did(keys("torvalds"))
+    assert set(got) == {gregkh, torvalds}
+    assert got[gregkh]["handle"] is None and got[torvalds]["tier"] == "anchor"
+    for subject, entry in got.items():
+        same_answer(entry, query(r.root, subject, "--at", T0), T0)
+
+
+def test_all_refuses_on_registry_problem(
+    reg: Registry,  # noqa: F811
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    reg.tier("dave", "maintainer", "alice", keys("alice"))  # alice may not grant it
+    proc = query(reg.root, "--all")
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+    assert "registry check failed" in proc.stderr
+
+
+@pytest.mark.parametrize("args", [[], ["--all", "did:key:zNotAKey"]])
+def test_wants_one_did_or_all(reg: Registry, args: list[str]) -> None:  # noqa: F811
+    proc = query(reg.root, *args)
+    assert proc.returncode == 2
+    assert proc.stdout == "" and "--all" in proc.stderr

@@ -31,6 +31,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -44,15 +45,21 @@ CLOCK_SKEW = timedelta(minutes=5)
 QUERY_TIMEOUT = 30  # seconds for one git vouch query
 STALE_AFTER = timedelta(hours=24)  # DESIGN.md, TRQP bridge, Freshness
 EXT = "org.kernel.git-vouch"  # the response's ext namespace
-# ponytail: every request runs one full-history registry check (git vouch
-# query), so the ceiling is each check's latency: once one takes longer than
-# QUERY_TIMEOUT, every request gets a retryable 503 however light the load.
-# QUERY_SLOTS caps concurrent git runs (past it, a retryable 503); verify-trust
-# asks one DID at a time, so it bites only when five or more runs overlap, and
-# a denied DID costs two checks (verify-trust re-asks with its fallback
-# resource). The upgrade path is a short-TTL memo of answers keyed on (registry
-# HEAD, entity, at), sound only for a clean served copy (vouch-s9w2.15).
+# ponytail: for now, one full-history registry check (git vouch query --all)
+# answers every DID, run once per registry commit and per ANSWER_TTL, shared by
+# concurrent requests; a dirty served copy, or a request with a context.time
+# (one DID's query each), is checked every time. So the first request after a
+# sync or a minute pays a whole check, and once one takes longer than
+# QUERY_TIMEOUT every such request gets a retryable 503 however light the load.
+# QUERY_SLOTS caps concurrent git runs (past it, a retryable 503). The upgrade
+# path is to check in the background after each sync and on a timer, so no
+# request waits for a check.
 QUERY_SLOTS = threading.BoundedSemaphore(4)
+# ponytail: an answer for now is reused for ANSWER_TTL seconds, so a key whose
+# retired instant or tier end passes with no commit stays valid that long;
+# the ceiling is 60 s of staleness. Expiring at the registry's next such
+# instant is the upgrade path.
+ANSWER_TTL = 60.0
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # HTTPS binding 0.3, section 4: the error code is authoritative, the status informative.
 STATUS = {
@@ -263,18 +270,101 @@ def log(message: str) -> None:
     print(f"git-vouch-trqp: {message}", file=sys.stderr, flush=True)
 
 
+class Answers:
+    """``git vouch query --all``'s map for now, run by the first request needing it."""
+
+    def __init__(self, state: str) -> None:
+        """Start the map for the clean registry ``state``; it is not ready yet."""
+        self.state = state
+        self.started = monotonic()
+        self.ready = threading.Event()
+        self.answers: Optional[dict[str, object]] = None  # None until it succeeds
+
+
+ANSWERS_LOCK = threading.Lock()
+latest: Optional[Answers] = None  # the newest map for now; guarded by ANSWERS_LOCK
+
+
 def query(entity: str, at: Optional[datetime]) -> dict[str, object]:
     """Return ``git vouch query``'s answer for the did:key ``entity``.
+
+    For now (``at`` None) the answer comes from ``answers_now``, where a DID
+    no person file lists gets ``handle`` null, as ``git vouch query``
+    answers it with exit 1. A given time runs that one DID's query:
+    ``--all --at`` reads every person's endorsement history, five times a
+    whole check on a 600-person registry.
 
     Raises:
         TaskError: unavailable if the registry cannot be read or checked.
     """
-    command = ["vouch", "query", entity]
     if at is not None:
         # Truncating to whole seconds is exact: every registry date is whole seconds.
         # The year is padded by hand: strftime's %Y leaves years before 1000 short.
-        command += ["--at", f"{at.year:04d}" + at.strftime("-%m-%dT%H:%M:%SZ")]
-    proc = git(command, "the registry cannot be queried")
+        when = f"{at.year:04d}" + at.strftime("-%m-%dT%H:%M:%SZ")
+        return vouch_query(entity, "--at", when)
+    answer = answers_now().get(entity, {"did": entity, "handle": None})
+    if not isinstance(answer, dict):
+        log(f"git vouch query --all gave a non-object answer for {entity}")
+        raise TaskError("unavailable", "the registry cannot be checked")
+    return answer
+
+
+def answers_now() -> dict[str, object]:
+    """Return ``git vouch query --all``'s map for the served copy as it is now.
+
+    A clean copy's map is reused while its commit stays and for ANSWER_TTL
+    seconds; requests needing it while it runs wait for that one run. A
+    dirty copy is checked each time, since its next edit may leave ``git
+    status`` printing the same lines.
+
+    Raises:
+        TaskError: unavailable if the registry cannot be read or checked.
+    """
+    global latest
+    proc = git(
+        ["-C", str(registry_root()), "--no-optional-locks", "status"]
+        + ["--porcelain=v2", "--branch", "--no-ahead-behind"],
+        "the registry is unreadable",
+    )
+    if proc.returncode != 0:
+        log(f"git status exited {proc.returncode}")
+        raise TaskError("unavailable", "the registry is unreadable")
+    lines = proc.stdout.splitlines()
+    if any(not line.startswith("# ") for line in lines):
+        return vouch_query("--all")
+    state = next((line for line in lines if line.startswith("# branch.oid ")), "")
+    with ANSWERS_LOCK:
+        entry = latest
+        is_runner = (
+            entry is None
+            or entry.state != state
+            or monotonic() - entry.started > ANSWER_TTL
+        )
+        if entry is None or is_runner:
+            entry = latest = Answers(state)
+    if not is_runner:
+        entry.ready.wait()  # bounded: the run holds a git() slot, so QUERY_TIMEOUT
+        if entry.answers is None:
+            raise TaskError("unavailable", "the registry cannot be checked")
+        return entry.answers
+    try:
+        entry.answers = vouch_query("--all")
+    finally:
+        if entry.answers is None:  # a failed run is retried by the next request
+            with ANSWERS_LOCK:
+                if latest is entry:
+                    latest = None
+        entry.ready.set()
+    return entry.answers
+
+
+def vouch_query(*args: str) -> dict[str, object]:
+    """Return what ``git vouch query args`` prints.
+
+    Raises:
+        TaskError: unavailable if the registry cannot be read or checked.
+    """
+    proc = git(["vouch", "query", *args], "the registry cannot be queried")
     # Exit 1 with an answer means an unknown key; with none, a failed registry check.
     if proc.returncode in (0, 1):
         try:

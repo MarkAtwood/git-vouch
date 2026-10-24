@@ -567,6 +567,13 @@ def test_unexpected_failure_is_a_bare_internal_error(
     check_schema(doc, "error")
 
 
+# What git vouch query --all prints for with_doc()'s DID: one authorized answer.
+ANSWER_MAP = (
+    '{"did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK": {"handle": "x",'
+    ' "valid": true, "automation": false, "emails": ["x@x.org"]}}'
+)
+
+
 def test_concurrent_queries_are_capped(
     reg: Registry,  # noqa: F811
     serve: Callable[[Path], Bridge],
@@ -574,14 +581,13 @@ def test_concurrent_queries_are_capped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Six queries at once against a 3 s registry: four run, two get a retryable 503."""
-    answer = (
-        '{"handle": "x", "valid": true, "automation": false, "emails": ["x@x.org"]}'
-    )
+    answer = ANSWER_MAP
     stub_git(tmp_path, monkeypatch, f"sleep 3; printf '%s' '{answer}'")
     bridge = serve(reg.root)
     with ThreadPoolExecutor(6) as pool:
         replies = list(pool.map(lambda _: bridge.post(with_doc()), range(6)))
     assert sorted(status for status, _ in replies) == [200] * 4 + [503] * 2
+    assert all(doc["payload"]["authorized"] for status, doc in replies if status == 200)
     for status, doc in replies:
         if status == 503:
             assert (doc["payload"]["code"], doc["payload"]["retryable"]) == (
@@ -953,9 +959,7 @@ def test_freshness_check_waits_for_a_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Past the cap of four, a request gets a retryable 503 before git rev-parse runs."""
-    answer = (
-        '{"handle": "x", "valid": true, "automation": false, "emails": ["x@x.org"]}'
-    )
+    answer = ANSWER_MAP
     log = tmp_path / "rev-parse.log"
     other = f'case " $* " in *" rev-parse "*) echo x >> "{log}"; sleep 3;; esac'
     stub_git(tmp_path, monkeypatch, f"printf '%s' '{answer}'", other)
@@ -963,4 +967,110 @@ def test_freshness_check_waits_for_a_slot(
     with ThreadPoolExecutor(6) as pool:
         replies = list(pool.map(lambda _: bridge.post(with_doc()), range(6)))
     assert sorted(status for status, _ in replies) == [200] * 4 + [503] * 2
+    assert all(doc["payload"]["authorized"] for status, doc in replies if status == 200)
     assert log.read_text().count("x") == 4
+
+
+ALL = "vouch query --all"
+
+
+def log_queries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delay: int = 0
+) -> Callable[[], list[str]]:
+    """Log each ``git vouch`` run of bridges started next; return a reader of the log.
+
+    Each run waits ``delay`` seconds and then runs the real git vouch.
+    """
+    log = tmp_path / "vouch.log"
+    log.touch()
+    real = shutil.which("git")
+    script = f'echo "$*" >> "{log}"\nsleep {delay}\nexec "{real}" "$@"'
+    stub_git(tmp_path, monkeypatch, script)
+    return lambda: log.read_text().splitlines()
+
+
+def test_one_check_answers_every_did_until_a_commit(
+    serve: Callable[[Path], Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At promoted_bot's HEAD bot is an endorsed contributor and gregkh has no
+    endorsed email; a commit endorsing gregkh is checked anew."""
+    r = promoted_bot(tmp_path, keys)
+    runs = log_queries(tmp_path, monkeypatch)
+    bridge = serve(r.root)
+    assert authorized(bridge, request(did(keys("bot"))))[0] is True
+    assert authorized(bridge, request(did(keys("gregkh"))))[0] is False
+    denied, answer = authorized(bridge, request(did(keys("mallory"))))
+    assert (denied, answer["message"]) == (False, "no registered person holds this key")
+    assert runs() == [ALL]
+    r.endorse("gregkh", keys("gregkh"), "torvalds", keys("torvalds"))
+    r.commit()
+    assert authorized(bridge, request(did(keys("gregkh"))))[0] is True
+    assert authorized(bridge, request(did(keys("bot"))))[0] is True
+    assert runs() == [ALL, ALL]
+
+
+def test_dirty_copy_is_checked_every_time(
+    serve: Callable[[Path], Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An uncommitted endorsement of gregkh counts at once, and is never cached."""
+    r = promoted_bot(tmp_path, keys)
+    runs = log_queries(tmp_path, monkeypatch)
+    bridge = serve(r.root)
+    gregkh = request(did(keys("gregkh")))
+    assert authorized(bridge, gregkh)[0] is False
+    r.endorse("gregkh", keys("gregkh"), "torvalds", keys("torvalds"))
+    assert authorized(bridge, gregkh)[0] is True
+    assert authorized(bridge, gregkh)[0] is True
+    assert runs() == [ALL] * 3
+
+
+def test_answers_for_now_expire_after_a_minute(
+    serve: Callable[..., Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At T0 bot was automation; now it is an endorsed contributor. The answer
+    for now lasts 60 s; a given time asks for its one DID every time."""
+    r = promoted_bot(tmp_path, keys)
+    runs = log_queries(tmp_path, monkeypatch)
+    ahead = tmp_path / "clock"
+    ahead.write_text("0")
+    bridge = serve(r.root, clock=ahead)
+    bot = did(keys("bot"))
+    now, then = request(bot), request(bot, time=T0)
+    at_t0 = f"vouch query {bot} --at {T0}"
+    for seconds in ("0", "30"):
+        ahead.write_text(seconds)
+        assert authorized(bridge, now)[0] is True
+        assert authorized(bridge, then)[0] is False
+    assert runs() == [ALL, at_t0, at_t0]
+    ahead.write_text("61")
+    assert authorized(bridge, now)[0] is True
+    assert runs() == [ALL, at_t0, at_t0, ALL]
+
+
+def test_concurrent_requests_share_one_check(
+    serve: Callable[[Path], Bridge],
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Four requests for different DIDs during one 2 s check all wait for it.
+
+    Four keeps every git run within the four QUERY_SLOTS.
+    """
+    r = promoted_bot(tmp_path, keys)
+    runs = log_queries(tmp_path, monkeypatch, delay=2)
+    bridge = serve(r.root)
+    reqs = [request(did(keys(n))) for n in ("bot", "gregkh", "torvalds", "mallory")]
+    with ThreadPoolExecutor(4) as pool:
+        got = list(pool.map(lambda req: authorized(bridge, req)[0], reqs))
+    assert got == [True, False, False, False]
+    assert runs() == [ALL]

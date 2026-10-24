@@ -3065,6 +3065,9 @@ def cmd_query(args: argparse.Namespace) -> int:
     ``handle`` null, if no valid person file lists the key, or if its
     person had no person file then.
 
+    With ``--all`` it prints one JSON object mapping every did:key listed in
+    a person file to that key's answer, from one registry check, and exits 0.
+
     Raises:
         VouchError: the registry check fails, so nothing is printed.
     """
@@ -3074,7 +3077,43 @@ def cmd_query(args: argparse.Namespace) -> int:
     result = check_registry(root)
     if result.problems:
         raise VouchError(f"the registry check failed; run git vouch check {root}")
-    did: str = args.did
+    holders = _holders(result)
+    if args.all:
+        answers = {
+            did: _answer(result, did, holder, when, args.at)
+            for did, holder in holders.items()
+        }
+        print(json.dumps(answers, indent=2))
+        return 0
+    answer = _answer(result, args.did, holders.get(args.did), when, args.at)
+    print(json.dumps(answer, indent=2))
+    return 0 if answer["handle"] is not None else 1
+
+
+def _holders(result: CheckResult) -> dict[str, tuple[Person, PersonKey]]:
+    """Map each did:key in a valid person file to the person and key listing it.
+
+    check fails on a key current in two files; a key retired in two is
+    equally valid in both, so the first by handle is as good as any.
+    """
+    holders: dict[str, tuple[Person, PersonKey]] = {}
+    for _, person in sorted(result.people.items()):
+        for key in person.keys:
+            holders.setdefault(key.did, (person, key))
+    return holders
+
+
+def _answer(
+    result: CheckResult,
+    did: str,
+    holder: Optional[tuple[Person, PersonKey]],
+    when: datetime,
+    at: Optional[datetime],
+) -> dict[str, object]:
+    """Return ``query``'s answer for ``did``, listed by ``holder`` (None if unlisted).
+
+    ``when`` is the time judged and ``at`` is ``--at`` (None for now).
+    """
     answer: dict[str, object] = {
         "did": did,
         "at": when.strftime(DATE_FORMAT),
@@ -3087,17 +3126,9 @@ def cmd_query(args: argparse.Namespace) -> int:
         "revoked": did in result.revoked,
         "valid": False,
     }
-    # check fails on a key current in two files; a key retired in two is
-    # equally valid in both, so the first is as good as any.
-    found = [
-        (person, key)
-        for _, person in sorted(result.people.items())
-        for key in person.keys
-        if key.did == did
-    ]
-    held = result.held_at(found[0][0].handle, args.at) if found else None
-    if held is not None:
-        person, key = found[0]
+    held = result.held_at(holder[0].handle, at) if holder else None
+    if holder and held is not None:
+        person, key = holder
         answer.update(
             handle=person.handle,
             tier=held.tier,
@@ -3107,8 +3138,7 @@ def cmd_query(args: argparse.Namespace) -> int:
             retired=key.retired and key.retired.strftime(DATE_FORMAT),
             valid=key_valid(key, when, result.revoked),
         )
-    print(json.dumps(answer, indent=2))
-    return 0 if held is not None else 1
+    return answer
 
 
 def key_valid(key: PersonKey, when: datetime, revoked: Collection[str]) -> bool:
@@ -3803,7 +3833,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("key", metavar="<.pub file | ssh-pubkey | did:key>")
     p.set_defaults(func=cmd_did)
     p = add("query", "print a did:key's holder, tier and validity as JSON")
-    p.add_argument("did", metavar="<did:key>")
+    which = p.add_mutually_exclusive_group(required=True)
+    which.add_argument("did", nargs="?", metavar="<did:key>")
+    which.add_argument(
+        "--all",
+        action="store_true",
+        help="print every listed did:key's answer as one JSON object",
+    )
     p.add_argument(
         "--at",
         type=_rfc3339,

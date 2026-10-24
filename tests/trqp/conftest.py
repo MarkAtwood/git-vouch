@@ -52,12 +52,18 @@ REPLY_KINDS = {
     "https://trusttasks.org/spec/registry/authorization/0.1#response": "response",
     "https://trusttasks.org/spec/trust-task-error/0.5": "error",
 }
-# Runs the bridge at argv[1] with QUERY_TIMEOUT set to argv[2] seconds.
-LAUNCH = """import pathlib, sys, types
-path, timeout, *argv = sys.argv[1:]
+# Runs the bridge at argv[1] with QUERY_TIMEOUT set to argv[2] seconds unless
+# blank, and, unless argv[3] is blank, its monotonic clock ahead by the
+# seconds written in the file argv[3] names.
+LAUNCH = """import pathlib, sys, time, types
+path, timeout, offset, *argv = sys.argv[1:]
 bridge = types.ModuleType("bridge")
 exec(compile(pathlib.Path(path).read_text(), path, "exec"), bridge.__dict__)
-bridge.QUERY_TIMEOUT = int(timeout)
+if timeout:
+    bridge.QUERY_TIMEOUT = int(timeout)
+if offset:
+    ahead = pathlib.Path(offset)
+    bridge.monotonic = lambda: time.monotonic() + float(ahead.read_text() or 0)
 sys.exit(bridge.main(argv))
 """
 
@@ -128,7 +134,8 @@ def serve(
     git repository if it is not one (no commit, so check still reads it as
     a plain tree) and given the sync stamp ``git vouch sync`` writes,
     ``.git/vouch-fetched``, dated now. A ``query_timeout`` replaces the
-    bridge's QUERY_TIMEOUT, in seconds.
+    bridge's QUERY_TIMEOUT, in seconds. A ``clock`` file holds how many
+    seconds ahead the bridge's monotonic clock reads (blank is none).
     """
     repo = str(BRIDGE.parent)
     monkeypatch.setenv("PATH", repo + os.pathsep + os.environ["PATH"])
@@ -140,6 +147,7 @@ def serve(
         *extra: str,
         stamp: bool = True,
         query_timeout: Optional[int] = None,
+        clock: Optional[Path] = None,
     ) -> Bridge:
         if stamp:
             if not (registry / ".git").exists():
@@ -148,8 +156,10 @@ def serve(
         log = (tmp_path / f"bridge-{len(procs)}.log").open("w")
         logs.append(log)
         command = [sys.executable, str(BRIDGE)]
-        if query_timeout is not None:
-            command = [sys.executable, "-c", LAUNCH, str(BRIDGE), str(query_timeout)]
+        if query_timeout is not None or clock is not None:
+            timeout = "" if query_timeout is None else str(query_timeout)
+            offset = "" if clock is None else str(clock)
+            command = [sys.executable, "-c", LAUNCH, str(BRIDGE), timeout, offset]
         proc = subprocess.Popen(
             [*command, "serve", "--did", DID, "--port", "0", *extra],
             cwd=registry,
