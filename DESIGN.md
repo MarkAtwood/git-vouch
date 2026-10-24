@@ -664,7 +664,11 @@ SSH key. After it, nothing new needs `gpg`.
    commit date.
 
 **Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at the
-freeze commit, after verifying the freeze commit's signature. For each
+freeze commit, after verifying the freeze commit's signature. It reads
+with `--no-replace-objects`, so `refs/replace` in the pgpkeys clone
+cannot change `keys/` or the freeze commit it checks, and reads `keys/`
+as the blobs in the freeze commit's tree, so no git attributes can drop
+or change a file. For each
 unrevoked person key it writes an unsigned draft person file: a proposed
 handle, the name, emails from unrevoked UIDs, and `migratedFrom`. The
 holder adds an SSH key, signs the draft with `git vouch register --from`

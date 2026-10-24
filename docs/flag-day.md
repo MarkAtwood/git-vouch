@@ -82,7 +82,13 @@ commit, `$SIGNER`, the flag-day date and the late cutoff together.
 Nobody needs to verify the freeze commit by hand: every
 `git-vouch-migrate` command checks the freeze commit's signature by
 `$SIGNER` first and refuses to run otherwise. It reads pgpkeys only at
-the freeze commit, never at a later commit.
+the freeze commit, never at a later commit. It reads pgpkeys with
+`--no-replace-objects`, so `refs/replace` in the pgpkeys clone (for
+example from `git clone --mirror` of an untrusted mirror) cannot change
+the `keys/` content or the freeze commit it checks. `keys/` is read as
+the blobs in the freeze commit's tree, so no `.gitattributes`
+(`export-ignore`, `export-subst`), `info/attributes` or
+`core.attributesFile` can drop or change a `keys/` file.
 
 ## 2. Window
 
@@ -476,7 +482,7 @@ cutoff, six months after the flag day. The commands are in each guide's Patch si
 | `port` prints `skip <fpr>: revoked` or `skip <fpr>: invalid at the freeze commit` for your key | The key was revoked or invalid at the freeze commit | No continuity proof is possible. Register fresh and collect fresh endorsements. |
 | `port` prints `skip <fpr>: not a person` | It is a kernel.org list key, not yours | Use the draft for your own key, or register fresh. |
 | `port` prints `conflict <fpr>` or `skip <fpr>: no user ID with a usable name and email` for your key | Several keys share your email under different names, or no user ID gives a name or none gives an email | You can still prove continuity, which is all that endorsement drafts need. Copy any draft `port` wrote, set `keys` to `[]`, and put in your own `handle`, `name`, `emails` and `migratedFrom` (`openpgp4fpr:<fingerprint>`), with every email on an unrevoked user ID of that key; then continue with `register --from` and the `.asc` as above. The rehearsal does not cover a hand-written draft. |
-| `port` prints `skip keys/<file>: <reason>` | gpg did not fully import that file: a PGP-2 (v3) key, a revocation certificate whose key is not in keys/, or a partial import | `port` carries on without it. Before the freeze, fix or remove the file in pgpkeys and rerun `port`; after it, the key's holder registers fresh. |
+| `port`, `verify-continuity` or `drafts` prints `skip keys/<file>: <reason>` or `partial keys/<file>: took <fingerprints>; <reason>` | gpg did not fully import that file: a PGP-2 (v3) key, a key gpg refuses (for example one with no user ID), or a revocation certificate whose key is in no keys/ file. A revocation filed before its key is not one of these: every file that fails is retried once after the rest are imported. | `skip`: nothing from the file is used. `partial`: the listed keys are used and the rest of the file is not. The run carries on either way. Before the freeze, fix or remove the file in pgpkeys and rerun; after it, a holder whose key is not used registers fresh. |
 | `fail <handle>: <fpr> is revoked` | The key was revoked at the freeze commit | No continuity proof is possible. Register fresh (without `migratedFrom`). |
 | `fail <handle>: <email> is not on an unrevoked user ID of <fpr>` | Your person file has an email your GPG key does not | Before your branch is merged: remove that email from your draft, register again in a fresh registry checkout, and make a new `.asc`. |
 | `fail <handle>: no people/<handle>.json.asc, and no signature by an auth subkey of <fpr>` | No proof submitted, or the auth subkey is listed but another key signed the file | Add the `.asc`, or sign the person file with the auth subkey itself. |
