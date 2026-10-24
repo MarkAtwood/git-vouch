@@ -60,13 +60,23 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
+Edit loop (about 40 s; skips the doc walkthroughs marked slow by `SLOW` in
+`tests/conftest.py`):
 
 ```bash
-# Example:
-# npm install
-# npm test
+uv run --python 3.12 --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl python -m pytest -q -p no:cacheprovider -n 6 -m "not slow" --basetemp=$(mktemp -d /tmp/gv.XXXX) tests
 ```
+
+Pre-commit gate: the same command without `-m "not slow"`, on `--python 3.12`
+and `--python 3.9` (about 2.5-3 minutes each), plus:
+
+```bash
+ruff check
+ruff format --check
+uv run --with mypy mypy --python-version 3.10 git-vouch
+```
+
+A new doc walkthrough module must be added to `SLOW` in `tests/conftest.py`.
 
 ## Architecture Overview
 

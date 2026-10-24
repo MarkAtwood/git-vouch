@@ -21,6 +21,21 @@ it must be correct, and it must be tested.
 - **Disclosure is optional.** If you want to credit the tool, add a commit
   trailer such as `Assisted-by: <tool/model>`. Nobody is penalized either way.
 
+## Testing
+
+Fast edit loop (about 40-55 s; skips the doc-walkthrough modules listed in
+`SLOW` in `tests/conftest.py`):
+
+```sh
+uv run --with pytest --with pytest-xdist --with jsonschema --with referencing --with pynacl python -m pytest -q -n 6 -m "not slow" tests
+```
+
+Before pushing, run the same command without `-m "not slow"` (about 2.5
+minutes), plus `ruff check`, `ruff format --check` and
+`uv run --with mypy mypy --python-version 3.10 git-vouch`. mypy needs 3.10
+as its target version; the code itself still supports Python 3.9. A new doc
+walkthrough module must be added to `SLOW`.
+
 ## Developer Certificate of Origin
 
 Signing off your commits (`git commit -s`) under the
