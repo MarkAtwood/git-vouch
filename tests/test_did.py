@@ -750,3 +750,25 @@ def test_non_canonical_base64_key_rejected(
     with pytest.raises(vouch.VouchError, match="not canonical"):
         vouch.ssh_to_did(f"{key_type} {bad}")
     vouch.ssh_to_did(ecdsa_key.pubkey)
+
+
+# A real ssh-keygen RSA key whose base64 has a run of over 255 characters
+# between two '/', so treating it as a path fails with "File name too long".
+LONG_SEGMENT_RSA = (
+    "AAAAB3NzaC1yc2EAAAADAQABAAABAQDn+OGE0UhOV0epjV4YMtQXvZDbENz1IWTB"
+    "avK+ysb+JFh16k4nLJTInrtzworCDrobOMnwpS6xuAforAETPa3E3wWGCQEUsUlc"
+    "QzEX46TOarDvgI8xxrvpLEQEGmOL26affAZ30iilvxEtvuVTKaiJRZSQq+BBnEn7"
+    "Vb7sOR4F940RTnvCkWtDd7IEw43ZmCQvcmexkDIIP05b6Gy++bZuqqqGwG7P3xqV"
+    "wrAMm17KSdH8vdCTIMY3N0UgCm61LNpt8x+oYyB1SOqbfyPV3Hb5Z5vKQKBoFlvw"
+    "Jgauzzc7RzYcHcmdPuAWdIoJhP6uvXqFvL8b1fKD/JV8giakF0zZ"
+)
+
+
+def test_key_line_too_long_for_a_path_is_read_as_a_key() -> None:
+    line = "ssh-rsa " + LONG_SEGMENT_RSA
+    assert max(len(part) for part in LONG_SEGMENT_RSA.split("/")) > 255
+    forward = run_script("did", line)
+    assert forward.returncode == 0, forward.stderr
+    assert forward.stdout.startswith("did:key:z")
+    reverse = run_script("did", forward.stdout.strip())
+    assert (reverse.returncode, reverse.stdout) == (0, line + "\n")

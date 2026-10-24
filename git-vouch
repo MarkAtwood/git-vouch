@@ -3271,7 +3271,11 @@ def _key_did(arg: str) -> str:
     """
     if arg.startswith("did:"):
         return ssh_to_did(did_to_ssh(arg))  # canonical form, as check compares
-    if Path(arg).is_file():
+    try:
+        is_file = Path(arg).is_file()
+    except OSError:  # a key line's base64 can hold a "name" too long for stat
+        is_file = False
+    if is_file:
         return ssh_to_did(_pubkey_file(arg))
     return ssh_to_did(arg)
 

@@ -1,0 +1,2 @@
+{"id":"01a16c38-a718-7c78-90fd-259478ba5701","issue_id":"vouch-9wui","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-24T04:43:34.552817675Z"}
+{"id":"01a16c38-a7a4-7370-ba88-2487218e95b2","issue_id":"vouch-9wui","event_type":"closed","actor":"agent","old_value":"","new_value":"OSError from is_file means not a file; test_key_line_too_long_for_a_path_is_read_as_a_key pins the ssh-keygen key; 100/100 fresh RSA keys round-trip","created_at":"2026-10-24T04:43:34.692226151Z"}
