@@ -63,7 +63,11 @@ ED25519_CODEC = b"\xed\x01"  # multicodec ed25519-pub (0xed) as a varint
 P256_CODEC = b"\x80\x24"  # multicodec p256-pub (0x1200) as a varint
 RSA_CODEC = b"\x85\x24"  # multicodec rsa-pub (0x1205) as a varint
 # The kernel's floor (maintainer-pgp-guide.rst) and OpenSSH's ceiling.
-RSA_MIN_BITS, RSA_MAX_BITS = 2048, 16384
+# 4096, not OpenSSH's 16384: every modulus gets a pow() weakness test while
+# parsing (_rsa_modulus_is_weak), about 0.15 s at 4096 bits but 7 s at 16384, so a
+# hostile person file of 16 such keys would cost every check about 2 minutes.
+# pgpkeys has no RSA authentication key above 4096 bits (vouch-gbth).
+RSA_MIN_BITS, RSA_MAX_BITS = 2048, 4096
 NEW_KEY_HINT = "make a new key with: ssh-keygen -t ed25519-sk"
 P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
 P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
@@ -91,9 +95,9 @@ SSH_KEY_FIELDS = {
     "sk-ecdsa-sha2-nistp256@openssh.com": 4,
     "ssh-rsa": 3,
 }
-# A did:key for a 16384-bit RSA key with e < n is at most 5625 characters;
+# A did:key for a 4096-bit RSA key with e < n is at most 1430 characters;
 # longer input is never decoded.
-MAX_DID_LEN = 5625
+MAX_DID_LEN = 1430
 NAMESPACES = {
     "people": "git-vouch-register",
     "tiers": "git-vouch-tier",
@@ -538,7 +542,7 @@ def _check_rsa(n: int, e: int) -> None:
     """Check an RSA public key against the accepted sizes and PKCS#1's exponent range.
 
     Raises:
-        VouchError: ``n`` is outside 2048-16384 bits, or ``e`` is not odd with 3 <= e < n.
+        VouchError: ``n`` is outside 2048-4096 bits, or ``e`` is not odd with 3 <= e < n.
     """
     if not RSA_MIN_BITS <= n.bit_length() <= RSA_MAX_BITS:
         raise VouchError(
@@ -566,7 +570,7 @@ def _rsa_modulus_is_weak(n: int) -> bool:
     # ponytail: catches accidental or naive weak moduli only. A registrant
     # who picks a factor just above 2^16, or one ECM finds, still gets a key
     # anyone can sign with: ruling that out costs factoring n. Ceiling: one
-    # pow() per distinct modulus, about 7 s at 16384 bits (0.15 s at 4096),
+    # pow() per distinct modulus, about 0.15 s at RSA_MAX_BITS (4096),
     # paid while parsing before any signature check; cached per modulus.
     return (
         any(n % d == 0 for d in range(3, 1 << 16, 2))

@@ -248,20 +248,23 @@ def test_rsa_did_carries_ssh_keygen_pkcs1(vouch: ModuleType, rsa_key: Key) -> No
     assert vouch.b58decode(did[len("did:key:z") :]) == b"\x85\x24" + der
 
 
-# Low bits of the synthetic test moduli. (1 << 2047) | 39 and (1 << 16383) | 39
+# Low bits of the synthetic test moduli. (1 << 2047) | 129 and (1 << 4095) | 129
 # are composite ('openssl prime') with no factor below 2^16, so they pass
-# the weak-modulus check; with | 1 both were multiples of 3.
-RSA_TEST_LOW = 39
+# the weak-modulus check; with | 39, the 4096-bit one did not.
+RSA_TEST_LOW = 129
 
 
-# The ceiling is OpenSSH's own (ssh-keygen is the oracle); the floor is the
-# kernel's (maintainer-pgp-guide.rst), below OpenSSH's 1024.
+# The floor is the kernel's (maintainer-pgp-guide.rst), above OpenSSH's 1024;
+# the ceiling, 4096, is below OpenSSH's 16384 (vouch-gbth): ssh-keygen is the
+# oracle that the refused sizes are ones OpenSSH would load.
 @pytest.mark.parametrize(
     ("bits", "openssh_ok", "accepted"),
     [
         (2047, True, False),
         (2048, True, True),
-        (16384, True, True),
+        (4096, True, True),
+        (4097, True, False),
+        (16384, True, False),
         (16385, False, False),
     ],
 )
@@ -276,8 +279,17 @@ def test_rsa_size_bounds(
     if accepted:
         assert vouch.did_to_ssh(vouch.ssh_to_did(line)) == line
     else:
-        with pytest.raises(vouch.VouchError, match="2048 to 16384"):
+        with pytest.raises(vouch.VouchError, match="2048 to 4096"):
             vouch.ssh_to_did(line)
+
+
+def test_longest_rsa_did_fits_the_length_cap(vouch: ModuleType) -> None:
+    """A 4096-bit key with the largest odd e below n round-trips (vouch-gbth)."""
+    n = (1 << 4095) | RSA_TEST_LOW
+    line = rsa_line(n, n - 2)
+    did = vouch.ssh_to_did(line)
+    assert len(did) <= vouch.MAX_DID_LEN
+    assert vouch.did_to_ssh(did) == line
 
 
 RSA_TEST_N = (1 << 2047) | RSA_TEST_LOW

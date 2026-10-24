@@ -1157,7 +1157,7 @@ def build_parser() -> argparse.ArgumentParser:
             "reusable authentication key (else the newest key), if their primary names "
             "match, and otherwise none is drafted. Emails come from unrevoked user "
             "IDs. An ed25519 or P-256 authentication key or subkey is pre-filled as "
-            "the SSH key, else an RSA one of 2048 to 16384 bits."
+            "the SSH key, else an RSA one of 2048 to 4096 bits."
         ),
     )
     p.add_argument("pgpkeys", help="a pgpkeys.git clone")
