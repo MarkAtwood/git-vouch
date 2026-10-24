@@ -2,11 +2,13 @@
   "id": "vouch-ystr",
   "title": "feat(query): accept the SHA256 fingerprint git prints",
   "description": "When git verify-tag fails it prints only 'Good \"git\" signature with ED25519 key SHA256:\u003cfp\u003e' and 'No principal matched.', the same for an unregistered key and a below-tier key (measured for vouch-tq92.5, git 2.55.0 / OpenSSH 9.6p1). Today 'git vouch query SHA256:\u003cfp\u003e' prints handle null and exits 1 even for a registered contributor, and does not reject the input as not a did:key. 'git vouch did SHA256:\u003cfp\u003e' errors with 'not an SSH public key line'. So neither Linus nor the sender can tell 'contributor' from 'not registered' without the public key. Proposal: make query (and query --at) match a SHA256 fingerprint against the person files' keys, and reject input that is neither a did:key nor a fingerprint. Then 'git vouch query SHA256:\u003cfp\u003e' answers handle, tier and added time with no new command; compare tiers to tell it apart from the export's --min-tier. A constraint on input rather than a new 'git vouch why' command. Once it lands, update guide-anchors 'Switch Linus's git' to name it. Not built.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "task",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-24T05:36:29.933661307Z",
   "created_by": "agent",
-  "updated_at": "2026-10-24T05:36:29.933661307Z"
+  "updated_at": "2026-10-24T06:53:37.742848892Z",
+  "closed_at": "2026-10-24T06:53:37.742848892Z",
+  "close_reason": "Won't do: not requested; the documented floor and existing query input cover it"
 }
