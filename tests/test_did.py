@@ -10,6 +10,8 @@ checked with ssh-keygen and openssl, never with git-vouch.
 from __future__ import annotations
 
 import base64
+import hashlib
+import math
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -246,6 +248,12 @@ def test_rsa_did_carries_ssh_keygen_pkcs1(vouch: ModuleType, rsa_key: Key) -> No
     assert vouch.b58decode(did[len("did:key:z") :]) == b"\x85\x24" + der
 
 
+# Low bits of the synthetic test moduli. (1 << 2047) | 39 and (1 << 16383) | 39
+# are composite ('openssl prime') with no factor below 2^16, so they pass
+# the weak-modulus check; with | 1 both were multiples of 3.
+RSA_TEST_LOW = 39
+
+
 # The ceiling is OpenSSH's own (ssh-keygen is the oracle); the floor is the
 # kernel's (maintainer-pgp-guide.rst), below OpenSSH's 1024.
 @pytest.mark.parametrize(
@@ -260,7 +268,7 @@ def test_rsa_did_carries_ssh_keygen_pkcs1(vouch: ModuleType, rsa_key: Key) -> No
 def test_rsa_size_bounds(
     vouch: ModuleType, tmp_path: Path, bits: int, openssh_ok: bool, accepted: bool
 ) -> None:
-    line = rsa_line((1 << (bits - 1)) | 1, 65537)
+    line = rsa_line((1 << (bits - 1)) | RSA_TEST_LOW, 65537)
     path = tmp_path / "check.pub"
     path.write_text(line + "\n")
     keygen = subprocess.run(["ssh-keygen", "-l", "-f", str(path)], capture_output=True)
@@ -272,7 +280,7 @@ def test_rsa_size_bounds(
             vouch.ssh_to_did(line)
 
 
-RSA_TEST_N = (1 << 2047) | 1
+RSA_TEST_N = (1 << 2047) | RSA_TEST_LOW
 
 
 @pytest.mark.parametrize("e", [3, 41, 65537, RSA_TEST_N - 2])
@@ -517,3 +525,216 @@ def test_leading_one_alias_rejected(vouch: ModuleType) -> None:
     # A '1' adds a zero byte, so it must not decode to the same key.
     with pytest.raises(vouch.VouchError):
         vouch.did_to_ssh("did:key:z16MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp")
+
+
+def sshsig(public_blob: bytes, namespace: str, message: bytes, sign: object) -> str:
+    """Return an armored SSHSIG (OpenSSH PROTOCOL.sshsig) made by ``sign(signed_data)``."""
+
+    def wire(*strings: bytes) -> bytes:
+        return b"".join(len(s).to_bytes(4, "big") + s for s in strings)
+
+    head = wire(namespace.encode(), b"", b"sha512")
+    signed = b"SSHSIG" + head + wire(hashlib.sha512(message).digest())
+    blob = b"SSHSIG\0\0\0\1" + wire(public_blob) + head + wire(sign(signed))  # type: ignore[operator]
+    text = base64.b64encode(blob).decode()
+    lines = [text[i : i + 70] for i in range(0, len(text), 70)]
+    return "\n".join(
+        ["-----BEGIN SSH SIGNATURE-----", *lines, "-----END SSH SIGNATURE-----\n"]
+    )
+
+
+def ssh_keygen_verifies(
+    tmp_path: Path, line: str, armored: str, message: bytes
+) -> bool:
+    """Return whether 'ssh-keygen -Y verify' accepts ``armored`` by ``line`` over ``message``."""
+    (tmp_path / "allowed").write_text(f"signer {line}\n")
+    (tmp_path / "msg.sig").write_text(armored)
+    result = subprocess.run(
+        ["ssh-keygen", "-Y", "verify", "-f", str(tmp_path / "allowed"), "-I", "signer"]
+        + ["-n", "git-vouch-register", "-s", str(tmp_path / "msg.sig")],
+        input=message,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+FORGED_MESSAGE = b"any bytes the forger likes\n"
+ED25519_IDENTITY = b"\x01" + b"\x00" * 31
+
+
+def test_identity_ed25519_key_is_forgeable_and_rejected(
+    vouch: ModuleType, tmp_path: Path
+) -> None:
+    # R = identity, S = 0 verifies for every message: no private key exists.
+    blob = b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + ED25519_IDENTITY
+    line = "ssh-ed25519 " + base64.b64encode(blob).decode()
+    forged = sshsig(
+        blob,
+        "git-vouch-register",
+        FORGED_MESSAGE,
+        lambda _: b"\0\0\0\x0bssh-ed25519\0\0\0\x40" + ED25519_IDENTITY + bytes(32),
+    )
+    assert ssh_keygen_verifies(tmp_path, line, forged, FORGED_MESSAGE)
+    with pytest.raises(vouch.VouchError, match="small order"):
+        vouch.ssh_to_did(line)
+    with pytest.raises(vouch.VouchError, match="small order"):
+        vouch.did_to_ssh("did:key:z" + vouch.b58encode(b"\xed\x01" + ED25519_IDENTITY))
+
+
+# y of the small-order points (little-endian, sign bit clear), copied from the
+# blacklist in libsodium 1.0.16's ge25519_has_small_order, plus y >= p
+# spellings. Each also appears with the x sign bit set. pynacl's libsodium is
+# the oracle that none is a usable public key.
+ED25519_BAD_Y = [
+    "00" * 32,
+    "01" + "00" * 31,
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "ec" + "ff" * 30 + "7f",  # p - 1
+    "ed" + "ff" * 30 + "7f",  # p
+    "ee" + "ff" * 30 + "7f",  # p + 1
+    "ef" + "ff" * 30 + "7f",  # p + 2
+    "ff" * 31 + "7f",  # 2^255 - 1
+]
+
+
+@pytest.mark.parametrize("sign", [0, 0x80])
+@pytest.mark.parametrize("y", ED25519_BAD_Y)
+def test_small_order_and_non_canonical_ed25519_rejected(
+    vouch: ModuleType, y: str, sign: int
+) -> None:
+    import nacl.bindings  # pynacl: a test-only dependency
+
+    key = bytes.fromhex(y)
+    key = key[:31] + bytes([key[31] | sign])
+    assert not nacl.bindings.crypto_core_ed25519_is_valid_point(key)
+    with pytest.raises(vouch.VouchError, match="small order|not canonically"):
+        vouch.ssh_to_did(ssh_line(b"ssh-ed25519", key))
+    with pytest.raises(vouch.VouchError, match="small order|not canonically"):
+        vouch.did_to_ssh("did:key:z" + vouch.b58encode(b"\xed\x01" + key))
+
+
+def test_ccg_ed25519_keys_are_valid_points() -> None:
+    # The oracle above must not reject every key.
+    import nacl.bindings  # pynacl: a test-only dependency
+
+    for seed in CCG_ED25519_SEEDS.values():
+        public = ed25519_public_from_seed(seed)
+        assert nacl.bindings.crypto_core_ed25519_is_valid_point(public)
+
+
+# From 'openssl prime -generate -bits N -hex' (OpenSSL 3.0.13); each is
+# checked with 'openssl prime' below.
+OPENSSL_PRIME_2048 = int(
+    "EA269300F68BA986A26E325FA125D130468FBFD95F1EB3C22C234F4763D07476"
+    "AADFE68D256CD266A484878446B8B686496AF1A807A0C72929F96E4C70BAE242"
+    "706C18803F54C781E8AEFC550D0C9F6844AF935CF562B9DB0C835E953399A9DD"
+    "8A7EA4C4F7A97D02ED17BF485E7B8ACF4B92B11AA9FBE9A687BFD9FD55FF1BD7"
+    "437D70A211D2F4B1F0D58DF64B1F6E1369FB63AC7E82C1B6FADE90834FA3218A"
+    "716415B3FDC06560A42DF7B14B610C50C430FCB82149721348C130A4E3CB7476"
+    "DD99226789A4EC5456C61A28A75EC78CBF599B6B58B5975545DA3DD6384427F9"
+    "B69D9DBA6F3AA598DE835583724D009D4F3C145907E6EEC83E28C098E47E3A61",
+    16,
+)
+OPENSSL_PRIME_2046 = int(
+    "3392E9F0FCB98409A4D17A206124B672FF0BB8DC2B32371BE4DAAFE68D538EEF"
+    "2E5746FA4F1E6B1E406E499F4E1F1B4740B4DD992352DE6C4EC3DFA08FDB17E6"
+    "33376D6007991126EB2434046663CC06D40D4F1DB49CA67569D971C8B97D67D2"
+    "10732E3C98BA5454C99AFFCA79D9AC3D7DAF6C996DF3E67FAF9866386CE40C89"
+    "AF4D081148C27DA4CF006997B4BCFD92A1FF8EC0E98F5B57C8BB5DB0D8977DCF"
+    "5A31587CCC298DD208ECFA7A71961CA856F1164B4BCDD4FF5E40C47C11BA4CE5"
+    "7E0CC1BC8CFA54E73DB41A95985F6CC0132C63658AF613E9BDBDF8E9CFDA86CC"
+    "BDCE6E4761801E8FD5787608E692E0F07E9803F3FC0FB3464F650A51F1D205B9",
+    16,
+)
+OPENSSL_PRIME_1025 = int(
+    "01879F0E763389DC6820AFD0CC99744D9040003130A7C549D3EC9A1F5E09A6DA"
+    "6D8B3F8DC204FF3A68EE1C29893B8758A2556BEB02168BAD55D2A0C7B67D89A5"
+    "A5E015143689771DA594124A13D0498ACFA82A94B74567399D945621B7EE7F12"
+    "9E72F241A4F47FF8EE382F77E3699910DD77C638915E7D7486DA0E3788724824CD",
+    16,
+)
+# RFC 8017 section 9.2, note 1: the DER DigestInfo prefix for SHA-512.
+SHA512_DIGEST_INFO = bytes.fromhex("3051300d060960864801650304020305000440")
+
+
+def openssl_says_prime(p: int) -> bool:
+    """Return whether 'openssl prime' reports ``p`` prime."""
+    out = subprocess.run(
+        ["openssl", "prime", "-hex", f"{p:X}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.rstrip().endswith(" is prime")
+
+
+def der_tlv(tag: int, body: bytes) -> bytes:
+    """Return a DER element with the minimal length form."""
+    n = len(body)
+    if n < 0x80:
+        return bytes([tag, n]) + body
+    size = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([tag, 0x80 | len(size)]) + size + body
+
+
+@pytest.mark.parametrize(
+    "factors",
+    [
+        [OPENSSL_PRIME_2048],
+        [3, OPENSSL_PRIME_2046],
+        # The largest prime below 2^16: only trial division catches this one.
+        [65521, OPENSSL_PRIME_2046],
+        [OPENSSL_PRIME_1025, OPENSSL_PRIME_1025],
+    ],
+    ids=["prime", "factor-3", "factor-65521", "prime-square"],
+)
+def test_weak_rsa_modulus_is_forgeable_and_rejected(
+    vouch: ModuleType, tmp_path: Path, factors: list[int]
+) -> None:
+    assert all(openssl_says_prime(p) for p in factors)
+    n, e = math.prod(factors), 65537
+    phi = n
+    for p in set(factors):
+        phi = phi // p * (p - 1)
+    d = pow(e, -1, phi)  # public, since the factors are
+    k = (n.bit_length() + 7) // 8
+
+    def sign(signed: bytes) -> bytes:
+        t = SHA512_DIGEST_INFO + hashlib.sha512(signed).digest()
+        em = b"\0\1" + b"\xff" * (k - 3 - len(t)) + b"\0" + t
+        s = pow(int.from_bytes(em, "big"), d, n).to_bytes(k, "big")
+        return b"\0\0\0\x0crsa-sha2-512" + len(s).to_bytes(4, "big") + s
+
+    line = rsa_line(n, e)
+    blob = base64.b64decode(line.split()[1])
+    forged = sshsig(blob, "git-vouch-register", FORGED_MESSAGE, sign)
+    assert ssh_keygen_verifies(tmp_path, line, forged, FORGED_MESSAGE)
+    with pytest.raises(vouch.VouchError, match="anyone can sign") as raised:
+        vouch.ssh_to_did(line)
+    assert str(raised.value).endswith("make a new key with: ssh-keygen -t ed25519-sk")
+
+    def mpint(v: int) -> bytes:
+        return v.to_bytes(v.bit_length() // 8 + 1, "big")
+
+    der = der_tlv(0x30, der_tlv(0x02, mpint(n)) + der_tlv(0x02, mpint(e)))
+    with pytest.raises(vouch.VouchError, match="anyone can sign"):
+        vouch.did_to_ssh("did:key:z" + vouch.b58encode(b"\x85\x24" + der))
+
+
+def test_non_canonical_base64_key_rejected(
+    vouch: ModuleType, ecdsa_key: Key, tmp_path: Path
+) -> None:
+    key_type, text = ecdsa_key.pubkey.split()[:2]
+    # A 104-byte blob ends in one '=': its last character has 2 unused bits.
+    assert text.endswith("=") and not text.endswith("==")
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    bad = text[:-2] + alphabet[alphabet.index(text[-2]) | 1] + "="
+    assert bad != text and base64.b64decode(bad) == base64.b64decode(text)
+    path = tmp_path / "bad.pub"
+    path.write_text(f"{key_type} {bad}\n")
+    keygen = subprocess.run(["ssh-keygen", "-l", "-f", str(path)], capture_output=True)
+    assert keygen.returncode != 0  # OpenSSH cannot load it
+    with pytest.raises(vouch.VouchError, match="not canonical"):
+        vouch.ssh_to_did(f"{key_type} {bad}")
+    vouch.ssh_to_did(ecdsa_key.pubkey)

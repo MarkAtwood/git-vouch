@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -59,6 +61,22 @@ RSA_MIN_BITS, RSA_MAX_BITS = 2048, 16384
 NEW_KEY_HINT = "make a new key with: ssh-keygen -t ed25519-sk"
 P256_P = 2**256 - 2**224 + 2**192 + 2**96 - 1
 P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+ED25519_P = 2**255 - 19
+# The y coordinates (little-endian, sign bit clear) of ed25519's 8 small-order
+# points: 0 and the two order-8 values each come with two signs of x. From the
+# blacklist in ge25519_has_small_order, libsodium 1.0.16 (commit 675149b9b8b6),
+# src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c. Its p and p+1
+# entries spell 0 and 1 non-canonically and are refused as y >= p instead.
+ED25519_SMALL_ORDER_Y = frozenset(
+    bytes.fromhex(y)
+    for y in (
+        "00" * 32,
+        "01" + "00" * 31,
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+        "ec" + "ff" * 30 + "7f",
+    )
+)
 # Number of SSH wire strings in each accepted key blob; sk- keys add an application.
 SSH_KEY_FIELDS = {
     "ssh-ed25519": 2,
@@ -490,6 +508,54 @@ def _check_rsa(n: int, e: int) -> None:
         )
     if not (3 <= e < n and e & 1):
         raise VouchError("RSA exponent must be odd, at least 3 and less than n")
+    if _rsa_modulus_is_weak(n):
+        raise VouchError(
+            "RSA modulus is prime, a prime power or has a factor below 2^16,"
+            f" so anyone can sign with this key; {NEW_KEY_HINT}"
+        )
+
+
+@functools.lru_cache(maxsize=None)
+def _rsa_modulus_is_weak(n: int) -> bool:
+    """Return whether anyone can compute a private key for an RSA modulus ``n`` >= 2^16.
+
+    A factor below 2^16 is found by trial division. If ``n`` is a prime p, or
+    a prime power p^k, then n = 1 (mod p-1), so by Fermat's little theorem
+    2^n = 2 (mod p) and p divides gcd(2^n - 2, n). For an even n, 2^n mod n
+    is even, so the gcd is at least 2.
+    """
+    # ponytail: catches accidental or naive weak moduli only. A registrant
+    # who picks a factor just above 2^16, or one ECM finds, still gets a key
+    # anyone can sign with: ruling that out costs factoring n. Ceiling: one
+    # pow() per distinct modulus, about 7 s at 16384 bits (0.15 s at 4096),
+    # paid while parsing before any signature check; cached per modulus.
+    return (
+        any(n % d == 0 for d in range(3, 1 << 16, 2))
+        or math.gcd(pow(2, n, n) - 2, n) != 1
+    )
+
+
+def _check_ed25519(key: bytes) -> None:
+    """Check that ``key`` is a canonical ed25519 public key that is not of small order.
+
+    Anyone can sign for a small-order key: for the identity, R = identity and
+    S = 0 verify for every message.
+
+    Raises:
+        VouchError: ``key`` is not 32 bytes, has y >= p, or is one of the 8
+            small-order points (with either x sign bit).
+    """
+    if len(key) != 32:
+        raise VouchError("ed25519 public key is not 32 bytes")
+    y = key[:31] + bytes([key[31] & 0x7F])
+    if int.from_bytes(y, "little") >= ED25519_P:
+        raise VouchError(
+            f"ed25519 public key is not canonically encoded; {NEW_KEY_HINT}"
+        )
+    if y in ED25519_SMALL_ORDER_Y:
+        raise VouchError(
+            f"ed25519 public key has small order, so anyone can sign with it; {NEW_KEY_HINT}"
+        )
 
 
 def ssh_to_did(pubkey: str) -> str:
@@ -516,9 +582,13 @@ def ssh_to_did(pubkey: str) -> str:
             f" are accepted; {NEW_KEY_HINT}"
         )
     try:
-        parts = _ssh_strings(base64.b64decode(fields[1], validate=True))
+        blob = base64.b64decode(fields[1], validate=True)
     except ValueError as e:
         raise VouchError(f"invalid base64 in SSH public key: {e}") from e
+    # OpenSSH refuses stray padding bits and would skip this line in allowed_signers.
+    if base64.b64encode(blob).decode() != fields[1]:
+        raise VouchError(f"SSH public key base64 is not canonical; {NEW_KEY_HINT}")
+    parts = _ssh_strings(blob)
     if len(parts) != count or parts[0] != key_type.encode():
         raise VouchError(f"malformed {key_type} public key")
     if key_type == "ssh-rsa":
@@ -529,8 +599,7 @@ def ssh_to_did(pubkey: str) -> str:
         _check_rsa(n, e)
         return "did:key:z" + b58encode(RSA_CODEC + _rsa_der(n, e))
     if "ed25519" in key_type:
-        if len(parts[1]) != 32:
-            raise VouchError("ed25519 public key is not 32 bytes")
+        _check_ed25519(parts[1])
         return "did:key:z" + b58encode(ED25519_CODEC + parts[1])
     point = parts[2]
     if parts[1] != b"nistp256" or len(point) != 65 or point[0] != 4:
@@ -558,6 +627,7 @@ def did_to_ssh(did: str) -> str:
     raw = b58decode(did[len("did:key:z") :])
     codec, key = raw[:2], raw[2:]
     if codec == ED25519_CODEC and len(key) == 32:
+        _check_ed25519(key)
         parts = [b"ssh-ed25519", key]
     elif codec == P256_CODEC and len(key) == 33 and key[0] in (2, 3):
         y = _p256_y(int.from_bytes(key[1:], "big"), key[0] == 3)
