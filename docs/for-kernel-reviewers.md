@@ -55,8 +55,9 @@ A maintainer runs `git vouch register`, collects endorsements made with
 `git vouch approve <handle> maintainer`. Each command writes files for a
 registry merge (DESIGN: Commands). pgpkeys holds 645 live keys for
 about 606 people; 188 can reuse an authentication subkey as their SSH
-key; about 1,784 certifications become endorsement drafts; about 80% of
-maintainers have no GPG key (DESIGN: Flag day). DESIGN has no merge-load
+key; about 1,784 certifications become endorsement drafts; 1,538 of 1,935
+maintainers (79.5%) have no pgpkeys key under a MAINTAINERS address
+(DESIGN: Flag day). DESIGN has no merge-load
 estimate beyond that.
 
 If `git vouch check` fails, `export` writes nothing and `sync` writes

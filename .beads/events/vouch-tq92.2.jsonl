@@ -1,1 +1,2 @@
 {"id":"01a169cd-a674-7187-b89e-594db0dd192b","issue_id":"vouch-tq92.2","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T17:27:27.604101053Z"}
+{"id":"01a16c6b-3be1-77bb-9309-34d20ce3633a","issue_id":"vouch-tq92.2","event_type":"closed","actor":"agent","old_value":"","new_value":"Measured 79.5% (1,538/1,935) of MAINTAINERS people without a pgpkeys key at pgpkeys af88128e, linux 7be4bc52; replaced the 80% figure in DESIGN Flag day Scale and for-kernel-reviewers","created_at":"2026-10-24T05:38:49.441507588Z"}

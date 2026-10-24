@@ -895,8 +895,13 @@ ends it.
 
 **Scale** (pgpkeys at research time): 645 live keys for about 606
 people; 188 can reuse an authentication key as an accepted SSH key;
-about 1,784 verified certification pairs become drafts; about 80% of
-maintainers have no GPG key and register fresh.
+about 1,784 verified certification pairs become drafts. 1,538 of the
+1,935 people on MAINTAINERS `M:` lines (79.5%) have no unrevoked,
+unexpired pgpkeys UID matching any of their `M:` emails, and register
+fresh. By address, 1,605 of 2,023 unique `M:` emails (79.3%) match none.
+Measured 2026-10-23 at pgpkeys af88128e (signature verified) and linux
+7be4bc52. A key listing a different address than MAINTAINERS counts as
+no key, so 79.5% is an upper bound.
 
 **Old signatures.** GPG-signed tags stay valid in history. Verifying
 them uses `gpg` with the archived pgpkeys at the freeze commit. There is
