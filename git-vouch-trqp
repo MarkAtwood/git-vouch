@@ -44,6 +44,7 @@ MAX_BODY = 64 * 1024
 CLOCK_SKEW = timedelta(minutes=5)
 QUERY_TIMEOUT = 30  # seconds for one git vouch query
 STALE_AFTER = timedelta(hours=24)  # DESIGN.md, TRQP bridge, Freshness
+RETRY_AFTER = 3600  # seconds; the sync timer's interval (docs/bridge-deployment.md)
 EXT = "org.kernel.git-vouch"  # the response's ext namespace
 # ponytail: for now, one full-history registry check (git vouch query --all)
 # answers every DID, run once per registry commit and per ANSWER_TTL, shared by
@@ -99,6 +100,21 @@ class TaskError(Exception):
         """Refuse with framework error ``code`` and a short operator ``message``."""
         super().__init__(message)
         self.code = code
+
+
+class Stale(TaskError):
+    """The registry copy is stale or unsynced: refused with a bare 503.
+
+    No Trust Task document, because trql-client reads any trust-task-error
+    as a denial but a bare non-2xx as a transport error, so verify-trust
+    reports registryUnavailable (vouch-faq3.16). If OpenVTC
+    verifiable-git-infrastructure#170 lands, this can go back to a
+    retryable trust-task-error.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Refuse with ``message`` as the reply's text."""
+        super().__init__("unavailable", message)
 
 
 def parse_time(text: object, what: str) -> datetime:
@@ -416,9 +432,9 @@ def freshness(now: datetime) -> dict[str, Optional[str]]:
     that lands between the two can make it one commit behind the answer.
 
     Raises:
-        TaskError: unavailable if the copy has no sync stamp, its last
-            successful sync is over 24 hours old, or the stamp is dated
-            ahead of ``now`` by more than the allowed clock skew.
+        Stale: if the copy is not a repository, has no sync stamp, its
+            last successful sync is over 24 hours old, or the stamp is
+            dated ahead of ``now`` by more than the allowed clock skew.
     """
     root = registry_root()
     command = ["-C", str(root), "rev-parse", "--absolute-git-dir"]
@@ -426,21 +442,17 @@ def freshness(now: datetime) -> dict[str, Optional[str]]:
     # Exit 1 prints the git directory but no commit: a repository with none.
     lines = proc.stdout.splitlines()
     if proc.returncode not in (0, 1) or not lines:
-        raise TaskError("unavailable", "the registry is not a git repository")
+        raise Stale("the registry is not a git repository")
     try:
         mtime = (Path(lines[0]) / "vouch-fetched").stat().st_mtime
     except OSError as e:
-        raise TaskError("unavailable", "the registry copy was never synced") from e
+        raise Stale("the registry copy was never synced") from e
     synced = datetime.fromtimestamp(mtime, timezone.utc)
     when = synced.strftime(DATE_FORMAT)
     if now - synced > STALE_AFTER:
-        raise TaskError(
-            "unavailable", f"the registry copy was last synced {when}, over 24h ago"
-        )
+        raise Stale(f"the registry copy was last synced {when}, over 24h ago")
     if synced - now > CLOCK_SKEW:
-        raise TaskError(
-            "unavailable", f"the registry copy was synced {when}, in the future"
-        )
+        raise Stale(f"the registry copy was synced {when}, in the future")
     return {"commit": lines[1] if len(lines) > 1 else None, "synced": when}
 
 
@@ -468,7 +480,11 @@ def decide(
 
 
 def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object]]:
-    """Return the HTTP status and Trust Task document answering the request ``body``."""
+    """Return the HTTP status and Trust Task document answering the request ``body``.
+
+    Raises:
+        Stale: the registry copy is stale; the caller sends a bare 503.
+    """
     doc: object = None
     stamp = now.strftime(DATE_FORMAT)
     try:
@@ -480,6 +496,8 @@ def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object
         time, at = check_payload(payload)
         synced = freshness(now)
         authorized, message = decide(payload, did, at)
+    except Stale:
+        raise
     except TaskError as e:
         return STATUS[e.code], error_document(doc, did, now, e.code, str(e))
     answer: dict[str, object] = {
@@ -562,6 +580,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(length))
         try:
             status, doc = respond(body, self.did, now)
+        except Stale as e:
+            self._send_stale(str(e))
+            return
         except Exception:  # the boundary: log the trace, never send it
             self.log_error("internal error:\n%s", traceback.format_exc())
             status = STATUS["internalError"]
@@ -579,6 +600,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_stale(self, message: str) -> None:
+        data = f"{message}\n".encode()
+        self.send_response(503)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Retry-After", str(RETRY_AFTER))
         self.end_headers()
         self.wfile.write(data)
 

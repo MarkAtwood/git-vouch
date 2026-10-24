@@ -9,6 +9,7 @@ Every expected ``authorized`` is stated by hand from the fixture.
 
 from __future__ import annotations
 
+import http.client
 import os
 import json
 import shutil
@@ -785,11 +786,29 @@ def stamp_time(registry: Path) -> str:
     return datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def stale_reply(bridge: Bridge, req: dict) -> str:
+    """POST ``req`` and return the text of the bare 503 a stale registry gets.
+
+    No Trust Task document, so verify-trust reads it as a transport error
+    and reports registryUnavailable (vouch-faq3.16).
+    """
+    conn = http.client.HTTPConnection(bridge.host, bridge.port, timeout=60)
+    try:
+        conn.request("POST", "/trust-tasks", json.dumps(req).encode())
+        resp = conn.getresponse()
+        body = resp.read()
+        assert resp.status == 503, body[:200]
+        assert resp.getheader("Content-Type") == "text/plain; charset=utf-8"
+        assert resp.getheader("Retry-After") == "3600"
+        assert resp.getheader("Cache-Control") == "no-store"
+        return body.decode()
+    finally:
+        conn.close()
+
+
 def assert_stale(bridge: Bridge, req: dict) -> None:
-    """Assert the bridge refuses ``req`` with the retryable error verify-trust fails closed on."""
-    status, payload = error(bridge, req)
-    assert (status, payload["code"], payload["retryable"]) == (503, "unavailable", True)
-    assert "synced" in payload["message"]
+    """Assert the bridge refuses ``req`` as stale, naming the sync."""
+    assert "synced" in stale_reply(bridge, req)
 
 
 @pytest.mark.parametrize(
@@ -814,7 +833,7 @@ def test_stale_registry_is_refused(
         assert authorized(bridge, req)[0] is True
     else:
         assert_stale(bridge, req)
-        assert stamp_time(reg.root) in error(bridge, req)[1]["message"]
+        assert stamp_time(reg.root) in stale_reply(bridge, req)
 
 
 def test_stale_registry_refuses_even_a_denial(
@@ -845,14 +864,11 @@ def test_never_synced_registry_is_refused(
     """No vouch-fetched stamp, or no git directory to hold one: refused."""
     if is_repo:
         subprocess.run(["git", "init", "-q", str(reg.root)], check=True)
-    status, payload = error(
-        serve(reg.root, stamp=False), request(did(keys("torvalds")))
-    )
-    assert (status, payload["code"], payload["retryable"]) == (503, "unavailable", True)
-    assert payload["message"] == (
-        "the registry copy was never synced"
+    text = stale_reply(serve(reg.root, stamp=False), request(did(keys("torvalds"))))
+    assert text == (
+        "the registry copy was never synced\n"
         if is_repo
-        else "the registry is not a git repository"
+        else "the registry is not a git repository\n"
     )
 
 

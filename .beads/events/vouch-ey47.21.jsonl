@@ -1,1 +1,2 @@
 {"id":"01a16727-a815-708e-b87c-053194d32dc7","issue_id":"vouch-ey47.21","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T05:06:54.613037186Z"}
+{"id":"01a16cbe-8f51-735e-97d7-11c2d03ed51d","issue_id":"vouch-ey47.21","event_type":"closed","actor":"agent","old_value":"","new_value":"Fixed in 8bc638f; test passes","created_at":"2026-10-24T07:09:50.289223832Z"}

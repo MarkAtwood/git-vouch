@@ -111,7 +111,9 @@ class Registry:
         retired: tuple[Key, ...] = (),
         accountable: str | None = None,
         emails: tuple[str, ...] = (),
+        signers: tuple[Key, ...] = (),
     ) -> None:
+        """Write ``handle``'s person file, signed by ``signers`` or else every current key."""
         entries = [
             {"ssh": k.pubkey, "added": ADDED, "retired": RETIRED} for k in retired
         ] + [{"ssh": k.pubkey, "added": ADDED, "retired": None} for k in current]
@@ -122,7 +124,8 @@ class Registry:
             "keys": entries,
             "accountable": accountable,
         }
-        self.write(f"people/{handle}.json", record, *current, ns="git-vouch-register")
+        signers = signers or current
+        self.write(f"people/{handle}.json", record, *signers, ns="git-vouch-register")
 
     def tier(
         self, subject: str, tier: str, approver: str, key: Key, date: str = BEFORE

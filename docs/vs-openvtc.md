@@ -135,4 +135,4 @@ What it does not prove:
 - **Tags.** verify-trust checks commit ranges only.
 
 A stale bridge (no sync for 24 hours) or a down one makes verify-trust
-fail closed.
+fail closed with `registryUnavailable`.

@@ -173,8 +173,9 @@ sends `Cache-Control: no-store` on every answer. Do not cache it.
 
 `git vouch sync` touches `vouch-fetched` in the copy's git directory
 after each successful fetch. The bridge reads that stamp before every
-answer and refuses with 503 `unavailable` when the stamp is missing,
-over 24 hours old, or dated more than 5 minutes in the future. An hourly
+answer and refuses with a bare HTTP 503 when the stamp is missing, over
+24 hours old, or dated more than 5 minutes in the future: a one-line
+`text/plain` reason, `Retry-After: 3600` and no Trust Task document. An hourly
 sync leaves 23 failed attempts before the refusal. `git vouch` itself
 only warns after 7 days and keeps working.
 
@@ -190,19 +191,18 @@ Failures, and where they show:
 | The fetch fails | `git vouch sync` exits 1 with the reason on stderr (`systemctl status git-vouch-sync`, `journalctl -u git-vouch-sync`). The stamp keeps its old time; the bridge answers until it is 24 hours old. |
 | The registry host rewrote history | `sync` refuses (`cannot fetch the registry; a rewritten history is refused`), since its refspec has no `+`. Same as a failed fetch. |
 | The fetch works but `git vouch check` fails | `sync` exits 1 and writes only the revocation file. The stamp is fresh, but every query fails the check, so the bridge answers 503 and logs `git-vouch-trqp: git vouch query exited 1: ...`. |
-| No sync for 24 hours | 503 `unavailable`, message `the registry copy was last synced TIME, over 24h ago`. |
+| No sync for 24 hours | Bare 503, body `the registry copy was last synced TIME, over 24h ago`. verify-trust reports `registryUnavailable` (measured, `test_stale_bridge_fails_closed`). |
 | The bridge is down | The proxy's own error. verify-trust reports `registryUnavailable` (measured, `test_bridge_down_fails_closed`). |
 
-**What verify-trust reports for a stale bridge.** Today the 503 carries a
-retryable `trust-task-error` document. trql-client reads any
-trust-task-error as a rejection, so verify-trust reports the commit
-`unauthorized`, not `registryUnavailable` (measured,
-`test_stale_bridge_fails_closed`). Either way the check fails closed.
-Bead vouch-faq3.16 changes the freshness refusal to a bare HTTP 503
-(`Retry-After`, a short text body, no Trust Task document), which
-trql-client treats as a transport error, so verify-trust will report
-`registryUnavailable`. OpenVTC/verifiable-git-infrastructure#170 asks
-OpenVTC to treat a retryable trust-task-error that way instead.
+**Why the stale reply is bare.** trql-client reads any trust-task-error
+as a rejection, so a Trust Task error document would make verify-trust
+report the commit `unauthorized`. A bare 503 is a transport error, so it
+reports `registryUnavailable`, as for a bridge that is down. Either way
+the check fails closed. Other refusals, including a failed or timed-out
+query, keep the retryable `trust-task-error` document.
+OpenVTC/verifiable-git-infrastructure#170 asks OpenVTC to treat that
+document as `registryUnavailable` too; if it lands, the stale reply can
+go back to one.
 
 ## Registry merges
 

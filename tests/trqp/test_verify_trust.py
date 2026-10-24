@@ -172,7 +172,8 @@ def bridge(
     r.person("torvalds", keys("torvalds"))
     r.person("gregkh", keys("gregkh"), retired=(keys("gregkh-old"),))
     alice = (keys("alice"), keys("alice2"), extra.ecdsa[0], extra.rsa[0], extra.sk[0])
-    r.person("alice", *alice)
+    # One current key signs: a .sig holds at most 4 blocks (DESIGN.md).
+    r.person("alice", *alice, signers=(keys("alice"),))
     r.person("bot", keys("bot"), accountable="gregkh")
     r.person("dave", keys("dave"))
     r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
@@ -372,14 +373,17 @@ def test_stale_bridge_fails_closed(
     bridge: Bridge,
     keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
-    """A bridge synced over 24h ago answers unavailable; verify-trust refuses.
+    """A bridge synced over 24h ago answers a bare 503; verify-trust refuses.
 
-    trql-client reads any trust-task-error as Rejected, which verify-trust
-    counts as a denial, so the commit is unauthorized, not registryUnavailable.
+    With no Trust Task document trql-client sees a transport error, so
+    verify-trust reports registryUnavailable, as for a bridge that is down,
+    not a denial (vouch-faq3.16).
     """
     stamp = tmp_path / "registry" / ".git" / "vouch-fetched"
     old = stamp.stat().st_mtime - 25 * 3600
     os.utime(stamp, (old, old))
     signer = did(keys("alice"))
     report = verify_trust(signed_repo(tmp_path, keys("alice"), signer), url(bridge))
-    assert report == Report(1, "unauthorized", {"signer_did": signer})
+    assert report.code == 1
+    assert report.status == "registryUnavailable"
+    assert isinstance(report.detail, dict) and report.detail["signer_did"] == signer
