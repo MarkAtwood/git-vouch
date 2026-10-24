@@ -1,1 +1,2 @@
 {"id":"01a16adc-be35-7ec0-961b-970d3de32d5b","issue_id":"vouch-s9w2.16","event_type":"created","actor":"agent","old_value":"","new_value":"","created_at":"2026-10-23T22:23:33.94196739Z"}
+{"id":"01a16b84-af02-7c3a-8baa-cc2a3706def7","issue_id":"vouch-s9w2.16","event_type":"closed","actor":"agent","old_value":"","new_value":"type must be an absolute URI (URI_RE) or the request is malformedRequest, and typeUri is echoed only when it is one; test test_type_not_a_uri_is_malformed_and_not_echoed","created_at":"2026-10-24T01:27:00.09880286Z"}

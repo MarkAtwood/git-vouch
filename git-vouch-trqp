@@ -77,6 +77,8 @@ DID_WEB_HOST = re.compile(r"([a-z0-9.-]{1,253})(?:%3A[0-9]{1,5})?")
 DID_WEB_PATH = re.compile(r"[A-Za-z0-9._~-]+")
 EXT_NAMESPACE = re.compile(r"[a-z][a-z0-9-]*(\.[a-z0-9-]+)+")
 ENVELOPE_STRINGS = ("id", "threadId", "parentThreadId", "issuer", "recipient")
+# An absolute URI (RFC 3986 section 4.3): a scheme, then only URI characters.
+URI_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]*")
 PAYLOAD_KEYS = {"entity_id", "authority_id", "action", "resource", "context", "ext"}
 
 
@@ -154,6 +156,8 @@ def check_envelope(doc: object, did: str, now: datetime) -> dict[str, object]:
     issued = parse_time(doc["issuedAt"], "issuedAt") if "issuedAt" in doc else None
     expires = parse_time(doc["expiresAt"], "expiresAt") if "expiresAt" in doc else None
     kind = doc["type"]
+    if not URI_RE.fullmatch(kind):
+        raise TaskError("malformedRequest", "type must be an absolute URI")
     if kind not in (TASK_TYPE, TASK_TYPE + "#request"):
         if kind.startswith(TASK_FAMILY):
             raise TaskError("unsupportedVersion", f"only {TASK_TYPE} is served")
@@ -418,7 +422,7 @@ def error_document(
     if (
         isinstance(request, dict)
         and isinstance(request.get("type"), str)
-        and request["type"]
+        and URI_RE.fullmatch(request["type"])
     ):
         in_response = {"typeUri": request["type"]}
         if isinstance(request.get("id"), str) and request["id"]:

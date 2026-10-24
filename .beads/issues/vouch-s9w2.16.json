@@ -2,13 +2,15 @@
   "id": "vouch-s9w2.16",
   "title": "trqp: non-URI request type echoed into typeUri",
   "description": "git-vouch-trqp error_document copies any non-empty request type into payload.inResponseTo.typeUri, which trust-task-error/0.5 payload.schema.json:50 declares format uri. Found once vouch-s9w2.13 turned on format checking (rfc3986-validator). Reproduced: POST a valid request with type 'not a uri' -\u003e unsupportedType reply; the schema oracle raises ValidationError: 'not a uri' is not a 'uri'. The envelope schema also requires type to be a uri, so such a request is arguably malformedRequest. Fix options: refuse a type that is not an absolute URI as malformedRequest before the unsupportedType test, or omit inResponseTo when the type is not a URI. Test: add with_doc(type='not a uri') to test_refused_documents; Bridge.post schema-checks the reply.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "bug",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T22:23:33.936930777Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T22:23:33.936930777Z",
+  "updated_at": "2026-10-24T01:27:00.08070475Z",
+  "closed_at": "2026-10-24T01:27:00.08070475Z",
+  "close_reason": "type must be an absolute URI (URI_RE) or the request is malformedRequest, and typeUri is echoed only when it is one; test test_type_not_a_uri_is_malformed_and_not_echoed",
   "dependencies": [
     {
       "issue_id": "vouch-s9w2.16",

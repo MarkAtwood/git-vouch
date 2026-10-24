@@ -388,6 +388,16 @@ def test_refused_documents(
 
 
 @pytest.mark.parametrize(
+    "kind", ["not a uri", "registry/authorization/0.1", "x:\u00e9"]
+)
+def test_type_not_a_uri_is_malformed_and_not_echoed(bridge: Bridge, kind: str) -> None:
+    """The envelope's type must be a URI, and typeUri in the error is one (vouch-s9w2.16)."""
+    got_status, payload = error(bridge, with_doc(type=kind))
+    assert (got_status, payload["code"]) == (400, "malformedRequest")
+    assert "inResponseTo" not in payload
+
+
+@pytest.mark.parametrize(
     "length",
     [
         str(64 * 1024 + 1),
