@@ -11,7 +11,7 @@ The test suite runs every command block here end to end ([Rehearsal](#rehearsal)
 
 ## Timeline
 
-> **What this does:** lists the four phases, their dates and who acts in each.
+> **What this does:** lists the four phases, their dates and who acts in each.\
 > **Why:** one switch date with no dual period, so after it nothing new needs `gpg` ([rationale](rationale.md#one-flag-day)).
 
 | Phase | When | Who acts | What happens |
@@ -23,7 +23,7 @@ The test suite runs every command block here end to end ([Rehearsal](#rehearsal)
 
 ## Kernel-team calls
 
-> **What this does:** names the values the kernel team sets; nothing below depends on them.
+> **What this does:** names the values the kernel team sets; nothing below depends on them.\
 > **Why:** these are decisions, not design, and DESIGN gives no reason for the six-month cutoff or for leaving it to registry maintainers ([rationale](rationale.md#late-cutoff)).
 
 The kernel team decides:
@@ -44,7 +44,7 @@ commit date.
 
 ## Who does what
 
-> **What this does:** maps each role to its job in the runbook.
+> **What this does:** maps each role to its job in the runbook.\
 > **Why:** a tier is a separate record its approver signs: anchors grant maintainer, maintainers grant contributor ([rationale](rationale.md#tiers)).
 
 | Role | Does |
@@ -63,7 +63,7 @@ on their own judgement, using MAINTAINERS and endorsements.
 
 ## What the commands assume
 
-> **What this does:** lists the variables, tools and key every command expects.
+> **What this does:** lists the variables, tools and key every command expects.\
 > **Why:** each person runs the tools on their own machine against the published freeze commit; drafts are never generated centrally ([rationale](rationale.md#freeze-commit)).
 
 Published with the freeze commit, and used as shell variables below:
@@ -81,7 +81,7 @@ name, handle and branch in place of the rehearsal's ([Rehearsal](#rehearsal)).
 
 ## 1. Freeze
 
-> **What this does:** kernel.org freezes `pgpkeys.git` at one signed commit that every later step reads.
+> **What this does:** kernel.org freezes `pgpkeys.git` at one signed commit that every later step reads.\
 > **Why:** DESIGN gives no reason for reading one commit only; it says what reading it safely takes: `--no-replace-objects` and the tree's blobs ([rationale](rationale.md#freeze-commit)).
 
 kernel.org makes the last commit to `pgpkeys.git`, the freeze commit,
@@ -100,12 +100,12 @@ or `core.attributesFile` can drop or change a `keys/` file.
 
 ## 2. Window
 
-> **What this does:** everyone registers, proves continuity, endorses and gets approved, one reviewed branch at a time.
+> **What this does:** everyone registers, proves continuity, endorses and gets approved, one reviewed branch at a time.\
 > **Why:** changes arrive as reviewed merges, and review is the only gate for three accepted risks ([rationale](rationale.md#nothing-pushes)).
 
 ### The first merge: the anchors
 
-> **What this does:** puts the anchors' person files and `anchors.json` in the empty registry.
+> **What this does:** puts the anchors' person files and `anchors.json` in the empty registry.\
 > **Why:** the registry is the root of trust: `anchors.json` in it names the anchors, and nothing is pinned locally ([rationale](rationale.md#registry-in-git)).
 
 The registry maintainer clones the registry once, at the start of the
@@ -159,7 +159,7 @@ merge commit into an empty branch.
 
 ### Everyone else registers
 
-> **What this does:** registers your SSH key by one of four routes, with a continuity proof if you had a pgpkeys key.
+> **What this does:** registers your SSH key by one of four routes, with a continuity proof if you had a pgpkeys key.\
 > **Why:** the proof only lets your old GPG certifiers draft endorsements for you; it grants no tier ([rationale](rationale.md#continuity-proof)).
 
 Pick your route:
@@ -265,7 +265,7 @@ git push -q origin HEAD:register-carol
 
 ### Merging a branch
 
-> **What this does:** the registry maintainer reviews and merges each submitted branch with `--no-ff`.
+> **What this does:** the registry maintainer reviews and merges each submitted branch with `--no-ff`.\
 > **Why:** tier removals and `--at` queries take their dates from commits, so the main line must carry the maintainer's committer dates ([rationale](rationale.md#no-ff-merges)).
 
 The registry maintainer merges every submitted branch the same way: list
@@ -303,7 +303,7 @@ endorsed; that is expected until their endorsements merge.
 
 ### Checking continuity proofs
 
-> **What this does:** checks every continuity proof in the registry against the freeze commit.
+> **What this does:** checks every continuity proof in the registry against the freeze commit.\
 > **Why:** a proof is judged against the person-file version it was made for, so later signed edits do not undo it ([rationale](rationale.md#continuity-proof)).
 
 Anyone can run the check:
@@ -334,7 +334,7 @@ registering a deleted handle again, and you make a fresh `.asc`.
 
 ### Endorsements from GPG certifications
 
-> **What this does:** each certifier drafts endorsements from their own GPG certifications and signs only the right ones.
+> **What this does:** each certifier drafts endorsements from their own GPG certifications and signs only the right ones.\
 > **Why:** certifications are not ported as records; the draft is a reminder, and the certifier's new SSH signature is what counts ([rationale](rationale.md#continuity-proof)).
 
 Each certifier drafts on their own machine, from the public pgpkeys at
@@ -381,7 +381,7 @@ maintainer merges it as above, with `branch=endorse-lena`.
 
 ### Fresh endorsements and approvals
 
-> **What this does:** a maintainer endorses people they know and approves contributors, with no GPG history.
+> **What this does:** a maintainer endorses people they know and approves contributors, with no GPG history.\
 > **Why:** an endorsement is evidence about identity and grants nothing; only the approver needs authority ([rationale](rationale.md#endorse-vs-approve)).
 
 ```sh
@@ -400,7 +400,7 @@ The registry maintainer merges it as above, with `branch=approve-alice`.
 
 ## 3. Flag day
 
-> **What this does:** Linus, the release tooling and every developer switch to SSH signatures checked against exported tiers.
+> **What this does:** Linus, the release tooling and every developer switch to SSH signatures checked against exported tiers.\
 > **Why:** after the flag day nothing new needs `gpg`; DESIGN gives no further reason for skipping a dual period ([rationale](rationale.md#one-flag-day)).
 
 Linus points git at the export of maintainers and above:
@@ -461,7 +461,7 @@ From this date a GPG-signed tag or pull is not accepted.
 
 ## 4. Late cutoff
 
-> **What this does:** ends continuity claims and the GPG patch fallback six months after the flag day.
+> **What this does:** ends continuity claims and the GPG patch fallback six months after the flag day.\
 > **Why:** it closes the window in which a stolen, unrevoked GPG key can claim its holder's identity ([rationale](rationale.md#late-cutoff)).
 
 Continuity claims against the freeze commit are accepted until six
@@ -477,7 +477,7 @@ commit. There is no manifest.
 
 ## Patch signing
 
-> **What this does:** moves patch signing to registry keys through the patatt fork, with the frozen pgpkeys keyring as a fallback until the late cutoff.
+> **What this does:** moves patch signing to registry keys through the patatt fork, with the frozen pgpkeys keyring as a fallback until the late cutoff.\
 > **Why:** the registry is the keyring, so nothing is generated or trusted in between; DESIGN gives no reason why patches get a fallback and tags do not ([rationale](rationale.md#patch-fallback)).
 
 Patches are signed with patatt and checked with `b4 am`. A fork of
@@ -510,7 +510,7 @@ Patch signing section ([regulars](guide-regulars.md#patch-signing),
 
 ## What breaks and how to recover
 
-> **What this does:** maps each error message to its cause and the fix.
+> **What this does:** maps each error message to its cause and the fix.\
 > **Why:** most of the 20 rows below are continuity checks, which hold only for a key unrevoked at the freeze commit whose emails match and which nobody else claims ([rationale](rationale.md#continuity-proof)).
 
 | Symptom | Cause | Recovery |
@@ -545,7 +545,7 @@ before the freeze and register fresh.
 
 ## Scale
 
-> **What this does:** gives the measured size of the migration.
+> **What this does:** gives the measured size of the migration.\
 > **Why:** up to 1,538 of 1,935 people on MAINTAINERS `M:` lines (79.5%, an upper bound) have no unrevoked, unexpired pgpkeys user ID matching their `M:` emails, measured 2026-10-23 ([rationale](rationale.md#ssh-not-gpg)).
 
 At research time pgpkeys held 645 live keys for about 606 people. 188 can
@@ -555,7 +555,7 @@ no GPG key and register fresh.
 
 ## Out of scope
 
-> **What this does:** names what stays on GPG.
+> **What this does:** names what stays on GPG.\
 > **Why:** git-vouch replaces the keyring and web of trust, not every use of `gpg` ([rationale](rationale.md#ssh-not-gpg)).
 
 Encryption keys for the remail and security lists: kernel.org keeps a
@@ -563,7 +563,7 @@ small encryption-only GPG keyring.
 
 ## Rehearsal
 
-> **What this does:** explains the test harness behind this page and its cast of names.
+> **What this does:** explains the test harness behind this page and its cast of names.\
 > **Why:** a command on this page is one the test suite ran, in the order it ran.
 
 Every command block on this page is copied from

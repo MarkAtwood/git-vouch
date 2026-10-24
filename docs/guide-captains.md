@@ -17,7 +17,7 @@ evidence to ask for, and how to read the endorsements you approve on.
 
 ## What the commands assume
 
-> **What this does:** lists the variables, tools and keys every block below uses, and the one path every change takes.
+> **What this does:** lists the variables, tools and keys every block below uses, and the one path every change takes.\
 > **Why:** commands only write and sign files; every change arrives as a reviewed merge ([rationale](rationale.md#nothing-pushes)).
 
 - `$REGISTRY` is the registry's URL and `$LINUX` a kernel tree you push
@@ -43,7 +43,7 @@ maintainer merges once `git vouch check` passes.
 
 ## Flag day
 
-> **What this does:** registers you, gets you approved, signs your endorsement drafts and switches git to SSH.
+> **What this does:** registers you, gets you approved, signs your endorsement drafts and switches git to SSH.\
 > **Why:** one day switches tags and pulls to SSH, with no period that accepts both ([rationale](rationale.md#one-flag-day)).
 
 These are a captain's steps in [the flag-day runbook](flag-day.md),
@@ -59,7 +59,7 @@ day. Tags get no such fallback.
 
 ### Register with your pgpkeys key
 
-> **What this does:** registers you from your pgpkeys draft and signs a continuity proof with your GPG key.
+> **What this does:** registers you from your pgpkeys draft and signs a continuity proof with your GPG key.\
 > **Why:** the proof lets your old GPG certifiers draft endorsements for you; it grants no tier ([rationale](rationale.md#continuity-proof)).
 
 Use this if you hold a key in `pgpkeys.git` that the freeze commit had
@@ -102,7 +102,7 @@ authentication subkey as your SSH key.
 
 ### Register without one
 
-> **What this does:** registers you fresh, with no continuity proof.
+> **What this does:** registers you fresh, with no continuity proof.\
 > **Why:** the proof only unlocks endorsement drafts, so without it you collect fresh endorsements and lose no tier ([rationale](rationale.md#continuity-proof)).
 
 About 80% of maintainers have no pgpkeys key. Register fresh, then
@@ -126,7 +126,7 @@ alice did.
 
 ### How your branch is merged
 
-> **What this does:** shows how the registry maintainer reviews, merges and checks your branch.
+> **What this does:** shows how the registry maintainer reviews, merges and checks your branch.\
 > **Why:** a `--no-ff` merge keeps the maintainer's commit dates on the main line, and tier removals take their dates from it ([rationale](rationale.md#no-ff-merges)).
 
 The registry maintainer merges every branch the same way (as `korg`,
@@ -159,7 +159,7 @@ git push -q origin main
 
 ### Get approved as a maintainer
 
-> **What this does:** an anchor endorses you and grants you the `maintainer` tier.
+> **What this does:** an anchor endorses you and grants you the `maintainer` tier.\
 > **Why:** a tier is a separate record the approver signs, so nobody promotes themselves ([rationale](rationale.md#tiers)).
 
 Ask people who know you in person to endorse you, as
@@ -189,7 +189,7 @@ You can approve contributors from the commit that adds that tier record.
 
 ### Sign your endorsement drafts
 
-> **What this does:** turns your old GPG certifications into endorsement drafts, which you read and sign, and approves your contributors.
+> **What this does:** turns your old GPG certifications into endorsement drafts, which you read and sign, and approves your contributors.\
 > **Why:** the tool reads pgpkeys only at the freeze commit, on your own machine; no one generates drafts centrally ([rationale](rationale.md#freeze-commit)).
 
 GPG certifications are not ported as records. If you certified other
@@ -245,7 +245,7 @@ next free number. It leaves the draft where it is.
 
 ### Switch git to SSH signing
 
-> **What this does:** points git at the registry's export and signs your first SSH tag.
+> **What this does:** points git at the registry's export and signs your first SSH tag.\
 > **Why:** git and OpenSSH already sign and verify, so `git-vouch` adds only the approval rules and no cryptography ([rationale](rationale.md#ssh-not-gpg)).
 
 `setup` records the registry, sets `gpg.format=ssh` and the
@@ -269,12 +269,12 @@ nobody accepts a GPG-signed tag or pull.
 
 ## Day to day
 
-> **What this does:** keeps your registry copy current and verifies the tags people ask you to pull.
+> **What this does:** keeps your registry copy current and verifies the tags people ask you to pull.\
 > **Why:** `git fetch` distributes the registry, so staying current is one `sync` ([rationale](rationale.md#registry-in-git)).
 
 ### Keep your copy current
 
-> **What this does:** fetches the registry and re-exports your allowed-signers and revocation files.
+> **What this does:** fetches the registry and re-exports your allowed-signers and revocation files.\
 > **Why:** withholding a revocation is the one attack left to whoever hosts the registry ([rationale](rationale.md#sync-refuses-rewinds)).
 
 <!-- as alice -->
@@ -291,7 +291,7 @@ last fetched more than 7 days ago. Sync before you verify.
 
 ### Verify pull request tags
 
-> **What this does:** checks a contributor's tag with plain `git verify-tag` against your export.
+> **What this does:** checks a contributor's tag with plain `git verify-tag` against your export.\
 > **Why:** every exported key carries its handle as a principal, so git names the signer and you check that name ([rationale](rationale.md#endorsed-emails)).
 
 A contributor signs the tag they ask you to pull (as `bob`, who pushes
@@ -330,7 +330,7 @@ they were approved recently.
 
 ## Rotating your key
 
-> **What this does:** replaces a key you still hold, signed by the old key.
+> **What this does:** replaces a key you still hold, signed by the old key.\
 > **Why:** any one key current in the previous person file may sign the next, so the backup token can stay in a drawer ([rationale](rationale.md#backup-key)).
 
 Add the new key and retire the old one in one branch, both signed by the
@@ -373,7 +373,7 @@ check them sync, which matters little once they are merged.
 
 ## Endorsing and approving
 
-> **What this does:** endorses a contributor you know and grants them the `contributor` tier.
+> **What this does:** endorses a contributor you know and grants them the `contributor` tier.\
 > **Why:** an endorsement is evidence about identity and grants nothing; only the approver needs authority ([rationale](rationale.md#endorse-vs-approve)).
 
 carol has registered but nobody has approved her, so her tag fails (as
@@ -445,7 +445,7 @@ Only a revoked key voids the records it signed (see
 
 ## If you lose a key
 
-> **What this does:** revokes a lost key and re-signs what it signed, with or without a backup key.
+> **What this does:** revokes a lost key and re-signs what it signed, with or without a backup key.\
 > **Why:** the signer sets the signing time, so whoever holds a retired key can backdate; revoke when in doubt ([rationale](rationale.md#revoke-vs-retire)).
 
 Revoke rather than retire unless you are sure nobody else can use the
@@ -460,7 +460,7 @@ then.
 
 ### With your backup key
 
-> **What this does:** revokes and retires the lost key and adds a replacement, all signed by the backup.
+> **What this does:** revokes and retires the lost key and adds a replacement, all signed by the backup.\
 > **Why:** a backup key registered in advance signs the change, so recovery needs no unsigned change ([rationale](rationale.md#backup-key)).
 
 Here alice lost the key she rotated to (as `alice`):
@@ -521,7 +521,7 @@ from a tag you re-sign with the new key.
 
 ### Without a backup key
 
-> **What this does:** recovers through an anchor's revocation and a new key no previous key signed.
+> **What this does:** recovers through an anchor's revocation and a new key no previous key signed.\
 > **Why:** that change prints a WARNING and registry review is the only gate, so the merger confirms the key with you first ([rationale](rationale.md#backup-key)).
 
 Ask an anchor to revoke the lost key: only the key itself, another of
@@ -541,7 +541,7 @@ has the revocation, and the recovery follows the table in
 
 ## Patch signing
 
-> **What this does:** signs your patches with your registry key and checks incoming ones against the registry, then pgpkeys.
+> **What this does:** signs your patches with your registry key and checks incoming ones against the registry, then pgpkeys.\
 > **Why:** the registry is the keyring, so nothing is generated or trusted in between; pgpkeys stays second until the late cutoff ([rationale](rationale.md#patch-fallback)).
 
 patatt, the signer built into b4, adds an `X-Developer-Signature`
@@ -552,7 +552,7 @@ comes from an endorsed email, whatever the signer's tier.
 
 ### Install the forks
 
-> **What this does:** installs b4 and patatt from their forks' `git-vouch` branches.
+> **What this does:** installs b4 and patatt from their forks' `git-vouch` branches.\
 > **Why:** the b4 fork can check every patch afresh, so a revocation takes effect at once ([rationale](rationale.md#patch-fallback)).
 
 Install both in one command, so b4 gets the patatt fork in place of
@@ -582,7 +582,7 @@ header shows.
 
 ### Sign with your registry key
 
-> **What this does:** tells patatt to sign with your git signing key and its selector.
+> **What this does:** tells patatt to sign with your git signing key and its selector.\
 > **Why:** only endorsed emails are exported, so your `user.email` must be one ([rationale](rationale.md#endorsed-emails)).
 
 patatt signs with the key git signs with, under the selector
@@ -602,7 +602,7 @@ sending.
 
 ### Check incoming patches
 
-> **What this does:** points patatt and b4 at the registry first and the frozen pgpkeys keyring second, then checks a series.
+> **What this does:** points patatt and b4 at the registry first and the frozen pgpkeys keyring second, then checks a series.\
 > **Why:** the registry is the keyring; pgpkeys at the freeze commit stays second, with a warning, until the late cutoff ([rationale](rationale.md#patch-fallback)).
 
 Tell patatt and b4 where to find keys: the registry first, then the
@@ -668,7 +668,7 @@ Read the result before you apply the series: under its default
 
 ### Keys `patatt genkey` made
 
-> **What this does:** says what happens to patches signed with a key `patatt genkey` made.
+> **What this does:** says what happens to patches signed with a key `patatt genkey` made.\
 > **Why:** the late cutoff ends the pgpkeys fallback, the only place such keys verify ([rationale](rationale.md#late-cutoff)).
 
 Tell those contributors to register an SSH key and switch patatt to it.
@@ -680,7 +680,7 @@ verified.
 
 ### After the late cutoff
 
-> **What this does:** removes the legacy pgpkeys keyring from your patatt config.
+> **What this does:** removes the legacy pgpkeys keyring from your patatt config.\
 > **Why:** the cutoff ends the window in which a stolen, unrevoked GPG key can claim someone's identity ([rationale](rationale.md#late-cutoff)).
 
 Delete the legacy keyring line; nothing else changes (as `alice`):
