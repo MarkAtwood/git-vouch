@@ -32,7 +32,7 @@ evidence to ask for, and how to read the endorsements you approve on.
 - `registry` is your checkout of the registry and `linux` your kernel
   tree, both in your home directory.
 
-The examples run as `lena`, the anchor (you); `alice` is a maintainer, and
+The cast: `lena` is the anchor (you), `alice` is a maintainer, and
 `korg` is the registry maintainer who merges branches into the registry.
 Put your own handle, name and email in their place.
 
