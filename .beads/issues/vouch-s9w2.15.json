@@ -2,13 +2,15 @@
   "id": "vouch-s9w2.15",
   "title": "trqp: memo query answers keyed on registry HEAD",
   "description": "Upgrade path named by the QUERY_SLOTS ponytail in git-vouch-trqp (from vouch-s9w2.1). Every request runs a full-history registry check; once one exceeds QUERY_TIMEOUT every request is a 503. Memoize query() answers in a dict keyed on (git rev-parse HEAD of the served copy, entity, at) with a short TTL (about 60 s: a key's validity at 'now' changes when its retired instant passes, with no commit). It also absorbs verify-trust's duplicate --fallback-resource query. Caveat: git vouch query judges the working tree, so a HEAD key is sound only for a clean served copy: either make that a deployment constraint (the synced copy is clean) or add git status --porcelain to the key. Build only when a registry's check time approaches QUERY_TIMEOUT.",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "issue_type": "feature",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T22:19:30.685987624Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T22:19:30.685987624Z",
+  "updated_at": "2026-10-24T03:40:51.128957248Z",
+  "closed_at": "2026-10-24T03:40:51.128957248Z",
+  "close_reason": "query --all + per-commit shared answer cache in the bridge; tests in tests/test_query.py and tests/trqp/test_trqp.py (one run per commit, dirty copy, 60 s expiry, single-flight)",
   "dependencies": [
     {
       "issue_id": "vouch-s9w2.15",

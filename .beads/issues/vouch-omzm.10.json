@@ -3,7 +3,7 @@
   "title": "Rename pgpkeys 'C' to 'the freeze commit'",
   "description": "Mark 2026-10-22: 'C' is a terrible name for the last signed pgpkeys.git commit, since C is the language the kernel is written in, and readers also take it for a person. Replace it with 'the freeze commit' everywhere: DESIGN.md (Flag day, Porting pgpkeys, continuity, endorsements), docs/flag-day.md and other guides, git-vouch-migrate help text, messages and comments, and test names/comments. Keep any real C-language mentions. Queued until the two-stream workflow finishes (it is editing the same docs).",
   "acceptance_criteria": "grep finds no standalone 'C' meaning the freeze commit in docs, help text, messages or tests; tests pass on 3.12 and 3.9; ruff clean.",
-  "notes": "2026-10-23: done, pending commit/close by later stage. Renamed C -\u003e 'the freeze commit' in DESIGN.md, docs/flag-day.md, guide-regulars/captains, git-vouch-migrate, tests/migrate/*. Shell var $C -\u003e $FREEZE_COMMIT (matches guide-anchors and patch sections; guides' duplicate definition sentence removed); C_DATE -\u003e FREEZE_DATE; test_port_skips_auth_subkey_not_live_at_c -\u003e ..._at_freeze_commit; c_time -\u003e freeze_time. Printed messages changed: 'expired/invalid at C' and 'is not in pgpkeys at C' now say 'at the freeze commit'. Remaining grep -w C hits are only git -C / ssh-keygen -C flags. tests/migrate 114 passed on 3.12 and 3.9; other suites 1033 passed 14 skipped; ruff clean.",
+  "notes": "2026-10-23: done, pending commit/close by later stage. Renamed C -\u003e 'the freeze commit' in DESIGN.md, docs/flag-day.md, guide-regulars/captains, git-vouch-migrate, tests/migrate/*. Shell var $C -\u003e $FREEZE_COMMIT (matches guide-anchors and patch sections; guides' duplicate definition sentence removed); C_DATE -\u003e FREEZE_DATE; test_port_skips_auth_subkey_not_live_at_c -\u003e ..._at_freeze_commit; c_time -\u003e freeze_time. Printed messages changed: 'expired/invalid at C' and 'is not in pgpkeys at C' now say 'at the freeze commit'. Remaining grep -w C hits are only git -C / ssh-keygen -C flags. tests/migrate 114 passed on 3.12 and 3.9; other suites 1033 passed 14 skipped; ruff clean.\nReopened 2026-10-23 (critic): older $C / 'C' text remains in docs/flag-day.md, docs/guide-regulars.md and docs/guide-captains.md prerequisites and migrate blocks, plus the migrate doc tests that set C. Rename to $FREEZE_COMMIT / 'the freeze commit' together with those tests. Also vouch-xlha.18's title/description says C.",
   "status": "closed",
   "priority": 2,
   "issue_type": "task",
@@ -11,10 +11,10 @@
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-10-23T05:54:17.769323028Z",
   "created_by": "agent",
-  "updated_at": "2026-10-23T19:27:05.583119775Z",
+  "updated_at": "2026-10-24T03:37:44.280330385Z",
   "started_at": "2026-10-23T18:46:02.548692267Z",
-  "closed_at": "2026-10-23T19:27:05.583119775Z",
-  "close_reason": "Closed",
+  "closed_at": "2026-10-24T03:37:44.280330385Z",
+  "close_reason": "rename complete: no leftover 'C' / $C freeze-commit naming in scripts, tests, docs or DESIGN.md (critic grep, 2026-10-23)",
   "dependencies": [
     {
       "issue_id": "vouch-omzm.10",

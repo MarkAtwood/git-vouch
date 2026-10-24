@@ -1,0 +1,12 @@
+{
+  "id": "vouch-rl5r",
+  "title": "Decide: foxtrot fast-forward defeats the date clamp",
+  "description": "From core-dates (26f41f4). A contributor merges main into their own backdated branch (their branch becomes first parent); a maintainer fast-forwards to it. The contributor's commits then form HEAD's first-parent line, so query --at counts their record from its forged date; no date clamp can catch it. Options: (a) process only: --no-ff, documented as the only defence (implemented in DESIGN, eeaf899); (b) check warns when a first-parent merge is dated before its second parent (also fires on honest merges after clock skew). Agent recommendation: (a). Also confirm: a side-branch commit takes the effective date of the first first-parent commit that contains it (implemented).",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-24T03:37:44.173133233Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-24T03:37:44.173133233Z"
+}

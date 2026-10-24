@@ -1,0 +1,14 @@
+{
+  "id": "vouch-gbth",
+  "title": "Cap RSA keys at 4096 bits (Mark 2026-10-23)",
+  "description": "Mark's decision 2026-10-23, (a): lower RSA_MAX_BITS from 16384 to 4096, and document why.\n\nWHY (write this down in DESIGN.md next to the key table, and in a ponytail comment at RSA_MAX_BITS): f96af5c (vouch-xlha.15/.16) tests every RSA modulus for being prime or a prime power (pow per distinct modulus) before any signature check. Measured: about 7 s per 16384-bit modulus, 1.0 s at 8192, 0.14-0.15 s at 4096. A hostile 64 KiB person file holds about 23 16384-bit keys, about 3 minutes of CPU per check for everyone who runs it. A fixed cap bounds the cost with a rule instead of machinery (caching, budgets). 4096 bits covers real kernel-developer RSA keys; ed25519 is the recommended key anyway.\n\nDO, after the core lane (wf_80814c85-680) and both docs units finish (they edit these files now):\n- git-vouch:63 RSA_MAX_BITS = 4096; fix git-vouch:91 (did:key length bound comment, recompute for 4096), :538 docstring, :566 cost comment.\n- git-vouch-migrate:1160 message (2048 to 4096); :177 uses the constant (check behaviour: a pgpkeys RSA auth subkey above 4096 bits is no longer reusable as the SSH key; count how many in pgpkeys and state it in docs/flag-day.md).\n- tests/test_did.py:264/279: 16384 becomes refused; add 4096 accepted and 4097 refused (pinned to this decision, not a weakening).\n- DESIGN.md:554 table, docs/flag-day.md:157, docs/for-kernel-reviewers.md:22 ('RSA from 2048 to 4096 bits').\n- Gates: both Pythons full suite in a clean clone, ruff.",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "task",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-24T01:00:54.852459636Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-24T03:40:51.184779343Z",
+  "closed_at": "2026-10-24T03:40:51.184779343Z",
+  "close_reason": "RSA_MAX_BITS 4096 with reason in the constant's comment and DESIGN; test_rsa_size_bounds (4096 ok, 4097/16384 refused), test_longest_rsa_did_fits_the_length_cap"
+}
