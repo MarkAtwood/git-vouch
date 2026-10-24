@@ -231,6 +231,27 @@ def test_promoted_after_time_reads_old_tier(
     assert answer(r.root, gregkh)["tier"] == "maintainer"
 
 
+def test_backdated_promotion_counts_from_its_parents_date(
+    tmp_path: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+) -> None:
+    """The commit making gregkh a maintainer claims 2026-01-01T06:00:00Z, before
+    the README commit of day 2 it follows (vouch-faq3.13)."""
+    r = base(tmp_path, keys)
+    r.tier("gregkh", "contributor", "torvalds", keys("torvalds"))
+    r.commit()
+    (r.root / "README").write_text("unrelated\n")
+    r.commit()
+    r.tier("gregkh", "maintainer", "torvalds", keys("torvalds"))
+    r.commit(date="2026-01-01T06:00:00Z")
+    gregkh = did(keys("gregkh"))
+    assert answer(r.root, gregkh, "--at", "2026-01-01T06:00:00Z")["tier"] == (
+        "contributor"
+    )
+    assert answer(r.root, gregkh, "--at", T0)["tier"] == "contributor"
+    assert answer(r.root, gregkh, "--at", T1)["tier"] == "maintainer"
+
+
 def test_automation_until_promotion(
     tmp_path: Path,
     keys: Callable[[str], Key],  # noqa: F811

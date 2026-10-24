@@ -51,6 +51,8 @@ STALE_AFTER = timedelta(days=7)
 # set their own timestamps and could backdate anyway, so the hour admits
 # nothing new. Drop it once that OpenSSH is gone.
 END_SLACK = timedelta(hours=1)
+# How far after check runs a commit may be dated: clocks drift, forgers wait.
+FUTURE_SLACK = timedelta(minutes=5)
 # A record date must leave room for END_SLACK and format as four digits.
 RECORD_YEARS = range(1970, 9999)
 # The latest valid-before: a commit can be dated to the end of datetime's range.
@@ -1308,6 +1310,10 @@ class History(NamedTuple):
 
     commits: list[str]  # per position, final excluded
     dates: list[int]  # committer time per position, as git prints it; final excluded
+    # max(own committer time, first parent's effective time), final excluded
+    effective: list[int]
+    # per position, the first commit on HEAD's first-parent line that has it
+    landed: list[int]
     parents: list[tuple[int, ...]]  # per position, final included
     ancestors: list[int]  # per position, bit j set if j is a strict ancestor
     # rel -> [(position, content or None if deleted)], by position
@@ -1325,17 +1331,26 @@ class History(NamedTuple):
         return self.commits[i] if i < self.final else "the working tree"
 
     def date(self, i: int) -> datetime:
-        """Return the committer date at position ``i``; the working tree is dated now.
+        """Return the effective date at position ``i``; the working tree is dated now.
+
+        A commit's effective date is its committer date, or its first
+        parent's effective date if that is later, so a commit dated before
+        what it follows counts from when that was. A commit off HEAD's
+        first-parent line counts from the first commit on it that has it,
+        so a branch merged with --no-ff counts from its merge.
 
         A date beyond what datetime can hold is returned as LAST_SECOND and
-        the commit added to ``far``, so one such commit never stops the
-        history being read.
+        the commit that set it added to ``far``, so one such commit never
+        stops the history being read.
         """
         if i == self.final:
             return datetime.now(timezone.utc)
+        i = self.landed[i]
         try:
-            return datetime.fromtimestamp(self.dates[i], timezone.utc)
+            return datetime.fromtimestamp(self.effective[i], timezone.utc)
         except (ValueError, OverflowError, OSError):
+            while self.dates[i] != self.effective[i]:
+                i = self.parents[i][0]
             self.far.add(self.commits[i])
             return LAST_SECOND
 
@@ -1420,6 +1435,19 @@ def registry_history(
     dates = [int(c[0]) for c in commits]
     final = len(commits)
     parents = [tuple(order[p] for p in c[2:]) for c in commits]
+    effective: list[int] = []
+    for d, ps in zip(dates, parents):
+        effective.append(max(d, effective[ps[0]]) if ps else d)
+    line, k = set(), final - 1
+    while k >= 0:
+        line.add(k)
+        k = parents[k][0] if parents[k] else -1
+    # Children come after their parents, and every commit is HEAD's ancestor.
+    landed = [i if i in line else final for i in range(final)]
+    for i in reversed(range(final)):
+        for p in parents[i]:
+            if p not in line:
+                landed[p] = min(landed[p], landed[i])
     parents.append((final - 1,) if commits else ())
     # ponytail: one int of len(commits) bits per commit, quadratic memory;
     # fine for tens of thousands of commits.
@@ -1508,13 +1536,15 @@ def registry_history(
             now: Optional[bytes] = read_capped(root, rel)
         except VouchError:
             now = None  # missing, or reported by check as a record problem
-        head = History(hashes, dates, parents, ancestors, {rel: history}, set()).at(
-            rel, final
-        )
+        head = History(
+            hashes, dates, effective, landed, parents, ancestors, {rel: history}, set()
+        ).at(rel, final)
         if head != now:
             history.append((final, now))
         versions[rel] = history
-    return History(hashes, dates, parents, ancestors, versions, set())
+    return History(
+        hashes, dates, effective, landed, parents, ancestors, versions, set()
+    )
 
 
 def _record_paths(root: Path, problems: list[str]) -> list[str]:
@@ -1588,11 +1618,15 @@ def check_registry(root: Path) -> CheckResult:
     that spreads it.
 
     A tier ends where a commit deleted its record or replaced it with one
-    that has no effect, at that commit's committer date, or where a lower
+    that has no effect, at that commit's effective date (a commit merged
+    from a branch counts from its merge), or where a lower
     tier or one across the automation line replaced it, at the new record's
     ``date``, provided the record verified at the parent commit. A record
-    that does not verify ends nothing. An anchor ends at the committer date
-    of the commit that dropped them from ``anchors.json``.
+    that does not verify ends nothing. An anchor ends at the effective date
+    of the commit that dropped them from ``anchors.json``. A commit's
+    effective date is the later of its committer date and its first
+    parent's effective date; a commit dated more than FUTURE_SLACK after
+    check runs is a problem.
 
     ``held_at(handle, when)`` is what a valid person held at ``when``, for
     ``query --at``: the registry then is the newest commit on HEAD's
@@ -2191,7 +2225,7 @@ def check_registry(root: Path) -> CheckResult:
         return ends
 
     def anchor_ends(start: int) -> dict[str, datetime]:
-        # Like a deleted tier record, an anchor ends at the latest committer
+        # Like a deleted tier record, an anchor ends at the latest effective
         # date of a commit at or before ``start`` that dropped them from
         # anchors.json.
         # ponytail: an anchors.json version that does not parse lists nobody,
@@ -2355,6 +2389,14 @@ def check_registry(root: Path) -> CheckResult:
     # A problem, not an abort, so sync still writes the revocation file.
     problems += (
         f"commit {c}: committer date out of range" for c in sorted(history.far)
+    )
+    # A commit dated ahead would push every later effective date, and so
+    # every --at and every tier end, past the time it was really made.
+    soon = (datetime.now(timezone.utc) + FUTURE_SLACK).timestamp()
+    problems += (
+        f"commit {c}: committer date is in the future"
+        for c, d in zip(history.commits, history.dates)
+        if d > soon
     )
     return CheckResult(
         people,

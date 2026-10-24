@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -33,14 +34,19 @@ class GitRegistry(Registry):
         subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
         self.day = 0
 
-    def commit(self, author: str | None = None, add: bool = True) -> None:
+    def commit(
+        self, author: str | None = None, add: bool = True, date: str | None = None
+    ) -> None:
         """Commit everything, one day after the previous commit.
 
         The author date is the committer date unless ``author`` is given.
-        With ``add`` false, commit only what is already staged.
+        With ``add`` false, commit only what is already staged. A ``date``
+        is the committer date instead, as a forger sets it; the next commit
+        is still the day after the previous one.
         """
-        self.day += 1
-        date = f"2026-01-{self.day:02d}T00:00:00Z"
+        if date is None:
+            self.day += 1
+            date = f"2026-01-{self.day:02d}T00:00:00Z"
         env = {
             **os.environ,
             "GIT_COMMITTER_DATE": date,
@@ -54,11 +60,16 @@ class GitRegistry(Registry):
                 check=True,
             )
 
-    def git(self, *args: str) -> None:
-        """Run a git command in the checkout, e.g. to branch or merge."""
+    def git(self, *args: str, date: str | None = None) -> None:
+        """Run a git command in the checkout, e.g. to branch or merge.
+
+        A ``date`` is the committer and author date of any commit it makes.
+        """
+        dated = {"GIT_COMMITTER_DATE": date, "GIT_AUTHOR_DATE": date} if date else {}
         subprocess.run(
             ["git", "-c", "user.name=t", "-c", "user.email=t@example.org", *args],
             cwd=self.root,
+            env={**os.environ, **dated},
             check=True,
             capture_output=True,
         )
@@ -1007,6 +1018,86 @@ def test_deleted_tier_ends_at_the_deleting_commit(
     assert not verifies(repo, "a-maintainer", out)
 
 
+def test_backdated_deletion_ends_the_tier_at_its_parents_date(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    """A deletion dated before its parent ends the tier at the parent's date (vouch-faq3.13)."""
+    (reg.root / "README").write_text("unrelated\n")
+    reg.commit()  # day 2
+    reg.delete("tiers/gregkh.json")
+    reg.commit(date="2026-01-01T06:00:00Z")
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "a", key("gregkh"), DAY1_NOON), out)
+    assert not verifies(repo, tag(repo, "b", key("gregkh"), DAY2_NOON), out)
+
+
+def test_deletion_merged_with_no_ff_ends_the_tier_at_the_merge(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    """A backdated deletion on a branch ends the tier when main merged it (vouch-faq3.13)."""
+    reg.git("branch", "side")
+    (reg.root / "README").write_text("unrelated\n")
+    reg.commit()  # day 2
+    reg.git("checkout", "-q", "side")
+    reg.delete("tiers/gregkh.json")
+    reg.commit(date="2026-01-01T06:00:00Z")
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-ff", "-m", "m", "side", date="2026-01-03T00:00:00Z")
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "a", key("gregkh"), DAY2_NOON), out)
+    assert not verifies(repo, tag(repo, "b", key("gregkh"), DAY3_NOON), out)
+
+
+def test_merge_counts_from_its_first_parent_not_its_branch(
+    reg: GitRegistry,
+    key: Callable[[str], Key],
+    tmp_path: Path,
+    repo: Path,  # noqa: F811
+) -> None:
+    """A merge dated before its branch's commit counts from its own date, as
+    the later first-parent commit deleting gregkh's tier does (vouch-faq3.13)."""
+    reg.git("branch", "side")
+    (reg.root / "README").write_text("unrelated\n")
+    reg.commit()  # day 2
+    reg.git("checkout", "-q", "side")
+    (reg.root / "NOTES").write_text("early\n")
+    reg.commit(date="2026-01-04T00:00:00Z")
+    reg.git("checkout", "-q", "main")
+    reg.git("merge", "-q", "--no-ff", "-m", "m", "side", date="2026-01-03T00:00:00Z")
+    reg.delete("tiers/gregkh.json")
+    reg.commit(date="2026-01-03T06:00:00Z")
+    out = export(reg, tmp_path, "--min-tier", "maintainer")
+    assert verifies(repo, tag(repo, "a", key("gregkh"), "2026-01-03T03:00:00Z"), out)
+    assert not verifies(repo, tag(repo, "b", key("gregkh"), DAY3_NOON), out)
+
+
+def test_commit_dated_in_the_future_is_refused(reg: GitRegistry) -> None:
+    """check refuses a commit dated more than five minutes after it runs (vouch-faq3.13)."""
+    now = int(time.time())
+    (reg.root / "README").write_text("soon\n")
+    reg.commit(date=f"@{now + 60} +0000")
+    proc = run_script("check", str(reg.root))
+    assert proc.returncode == 0, proc.stderr
+    (reg.root / "README").write_text("later\n")
+    reg.commit(date=f"@{now + 3600} +0000")
+    late = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=reg.root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    proc = run_script("check", str(reg.root))
+    assert proc.returncode == 1
+    assert f"error: commit {late}: committer date is in the future" in proc.stderr
+
+
 def test_deleted_record_invalid_at_its_parent_ends_nothing(
     reg: GitRegistry,
     key: Callable[[str], Key],
@@ -1110,7 +1201,8 @@ def test_tier_replaced_by_a_void_record_ends_at_the_replacing_commit(
     reg.tier("gregkh", "contributor", "dave", key("dave"), "2026-03-01T00:00:00Z")
     reg.commit()  # day 4
     reg.git("checkout", "-q", "main")
-    reg.git("merge", "-q", "--no-edit", "side")
+    # The replacement counts from when main merged it (vouch-faq3.13).
+    reg.git("merge", "-q", "--no-edit", "side", date="2026-01-04T00:00:00Z")
     result = vouch.check_registry(reg.root)
     assert result.problems == []
     assert has(result.voids, "tiers/gregkh.json", "concurrent commit")
@@ -1181,8 +1273,30 @@ def test_committer_date_out_of_range(reg: GitRegistry) -> None:
     (reg.root / "README").write_text("unrelated\n")
     reg.git("add", "README")
     far_commit("unrelated")
+    # Unrelated, but it sets every later commit's effective date (vouch-faq3.13).
     proc = run_script("check", str(reg.root))
-    assert proc.returncode == 0, proc.stderr
+    assert proc.returncode == 1
+    assert "committer date is in the future" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    far = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=reg.root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    # Dated normally, but its effective date is the far one before it: only
+    # the far commit is out of range (vouch-faq3.13).
+    reg.delete("tiers/alice.json")
+    reg.commit()
+    proc = run_script("check", str(reg.root))
+    assert proc.returncode == 1
+    out_of_range = [
+        line for line in proc.stderr.splitlines() if "date out of range" in line
+    ]
+    assert out_of_range == [
+        f"git-vouch: error: commit {far}: committer date out of range"
+    ]
     reg.git("rm", "-q", "tiers/gregkh.json", "tiers/gregkh.json.sig")
     far_commit("delete gregkh")
     proc = run_script("check", str(reg.root))

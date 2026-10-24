@@ -311,22 +311,32 @@ def test_retirement_second_matches_openssh(
     assert "gregkh-3.json: dated outside the validity" in proc.stderr
 
 
-def test_tier_ended_at_the_end_of_time_exports(
+def test_tier_ended_at_the_end_of_time_is_refused(
     reg: Registry,
     tmp_path: Path,
-    keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
-    """A commit dated 9999-12-31 ends a tier; adding END_SLACK must not overflow (vouch-xlha.22)."""
+    """A commit dated 9999-12-31 ends a tier; check refuses it as in the future
+    (vouch-faq3.13) rather than overflow adding END_SLACK (vouch-xlha.22)."""
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "r"]):
         assert git(reg.root, *args).returncode == 0
     assert git(reg.root, "rm", "-q", "tiers/gregkh.json*").returncode == 0
     end = "@253402299000 +0000"  # 9999-12-31T23:30:00Z; git takes no ISO date there
     proc = git(reg.root, "commit", "-q", "-m", "end", date=end)
     assert proc.returncode == 0, proc.stderr
-    out = export(reg, tmp_path, "--min-tier", "maintainer")
-    assert 'valid-before="99991231235959Z"' in out.signers.read_text()
-    data, sig = sign_file(tmp_path, keys("gregkh"), "git")
-    assert ssh_verify(data, sig, out.signers, "gregkh@example.org", "git")
+    out = Exported(tmp_path / "out")
+    proc = run_script(
+        "export",
+        str(reg.root),
+        "--min-tier",
+        "maintainer",
+        "--allowed-signers",
+        str(out.signers),
+        "--revocation-file",
+        str(out.revocations),
+    )
+    assert proc.returncode == 1
+    assert "committer date is in the future" in proc.stderr
+    assert "Traceback" not in proc.stderr
 
 
 def test_valid_before_is_capped_at_the_end_of_time(
