@@ -137,7 +137,9 @@ git vouch check .
 ```
 
 and pushes only once `check` exits 0, the list of changed paths is
-right, and every `git-vouch: warning:` line has been read. Until someone
+right, and every `git-vouch: warning:` line has been read. It never
+fast-forwards, not even your merge of main, so the dates on the main
+line are the maintainer's clock, not yours. Until someone
 endorses you, `check` warns that your emails are not endorsed; that is
 expected. Then (here as `korg`):
 
@@ -396,7 +398,10 @@ Before approving someone others have endorsed, read each
 `endorsements/<handle>/*.json`: who endorsed them, which emails, and
 what the note says was checked. `endorse` covers the person's name,
 first current key and every listed email; `--email` limits it to the
-addresses you confirmed.
+addresses you confirmed. Before signing,
+`endorse` prints the key's SHA256 fingerprint: compare it with the one
+you checked in person, and run `endorse` on the merged registry, not on
+a pull-request checkout.
 
 Once merged and synced, carol's tag verifies (here as `alice`):
 

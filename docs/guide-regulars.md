@@ -139,7 +139,9 @@ git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 ```
 
-and pushes once `check` exits 0 and its warnings are read. Until someone
+and pushes once `check` exits 0 and its warnings are read. It never
+fast-forwards, not even your merge of main, so the dates on the main
+line are the maintainer's clock, not yours. Until someone
 endorses you, it warns that your email is not endorsed; that is expected
 (here as `korg`):
 
@@ -194,7 +196,10 @@ git push -q origin HEAD:endorse-alice
 
 The [captains guide](guide-captains.md#sign-your-endorsement-drafts)
 says what each draft field means. Someone with no GPG history
-with you endorses with `git vouch endorse bob --note "..."` instead.
+with you endorses with `git vouch endorse bob --note "..."` instead. Before signing,
+`endorse` prints the key's SHA256 fingerprint: compare it with the one
+you checked in person, and run `endorse` on the merged registry, not on
+a pull-request checkout.
 
 ### Switch git to SSH signing
 
@@ -323,7 +328,10 @@ git push -q origin HEAD:endorse-carol
 <!-- merge endorse-carol -->
 
 `endorse` covers the name, first current key and every listed email;
-`--email` limits it to the addresses you confirmed.
+`--email` limits it to the addresses you confirmed. Before signing,
+`endorse` prints the key's SHA256 fingerprint: compare it with the one
+you checked in person, and run `endorse` on the merged registry, not on
+a pull-request checkout.
 
 ## If you lose a key
 

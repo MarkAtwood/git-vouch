@@ -252,7 +252,10 @@ The registry maintainer merges each submitted branch the same way: list
 the paths it touches, merge, and push only if `git vouch check` exits 0
 and the list is right. `--no-ff` makes every merge a commit of its own,
 so the commits on the registry's main line carry the maintainer's
-committer dates, not ones the submitter set:
+committer dates, not ones the submitter set. Never fast-forward a
+branch, not even one whose tip is the submitter's own merge of main:
+its first parent would be the submitter's branch, and its backdated
+commits would become the main line:
 
 ```sh
 branch=register-alice
@@ -490,6 +493,7 @@ cutoff, six months after the flag day. The commands are in each guide's Patch si
 | `check` warns `migratedFrom openpgp4fpr:<fpr> is also claimed by <handle>`; `verify-continuity` prints `duplicate` | Two person files claim the same GPG key | Neither gets drafts, whichever merged first. An anchor decides which claim is genuine, and the other claim comes out of the registry. Suspect a stolen GPG key. |
 | `drafts --as` refuses: `no migratedFrom` | Your person file does not name your GPG key | Add `migratedFrom` before the late cutoff, or endorse people afresh. |
 | A subject is missing from your drafts | They have not registered yet, or their proof does not hold | Run `drafts` again later, into a new `--out` directory. It drafts every subject again, including ones you already endorsed, so sign only the new ones. |
+| Another user's git cannot read `allowed_signers` or `revoked_keys` | An earlier git-vouch wrote them with mode 0600, and `export` and `sync` keep an existing file's mode | Run `chmod 0644` on both files once. |
 | `git verify-tag` says "No principal matched" | The signer has no tier at or above the export's minimum, has not been approved yet, or your registry copy is stale | Have them approved, or run `git vouch sync`. |
 | A GPG-signed tag after the flag day | GPG is no longer accepted | Re-sign the tag with `git tag -s` after `git vouch setup`. |
 | Missed the late cutoff | Continuity claims have ended | Register fresh and collect fresh endorsements. |

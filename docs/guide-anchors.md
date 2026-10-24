@@ -144,6 +144,10 @@ git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 ```
 
+Registry maintainers always merge with `--no-ff`, never a fast-forward,
+not even of a contributor's merge of main, so the dates on the main
+line are the maintainer's clock and not the contributor's.
+
 Stop here. Push only once `check` exits 0, the list of changed paths is
 right, and you have read every `git-vouch: warning:` line (see Read
 check warnings in registry merges). For an unsigned-change WARNING,
@@ -480,7 +484,10 @@ Any registered human may endorse anyone; anchors are no different.
 `git vouch endorse <handle> --note "..."` endorses the person's name,
 first current key and every listed email (`--email` limits it), as in
 the steps above. What to check first and what to write in the note is
-in [vouching.md](vouching.md).
+in [vouching.md](vouching.md). Before signing,
+`endorse` prints the key's SHA256 fingerprint: compare it with the one
+you checked in person, and run `endorse` on the merged registry, not on
+a pull-request checkout.
 
 ### Lost key
 
