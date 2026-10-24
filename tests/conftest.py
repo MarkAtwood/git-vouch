@@ -17,6 +17,33 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "git-vouch"
 DAEMONS = {"gpg-agent", "scdaemon", "keyboxd", "dirmngr"}
+# The doc walkthroughs: each replays a whole guide against fresh registries,
+# and together they take over half the suite's time. ``-m "not slow"`` skips them.
+# ponytail: listed here, not as pytestmark in each module, so one file marks
+# every lane's walkthroughs; a new walkthrough module must be added by hand.
+SLOW = (
+    "test_guide_anchors.py",
+    "migrate/test_guide_captains.py",
+    "migrate/test_guide_regulars.py",
+    "migrate/test_rehearsal.py",
+    "patatt/test_patch_docs.py",
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the ``slow`` marker; refuse a SLOW entry that names no module."""
+    config.addinivalue_line("markers", "slow: a doc walkthrough, minutes long")
+    missing = [m for m in SLOW if not (Path(__file__).parent / m).is_file()]
+    if missing:
+        raise pytest.UsageError(f"conftest.py SLOW names missing modules: {missing}")
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test in a SLOW module as ``slow``."""
+    tests = Path(__file__).resolve().parent
+    for item in items:
+        if item.path.resolve().relative_to(tests).as_posix() in SLOW:
+            item.add_marker(pytest.mark.slow)
 
 
 class Key(NamedTuple):
