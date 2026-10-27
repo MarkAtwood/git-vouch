@@ -43,6 +43,39 @@ one job. Patch email adds a patatt fork.
 | `git-vouch-trqp` | Optional bridge that answers OpenVTC's `verify-trust` from the registry |
 | [patatt fork](https://github.com/MarkAtwood/patatt) | Lets b4 check patch-email signatures against the registry |
 
+## What `git vouch setup` changes
+
+`setup` changes git's config and its own directory, nothing else. It
+never touches `~/.ssh`, your SSH config or agent, `~/.gnupg`, or your
+GPG keyring.
+
+- **Its directory**, `~/.local/share/git-vouch/` (or
+  `$XDG_DATA_HOME/git-vouch/`): the registry copy in `registry/`, and the
+  `allowed_signers` and `revoked_keys` files git verifies against.
+- **Global git config**: `vouch.registry`, `gpg.ssh.allowedSignersFile`,
+  `gpg.ssh.revocationFile`, and `gpg.format=ssh`. With `--min-tier` or
+  `--include-automation`, also `vouch.minTier` or
+  `vouch.includeAutomation`.
+
+`gpg.format=ssh` makes git sign with your SSH key in every repository.
+Signatures already made with GPG still verify. `setup` writes config
+only after its first sync succeeds, and changes nothing if git already
+signs with GPG or X.509, or already points at other allowed-signers or
+revocation files.
+
+To do it yourself, for example to sign with SSH in some repositories
+only, set the same config and sync. Verifying needs no `gpg.format`;
+only signing does:
+
+```sh
+D=~/.local/share/git-vouch
+git config --global vouch.registry https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git
+git config --global gpg.ssh.allowedSignersFile "$D/allowed_signers"
+git config --global gpg.ssh.revocationFile "$D/revoked_keys"
+git vouch sync
+git config gpg.format ssh   # in each repository that signs with SSH
+```
+
 ## Status
 
 Under active development. The core commands, the migration tool, the

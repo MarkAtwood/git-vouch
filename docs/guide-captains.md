@@ -249,7 +249,8 @@ next free number. It leaves the draft where it is.
 > **Why:** git and OpenSSH already sign and verify, so `git-vouch` adds only the approval rules and no cryptography ([rationale](rationale.md#ssh-not-gpg)).
 
 `setup` records the registry, sets `gpg.format=ssh` and the
-allowed-signers and revocation files, and runs a first `sync`. The
+allowed-signers and revocation files, and runs a first `sync`
+([What setup changes](../README.md#what-git-vouch-setup-changes)). The
 default export is contributor and above, which is what you verify your
 pull requests against (as `alice`):
 

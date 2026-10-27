@@ -203,7 +203,8 @@ the tier records it signed (see Lost key).
 > **Why:** requiring a tier needs no wrapper: `git verify-tag` against the `--min-tier maintainer` export rejects anyone below it ([rationale](rationale.md#tiers)).
 
 Do this on the flag day. `setup` records the registry, sets
-`gpg.format=ssh` and both git files, and runs a first `sync`:
+`gpg.format=ssh` and both git files, and runs a first `sync`
+([What setup changes](../README.md#what-git-vouch-setup-changes)):
 
 <!-- as lena -->
 ```sh

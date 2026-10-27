@@ -224,7 +224,8 @@ not on a pull-request checkout.
 `setup` records the registry, sets `gpg.format=ssh`, the allowed-signers
 and revocation files, and runs a first `sync`. It refuses, changing
 nothing, if git already signs with a GPG key or points at other
-allowed-signers or revocation files. `status` then shows your tier:
+allowed-signers or revocation files ([What setup changes](../README.md#what-git-vouch-setup-changes), and how to do it by
+hand). `status` then shows your tier:
 
 <!-- as bob -->
 ```sh
