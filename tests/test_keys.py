@@ -169,6 +169,7 @@ def test_refuses_on_registry_problem(
     sync: Callable[[], subprocess.CompletedProcess[str]],
     home: Path,  # noqa: F811
 ) -> None:
+    assert sync().returncode == 0
     reg.tier("dave", "maintainer", "alice", keys("alice"))  # alice may not grant it
     assert sync().returncode == 1  # the copy is fetched even though check fails
     proc = keys_cmd(home, "alice@example.org")

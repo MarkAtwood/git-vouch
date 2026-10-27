@@ -1,0 +1,17 @@
+{
+  "id": "vouch-2kp8",
+  "title": "setup writes global git config before the first sync succeeds",
+  "description": "Reported by sankarshan in the OpenVTC Signal group 2026-10-25; Mark replied 'will fix'. cmd_setup sets gpg.format=ssh, gpg.ssh.allowedSignersFile/revocationFile and vouch.registry globally, then syncs. A failed fetch or check leaves global config pointing at files that were never written, breaking SSH signature verification in every repo. Fix: fetch, check and write both files first; set config (including --min-tier/--include-automation) only after success.",
+  "acceptance_criteria": "A setup whose fetch fails leaves global git config unchanged; a failed re-setup to a bad URL keeps the previous working config; existing setup/sync tests pass.",
+  "status": "closed",
+  "priority": 1,
+  "issue_type": "bug",
+  "assignee": "agent",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-10-27T20:34:16.305913892Z",
+  "created_by": "agent",
+  "updated_at": "2026-10-27T21:08:42.525028557Z",
+  "started_at": "2026-10-27T20:34:18.851415488Z",
+  "closed_at": "2026-10-27T21:08:42.525028557Z",
+  "close_reason": "setup syncs before writing config and refuses to change existing OpenPGP/X.509 signing or SSH signer files; gate green 3.12/3.9"
+}

@@ -573,7 +573,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 
 | Command | Does |
 |---|---|
-| `git vouch setup [--registry URL] [--min-tier T] [--include-automation]` | Records the registry URL (default: the kernel's on git.kernel.org) and the export choices in git config; sets `gpg.format=ssh`, `gpg.ssh.allowedSignersFile`, `gpg.ssh.revocationFile`; runs a first `sync` |
+| `git vouch setup [--registry URL] [--min-tier T] [--include-automation]` | Records the registry URL (default: the kernel's on git.kernel.org) and the export choices in git config; runs a first `sync`, then sets `gpg.format=ssh`, `gpg.ssh.allowedSignersFile`, `gpg.ssh.revocationFile`. Writes no config if the sync fails, and refuses before anything if git already signs with OpenPGP or X.509 or either file is set elsewhere |
 | `git vouch sync [--min-tier T] [--include-automation]` | Fetches the registry without allowing a rewind and runs `check`. Saves any `--min-tier` / `--include-automation` given to git config, then re-exports with the saved choices; the revocation file is written even if `check` fails |
 | `git vouch status` | Shows registry commit, fetch age (warns past 7 days), and your own tier |
 | `git vouch register [--from FILE]` | Writes your person file from an SSH public key, or completes a draft such as one from `git-vouch-migrate`, and signs it through the agent |

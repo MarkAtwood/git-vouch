@@ -2945,25 +2945,33 @@ def _fetch(url: str, copy: Path) -> None:
     (git_dir / "vouch-fetched").touch()
 
 
-def cmd_sync(args: argparse.Namespace) -> int:
-    """Fetch the registry without a rewind, check it, and re-export with the saved choices.
+def _export_choices(args: argparse.Namespace) -> tuple[str, bool]:
+    """Return ``--min-tier`` and ``--include-automation``, else the saved choices."""
+    min_tier = args.min_tier or _config("vouch.minTier") or "contributor"
+    if min_tier not in TIERS[:3]:
+        raise VouchError(f"git config vouch.minTier: {min_tier!r} is not a tier")
+    if args.include_automation is not None:
+        return min_tier, args.include_automation
+    return min_tier, _config("vouch.includeAutomation", "bool") == "true"
 
-    Any ``--min-tier`` or ``--include-automation`` given is saved to git
-    config first. The revocation file is written even if the check fails,
-    so a revocation always spreads; the allowed-signers file only if it
-    passes.
-    """
-    url = _config("vouch.registry")
-    if url is None:
-        raise VouchError("no registry configured: run git vouch setup")
+
+def _save_export_choices(args: argparse.Namespace) -> None:
     if args.min_tier is not None:
         _set_config("vouch.minTier", args.min_tier)
     if args.include_automation is not None:
         _set_config("vouch.includeAutomation", str(args.include_automation).lower())
-    min_tier = _config("vouch.minTier") or "contributor"
-    if min_tier not in TIERS[:3]:
-        raise VouchError(f"git config vouch.minTier: {min_tier!r} is not a tier")
-    include_automation = _config("vouch.includeAutomation", "bool") == "true"
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Fetch the registry without a rewind, check it, and re-export with the saved choices.
+
+    Any ``--min-tier`` or ``--include-automation`` given is used, and saved
+    to git config once the sync succeeds.
+    """
+    url = _config("vouch.registry")
+    if url is None:
+        raise VouchError("no registry configured: run git vouch setup")
+    min_tier, include_automation = _export_choices(args)
     paths = []
     for name in ("gpg.ssh.revocationFile", "gpg.ssh.allowedSignersFile"):
         value = _config(name, "path")
@@ -2971,6 +2979,26 @@ def cmd_sync(args: argparse.Namespace) -> int:
             raise VouchError(f"{name} is not set: run git vouch setup")
         paths.append(Path(value))
     revocations, signers = paths
+    _sync(url, revocations, signers, min_tier, include_automation)
+    _save_export_choices(args)
+    return 0
+
+
+def _sync(
+    url: str,
+    revocations: Path,
+    signers: Path,
+    min_tier: str,
+    include_automation: bool,
+) -> None:
+    """Fetch ``url`` into the registry copy, check it, and write the two files.
+
+    The revocation file is written even if the check fails, so a
+    revocation always spreads; the allowed-signers file only if it passes.
+
+    Raises:
+        VouchError: The fetch, the check or a write fails.
+    """
     copy = registry_copy()
     try:
         _fetch(url, copy)
@@ -2990,26 +3018,79 @@ def cmd_sync(args: argparse.Namespace) -> int:
         raise VouchError(
             "the registry check failed; only the revocation file was written"
         )
-    return 0
+
+
+def _refuse_to_change_git(signers: Path, revocations: Path) -> None:
+    """Raise if setup's config would change how git already signs or verifies.
+
+    Setting gpg.format to ssh breaks signing with a GPG or X.509 key, and
+    replacing either SSH file drops the signers the user trusts now.
+
+    Raises:
+        VouchError: Naming the setting in the way; nothing has been written.
+    """
+    fmt = _config("gpg.format")
+    if fmt not in (None, "ssh"):
+        raise VouchError(
+            f"git signs with gpg.format {fmt}; setup would switch it to ssh"
+            " and break that signing (see git config --show-origin gpg.format)"
+        )
+    if fmt is None:
+        # An SSH key, as git reads it with gpg.format ssh: a literal key or a
+        # key file. A GPG key id or email is neither.
+        key = _config("user.signingKey", "path")
+        ssh_key = key is not None and (
+            key.startswith(("key::", "ssh-", "sk-ssh-", "ecdsa-", "sk-ecdsa-"))
+            or Path(key).is_file()
+        )
+        for name, kind in (
+            ("user.signingKey", "path"),
+            ("commit.gpgSign", "bool"),
+            ("tag.gpgSign", "bool"),
+        ):
+            value = _config(name, kind)
+            if not ssh_key and value is not None and value != "false":
+                raise VouchError(
+                    f"git signs with OpenPGP ({name} is set); setup would switch"
+                    f" gpg.format to ssh and break that signing (see git config"
+                    f" --show-origin {name})"
+                )
+    for name, path in (
+        ("gpg.ssh.allowedSignersFile", signers),
+        ("gpg.ssh.revocationFile", revocations),
+    ):
+        value = _config(name, "path")
+        if value and Path(value) != path:
+            raise VouchError(
+                f"{name} is already {value}; setup would replace it"
+                f" (see git config --show-origin {name})"
+            )
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    """Record the registry and git's SSH signing config globally, then sync.
+    """Sync, then record the registry and git's SSH signing config globally.
 
-    Without ``--registry``, a registry already configured is kept, and the
+    Git config is written only after the sync succeeds, so a failed setup
+    never points git at files that were not written. Without
+    ``--registry``, a registry already configured is kept, and the
     kernel's is the default.
     """
     url = args.registry or _config("vouch.registry") or DEFAULT_REGISTRY
+    min_tier, include_automation = _export_choices(args)
     data = _data_dir()
     try:
         data.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         raise VouchError(f"cannot create {data}: {e}") from e
+    signers, revocations = data / "allowed_signers", data / "revoked_keys"
+    _refuse_to_change_git(signers, revocations)
+    _sync(url, revocations, signers, min_tier, include_automation)
     _set_config("vouch.registry", url)
     _set_config("gpg.format", "ssh")
-    _set_config("gpg.ssh.allowedSignersFile", str(data / "allowed_signers"))
-    _set_config("gpg.ssh.revocationFile", str(data / "revoked_keys"))
-    return cmd_sync(args)
+    _set_config("gpg.ssh.allowedSignersFile", str(signers))
+    _set_config("gpg.ssh.revocationFile", str(revocations))
+    _save_export_choices(args)
+    return 0
 
 
 def patatt_selector(ssh: str) -> str:
