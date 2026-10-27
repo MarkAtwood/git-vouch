@@ -222,8 +222,9 @@ not on a pull-request checkout.
 > **Why:** the registry is a git repository, and `git vouch export` writes git's own allowed-signers format, so plain git verifies against it ([rationale](rationale.md#registry-in-git)).
 
 `setup` records the registry, sets `gpg.format=ssh`, the allowed-signers
-and revocation files, and runs a first `sync`. `status` then shows your
-tier:
+and revocation files, and runs a first `sync`. It refuses, changing
+nothing, if git already signs with a GPG key or points at other
+allowed-signers or revocation files. `status` then shows your tier:
 
 <!-- as bob -->
 ```sh

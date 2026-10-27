@@ -147,6 +147,91 @@ def test_setup_without_registry_keeps_the_configured_one(
     assert config("vouch.registry") == str(remote)
 
 
+SETUP_CONFIG = (
+    "vouch.registry",
+    "vouch.minTier",
+    "gpg.format",
+    "gpg.ssh.allowedSignersFile",
+    "gpg.ssh.revocationFile",
+)
+
+
+def unset(name: str) -> bool:
+    proc = subprocess.run(["git", "config", "--global", "--get", name])
+    return proc.returncode == 1
+
+
+def test_failed_setup_leaves_git_config_unchanged(home: Path, tmp_path: Path) -> None:
+    missing = tmp_path / "missing.git"
+    proc = run_script("setup", "--registry", str(missing), "--min-tier", "maintainer")
+    assert proc.returncode == 1
+    assert "cannot fetch the registry" in proc.stderr
+    for name in SETUP_CONFIG:
+        assert unset(name), name
+
+
+def test_failed_setup_keeps_the_working_config(
+    home: Path,
+    remote: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+    tmp_path: Path,
+) -> None:
+    assert run_script("setup", "--registry", str(remote)).returncode == 0
+    missing = tmp_path / "missing.git"
+    proc = run_script("setup", "--registry", str(missing), "--min-tier", "anchor")
+    assert proc.returncode == 1
+    assert config("vouch.registry") == str(remote)
+    assert unset("vouch.minTier")
+    assert verifies(home, keys("alice"), tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("user.signingKey", "6E7B5903A44C4D50621A2227571AC519C6F05818"),
+        ("commit.gpgSign", "true"),
+        ("tag.gpgSign", "true"),
+        ("gpg.format", "x509"),
+        ("gpg.ssh.allowedSignersFile", "/etc/ssh/allowed_signers"),
+        ("gpg.ssh.revocationFile", "/etc/ssh/revoked_keys"),
+    ],
+)
+def test_setup_refuses_to_change_how_git_signs(
+    home: Path, remote: Path, name: str, value: str
+) -> None:
+    subprocess.run(["git", "config", "--global", name, value], check=True)
+    proc = run_script("setup", "--registry", str(remote))
+    assert proc.returncode == 1
+    assert name in proc.stderr
+    assert config(name) == value
+    for other in SETUP_CONFIG:
+        if other != name:
+            assert unset(other), other
+    assert not (data_dir(home) / "registry").exists()
+
+
+@pytest.mark.parametrize("fmt", [None, "ssh"])
+@pytest.mark.parametrize("literal", [False, True])
+def test_setup_keeps_ssh_signing(
+    home: Path,
+    remote: Path,
+    keys: Callable[[str], Key],  # noqa: F811
+    fmt: str | None,
+    literal: bool,
+) -> None:
+    public = keys("alice").public
+    signing_key = "key::" + public.read_text().strip() if literal else str(public)
+    settings = [("user.signingKey", signing_key), ("commit.gpgSign", "true")]
+    if fmt is not None:
+        settings.append(("gpg.format", fmt))
+    for name, value in settings:
+        subprocess.run(["git", "config", "--global", name, value], check=True)
+    proc = run_script("setup", "--registry", str(remote))
+    assert proc.returncode == 0, proc.stderr
+    assert config("user.signingKey") == signing_key
+    assert config("gpg.format") == "ssh"
+
+
 def test_sync_without_setup_fails(home: Path) -> None:
     proc = run_script("sync")
     assert proc.returncode == 1
