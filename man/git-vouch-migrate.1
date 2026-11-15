@@ -1,0 +1,90 @@
+.TH GIT-VOUCH-MIGRATE 1 "" "git-vouch-migrate" "git-vouch Manual"
+.nh
+.ad l
+.SH NAME
+git-vouch-migrate \- port the frozen pgpkeys.git into git-vouch person-file drafts
+.SH SYNOPSIS
+\fBgit\-vouch\-migrate\fR \fIcommand\fR [\fIoptions\fR]
+.br
+\fBgit\-vouch\-migrate\fR \fIcommand\fR \fB\-h\fR
+.SH DESCRIPTION
+Used on the flag day only, and the only git-vouch tool that runs \fBgpg\fR(1). It reads the kernel's pgpkeys.git at one signed commit, the freeze commit, after checking its signature. Every draft it writes is unsigned; holders and certifiers read and sign their own with \fBgit vouch\fR.
+.PP
+\fBgit\-vouch\-migrate \-h\fR lists the commands, and \fBgit\-vouch\-migrate\fR \fIcommand\fR \fB\-h\fR prints one command's help, which is what this page is made from.
+.SH COMMANDS
+.SS port
+\fBgit\-vouch\-migrate port\fR \fIpgpkeys\fR \fB\-\-commit\fR \fICOMMIT\fR \fB\-\-signer\fR \fISIGNER\fR \fB\-\-out\fR \fIOUT\fR
+.PP
+Import keys/*.asc from pgpkeys.git at the freeze commit into a temporary keyring, check the freeze commit's signature, and write one unsigned draft people/<handle>.json per person to a new directory. Keys are judged at the freeze commit's committer date: revoked keys and kernel.org list keys are skipped, expired keys are not; keys sharing an email are one person, drafted from the newest unexpired key, preferring one with a reusable authentication key (else the newest key), if their primary names match, and otherwise none is drafted. Emails come from unrevoked user IDs. An ed25519 or P-256 authentication key or subkey is pre-filled as the SSH key, else an RSA one of 2048 to 4096 bits.
+.TP
+\fIpgpkeys\fR
+a pgpkeys.git clone
+.TP
+\fB\-\-commit\fR \fICOMMIT\fR
+the freeze commit
+.TP
+\fB\-\-signer\fR \fISIGNER\fR
+primary fingerprint expected to sign the freeze commit
+.TP
+\fB\-\-out\fR \fIOUT\fR
+new directory for the drafts
+.SS verify\-continuity
+\fBgit\-vouch\-migrate verify\-continuity\fR \fIpgpkeys\fR \fIregistry\fR \fB\-\-commit\fR \fICOMMIT\fR \fB\-\-signer\fR \fISIGNER\fR [\fIHANDLE\fR ...]
+.PP
+Check the freeze commit's signature, then, for each validly signed person file in the registry with migratedFrom (or each HANDLE given), verify its continuity proof against the keys in pgpkeys.git at the freeze commit: the GPG key must not be revoked at the freeze commit (expired is accepted), and some version of the person file in the registry's history must claim it, have every email on an unrevoked user ID of it, and be signed by an ed25519, P-256 or RSA authentication key or subkey of it listed as current in that version, or by people/<handle>.json.asc, its detached signature over that version's exact bytes. A fingerprint claimed by two handles proves neither. Prints 'ok' or 'fail' per handle, and exits 1 if any fails.
+.TP
+\fIpgpkeys\fR
+a pgpkeys.git clone
+.TP
+\fIregistry\fR
+the registry checkout
+.TP
+\fB\-\-commit\fR \fICOMMIT\fR
+the freeze commit
+.TP
+\fB\-\-signer\fR \fISIGNER\fR
+primary fingerprint expected to sign the freeze commit
+.TP
+[\fIHANDLE\fR ...]
+whose claims to verify
+.SS drafts
+\fBgit\-vouch\-migrate drafts\fR \fIpgpkeys\fR \fIregistry\fR \fB\-\-commit\fR \fICOMMIT\fR \fB\-\-signer\fR \fISIGNER\fR \fB\-\-as\fR \fIHANDLE\fR \fB\-\-out\fR \fIOUT\fR
+.PP
+Run by each certifier on their own machine. Check the freeze commit's signature and the continuity proofs, as verify-continuity does, then write to a new directory one unsigned draft endorsements/<subject>/<HANDLE>-<n>.json for each person whose proof holds and whose GPG key the key in HANDLE's own migratedFrom certified at the freeze commit; HANDLE needs no continuity proof. Per user ID, the latest certification counts unless HANDLE later revoked it; SHA-1 certifications and ones expired by the freeze commit count. subjectEmails are the person file's emails on certified user IDs, and note names the certified key, user IDs and dates. endorserKey and subjectKey are each person's first current key. Read each draft, then sign it.
+.TP
+\fIpgpkeys\fR
+a pgpkeys.git clone
+.TP
+\fIregistry\fR
+the registry checkout
+.TP
+\fB\-\-commit\fR \fICOMMIT\fR
+the freeze commit
+.TP
+\fB\-\-signer\fR \fISIGNER\fR
+primary fingerprint expected to sign the freeze commit
+.TP
+\fB\-\-as\fR \fIHANDLE\fR
+your own handle
+.TP
+\fB\-\-out\fR \fIOUT\fR
+new directory for the drafts
+.SS pullers
+\fBgit\-vouch\-migrate pullers\fR \fItree\fR \fB\-\-since\fR \fISINCE\fR [\fB\-\-until\fR \fIUNTIL\fR]
+.PP
+Read the merges on the first-parent line of SINCE..UNTIL in a kernel tree, which are its owner's own pulls, and the signed tags git recorded in their mergetag headers (git records no unsigned tag there). Print the resolved range, then one line per tagger email: pulls, how many were OpenPGP-signed, how many SSH-signed, the email, and the name on their newest pulled tag; most pulls first. Needs no gpg and no network, and gives the same answer for the same two commits.
+.TP
+\fItree\fR
+a clone of the tree, e.g. Linus's linux.git
+.TP
+\fB\-\-since\fR \fISINCE\fR
+start of the range, e.g. v6.12
+.TP
+\fB\-\-until\fR \fIUNTIL\fR
+end of the range (default HEAD)
+.SH EXIT STATUS
+0 on success. 1 on any error, and for \fBverify-continuity\fR if any claim is not proven.
+.SH SEE ALSO
+\fBgit-vouch\fR(1), \fBgpg\fR(1).
+.PP
+docs/flag-day.md in the git-vouch repository: https://github.com/MarkAtwood/git-vouch

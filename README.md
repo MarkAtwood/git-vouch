@@ -53,19 +53,22 @@ directory on `PATH` is the whole install:
 
 ```sh
 git clone https://github.com/MarkAtwood/git-vouch.git ~/src/git-vouch
-mkdir -p ~/.local/bin   # or any directory on your PATH
+mkdir -p ~/.local/bin ~/.local/share/man/man1   # or any directory on your PATH
 ln -s ~/src/git-vouch/git-vouch ~/.local/bin/
-git vouch -h
+ln -s ~/src/git-vouch/man/git-vouch.1 ~/.local/share/man/man1/
+git help vouch
 ```
+
+`man` finds pages in `~/.local/share/man` because `~/.local/bin` is on
+your `PATH`, so `git help vouch` and `git vouch --help` show the man
+page. `git vouch <command> -h` prints one command's help, which the man
+page is generated from.
 
 Link the other tools the same way if you need them: anchors and
 pgpkeys holders need `git-vouch-migrate` for the flag day, and it finds
-`git-vouch` next to its own file. To update, run
+`git-vouch` next to its own file; its page is
+`man/git-vouch-migrate.1`. To update, run
 `git -C ~/src/git-vouch pull`.
-
-`git vouch -h` and `git vouch <command> -h` print the help. Plain
-`git vouch --help` does not: git takes it as `git help vouch` and looks
-for a man page, which git-vouch does not have.
 
 Patch signing also needs the b4 and patatt forks; the guides' Patch
 signing sections install them. Next, run `git vouch setup` (below). The

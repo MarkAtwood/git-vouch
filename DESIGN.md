@@ -669,8 +669,10 @@ fetch stamp `vouch-fetched` lives in the repository's common git dir
 merge request; they never push. `export` and `sync` replace the
 allowed-signers and revocation files atomically, keeping an existing
 file's mode, and create a new one with mode 0666 minus the umask: the
-files are public, and git reads them. `--help` is the documentation; there is
-no man page.
+files are public, and git reads them. `--help` is the documentation.
+The man pages in `man/`, which `git help vouch` shows, are generated
+from the same argument parsers by `man/mkman.py`, and a test fails if a
+checked-in page is stale.
 
 ## did:key
 
