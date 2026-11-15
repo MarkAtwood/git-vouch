@@ -59,6 +59,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def verify_trust_runs() -> None:
+    """Fail once, with verify-trust's own words, if the binary cannot run here.
+
+    A release binary built against a newer glibc than this system's, for
+    one, exits 1 before printing anything; every test would then fail on
+    empty JSON instead of saying why.
+    """
+    proc = subprocess.run(
+        [VERIFY_TRUST, "--version"], capture_output=True, text=True, timeout=30
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        pytest.fail(f"{VERIFY_TRUST} does not run: {proc.stderr.strip()[:500]}")
+
+
 class Report(NamedTuple):
     """verify-trust's exit code and the one commit verdict of its JSON report."""
 
@@ -267,6 +282,7 @@ def verify_trust(repo: Path, url: str) -> Report:
         timeout=120,
     )
     assert proc.returncode in (0, 1), proc.stderr
+    assert proc.stdout.strip(), f"verify-trust printed no report: {proc.stderr}"
     report = json.loads(proc.stdout)
     assert report["ok"] is (proc.returncode == 0)
     [verdict] = report["commits"]
