@@ -37,23 +37,26 @@ What follows from the binding:
   verified signer, and `check` warns about it. An endorsed email is also
   what makes their patches verify in b4.
 - **Your endorsement follows their key rotations.** It carries over to
-  every key added in later versions of their person file. Along a chain
-  of signed versions that is sound. It also carries over an unsigned
-  change that registry review lets through, whether lost-key recovery or
-  a swapped-in key. If a merger lets a swapped key through, its holder
-  inherits your endorsement; the only traces are `check`'s WARNING on
-  that version and git history. For an anchor or maintainer, two other
-  anchors must also cosign the change, or their tier is suspended.
+  every key added in later versions of their person file, which is sound
+  along a chain of signed versions.
+
+  It also carries over an unsigned change that registry review lets
+  through, whether lost-key recovery or a swapped-in key. If a merger
+  lets a swapped key through, its holder inherits your endorsement; the
+  only traces are `check`'s WARNING on that version and git history. For
+  an anchor or maintainer, two other anchors must also cosign the
+  change, or their tier is suspended.
 - **Your key's fate matters.** Retiring the key you endorsed with leaves
   the endorsement valid. Revoking it voids every endorsement it made, and
-  the people you endorsed lose that evidence. If that key may be lost or
-  stolen, revoke it, not retire it: the signer sets the signing time, so
-  whoever holds a retired key can backdate endorsements. Then re-endorse
-  with a new key.
+  the people you endorsed lose that evidence.
+
+  If that key may be lost or stolen, revoke it; do not retire it. The
+  signer sets the signing time, so whoever holds a retired key can
+  backdate endorsements. Then re-endorse with a new key.
 - **Their key's fate matters less.** If the key you endorsed is
-  revoked, your endorsement is not void: it carries over to
-  their later keys, as on rotation. After a compromise, confirming that the new key is theirs and
-  endorsing it is encouraged but not enforced.
+  revoked, your endorsement is not void: it carries over to their later
+  keys, as on rotation. After a compromise, confirming that the new key
+  is theirs and endorsing it is encouraged but not enforced.
 - **It is public.** The registry, including who endorsed whom and your
   note, is public by design, with no privacy features.
 
@@ -176,14 +179,15 @@ neither does the person's own file.
   validly signed it; it does not second-guess the approver.
 - **Approval without endorsements still works.** Every exported key gets
   its handle as a principal, so a person approved with no endorsements
-  still verifies, just without any email principal.
+  still verifies, without any email principal.
 - **Hardware is advice, not a rule.** Maintainers and anchors should
   keep their keys on a hardware token, but every tier accepts any
   supported key type. The tool cannot prove what holds a key, so
   endorsers and approvers ask about it
   ([rationale](rationale.md#hardware-keys)).
-- **Automation identities** sign files and patches, never tags or commits. Their
-  person file must name the accountable maintainer in `accountable`.
+- **Automation identities** sign files and patches, never tags or
+  commits. Their person file must name the accountable maintainer in
+  `accountable`.
 - **The GPG web of trust does not supply tiers.** Anchors approve
   maintainers on their own judgement, using MAINTAINERS and endorsements.
 
@@ -219,9 +223,10 @@ kernel developer in three steps:
 2. They list their other identities in `alsoKnownAs`.
 3. They endorse as usual.
 
-There is no federation and no lookup in the other registry. If they use
-the same key in both registries, it has the same did:key in both, so
-anyone can compare the two with `git vouch did` and nothing else.
+There is no federation and no lookup in the other registry. A key used
+in both registries has the same did:key in both, so anyone can compare
+the two with `git vouch did` alone.
+
 `git-vouch` never resolves an `alsoKnownAs` DID or checks that it links
 back; those DIDs are the endorser's own claim. A DID that also lists the
 person's did:key in its own `alsoKnownAs` is a stronger claim, but
@@ -241,18 +246,23 @@ any `alsoKnownAs`.
 
 Run `git-vouch-migrate drafts --as <handle>` on your own machine. You get
 one unsigned draft per subject who has proved continuity with the old
-GPG key you certified. The draft takes `subjectName` from the person
-file, fills `subjectEmails` from the UIDs you certified, and puts the
-certified fingerprint, UID and date in `note`. Nobody generates drafts
-centrally, and unsigned drafts never enter the registry. Read each one
-and sign only those you still stand behind.
+GPG key you certified. Each draft:
+
+- takes `subjectName` from the person file;
+- fills `subjectEmails` from the UIDs you certified;
+- puts the certified fingerprint, UID and date in `note`.
+
+Nobody generates drafts centrally, and unsigned drafts never enter the
+registry. Read each one and sign only those you still stand behind.
 
 > **Proposal for kernel review.** A draft records only that you once
 > certified a GPG key. That certification never covered the SSH key in
 > `subjectKey`, and `subjectName` comes from the subject's own person
-> file. Before signing, confirm both as in "Confirming the key and
-> emails". Sign it only if you would endorse
-> that person today on the evidence above. If the certification came from
-> a keysigning party long ago and you have had no contact since, do not
-> sign it. If you have newer evidence, add it to the note before signing.
-> Drop any email from `subjectEmails` that you would not vouch for now.
+> file. Before signing:
+>
+> - Confirm both as in "Confirming the key and emails".
+> - Sign only if you would endorse that person today on the evidence
+>   above. A certification from a keysigning party long ago, with no
+>   contact since, is not enough.
+> - Add any newer evidence to the note.
+> - Drop any email from `subjectEmails` that you would not vouch for now.

@@ -3,10 +3,11 @@
 **Status:** research spike for `git-vouch-trqp` (bead vouch-faq3.1),
 2026-10-22, against verify-trust 0.24.0, which spoke
 `registry/authorization/0.1`. It records what that verify-trust sent and
-accepted, read from source; field names below are 0.1's snake_case. The
-bridge now speaks 0.2 only (lowerCamelCase: `entityId`, `authorityId`,
-`evaluatedAt`, `asOf`) and needs verify-trust 0.27.0 or later. The bridge is now
-built: DESIGN.md, TRQP bridge, describes it, and
+accepted, read from source; field names below are 0.1's snake_case.
+
+The bridge is now built. It speaks 0.2 only (lowerCamelCase:
+`entityId`, `authorityId`, `evaluatedAt`, `asOf`) and needs verify-trust
+0.27.0 or later. DESIGN.md, TRQP bridge, describes it, and
 `docs/bridge-deployment.md` explains how to run it.
 
 ## Verdict
@@ -150,7 +151,7 @@ Nothing else protects it:
 - The resolver's `PublicOnly` host policy (§2) covers DID resolution
   only, not the registry endpoint fetch.
 
-So the answer's integrity rests entirely on the bridge publishing an
+The answer's integrity therefore rests on the bridge publishing an
 `https://` endpoint that answers directly.
 
 ## 2. DID-document service entry
@@ -331,18 +332,21 @@ forge-host = lowercased DNS host (dotted) or localhost; no port
 segment    = [a-z0-9._-]+, never "." or ".."
 ```
 
-- Grammar and rules: VGI `vgi-core/src/resource.rs:1-28`. Length cap
-  512 bytes (`:32-35`). verify-trust allows up to 21 path segments,
-  because it calls `normalize_resource` with no forge depth
-  (`vgi-core/src/resource.rs:37-40`, `:190-197`;
-  `verify-trust/src/resource.rs:179-180`). A scheme, port, trailing
-  slash, empty segment or `.`/`..` segment is refused, never rewritten
-  (`vgi-core/src/resource.rs:219-221`, `:239-277`). The module doc says
-  a `.git` suffix is refused too (`:20`), but the code does not refuse
-  it: `.` is a legal segment character (`:317-319`), and `.git` is only
-  stripped when building the suggestion for an input with a scheme
-  (`:321-327`). So `…/linux.git` and `…/linux` are two different valid
-  resources, and the bridge must match the resource exactly.
+- Grammar and rules: VGI `vgi-core/src/resource.rs:1-28`.
+  - Length cap 512 bytes (`:32-35`).
+  - verify-trust allows up to 21 path segments, because it calls
+    `normalize_resource` with no forge depth
+    (`vgi-core/src/resource.rs:37-40`, `:190-197`;
+    `verify-trust/src/resource.rs:179-180`).
+  - A scheme, port, trailing slash, empty segment or `.`/`..` segment is
+    refused, never rewritten (`vgi-core/src/resource.rs:219-221`,
+    `:239-277`).
+  - The module doc says a `.git` suffix is refused too (`:20`), but the
+    code does not refuse it: `.` is a legal segment character
+    (`:317-319`), and `.git` is only stripped when building the
+    suggestion for an input with a scheme (`:321-327`). So `…/linux.git`
+    and `…/linux` are two different valid resources, and the bridge must
+    match the resource exactly.
 - verify-trust's own module repeats the grammar: `verify-trust/src/resource.rs:1-29`.
   The bare `owner/repo` form was removed in 0.8.0
   (`verify-trust/src/resource.rs:21-25`, `:71-76`).

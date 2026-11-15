@@ -7,9 +7,8 @@ how the tests run them.
 
 A captain is a subsystem maintainer an anchor has approved at the
 `maintainer` tier. Linus, or the maintainer above you, pulls your
-signed tags. You verify the tags of
-people who send you pull requests, approve contributors, and endorse
-people you know. Anchors, not you, approve maintainers and revoke other
+signed tags. You verify the tags of people who send you pull requests,
+approve contributors, and endorse people you know. Anchors, not you, approve maintainers and revoke other
 people's keys.
 
 Read [What vouching for a real person means](vouching.md) before you
@@ -18,7 +17,7 @@ evidence to ask for, and how to read the endorsements you approve on.
 
 ## What the commands assume
 
-> **What this does:** lists the variables, tools and keys every block below uses, and the one path every change takes.\
+> **What this does:** lists the variables, tools and keys the blocks below use.\
 > **Why:** commands only write and sign files; every change arrives as a reviewed merge ([rationale](rationale.md#nothing-pushes)).
 
 - `$REGISTRY` is the registry's URL and `$LINUX` a kernel tree you push
@@ -38,9 +37,12 @@ evidence to ask for, and how to read the endorsements you approve on.
   tree, both in your home directory.
 
 No `git vouch` command pushes to the registry. Every change takes the
-same path: branch from the registry's `main`, run a `git vouch` command
-that writes and signs a record, commit, push, and the registry
-maintainer merges once `git vouch check` passes.
+same path:
+
+1. Branch from the registry's `main`.
+2. Run a `git vouch` command that writes and signs a record.
+3. Commit and push the branch.
+4. The registry maintainer merges it once `git vouch check` passes.
 
 ## Flag day
 
@@ -49,8 +51,9 @@ maintainer merges once `git vouch check` passes.
 
 These are a captain's steps in [the flag-day runbook](flag-day.md),
 which has the full timeline. The anchors register and merge first.
+
 If `git-vouch-migrate pullers` lists you, because Linus merged a signed
-tag of yours in the last N releases, you are in the core set: register
+tag of yours in the last N releases, you are in the core set. Register
 during the window and get approved before the flag day. Your own tree
 keeps accepting GPG-signed pulls from people below you until you switch
 it, by the late cutoff at the latest.
@@ -58,9 +61,9 @@ it, by the late cutoff at the latest.
 Set up patch signing before the flag day: install the patatt fork and
 list `keyringsrc = vouch:` first and the frozen pgpkeys keyring second,
 as [Patch signing](#patch-signing) shows. Patches signed with a GPG key,
-or a key `patatt genkey` made, then keep verifying through pgpkeys, with
-a warning, for everyone until the late cutoff, six months after the flag
-day, the same date your tree stops accepting GPG-signed tags.
+or a key `patatt genkey` made, keep verifying through pgpkeys, with a
+warning, for everyone until the late cutoff. That is six months after
+the flag day, the same date your tree stops accepting GPG-signed tags.
 
 ### Register with your pgpkeys key
 
@@ -90,14 +93,14 @@ git push -q origin HEAD:register-alice
 `port` checks the freeze commit's signature by `$SIGNER`, then writes
 one unsigned draft per person in pgpkeys: a proposed handle, your name,
 the emails on your unrevoked user IDs, and `migratedFrom`. Read yours
-before registering: the handle is permanent. `register --from` adds your
-SSH key and signs the file; `add-key` lists your backup key, signed by
-the main one.
+before registering, because the handle is permanent. `register --from`
+adds your SSH key and signs the file; `add-key` lists your backup key,
+signed by the main one.
 
 The `.asc` covers the person file's exact bytes
 ([rationale](rationale.md#exact-bytes)). Once that version is merged,
 later signed edits such as `add-key`, `retire-key` or an email change do
-not undo the proof; only a change no previous key signed, such as a
+not undo the proof. Only a change no previous key signed, such as a
 lost-key recovery, needs a fresh `.asc`. The proof only unlocks drafts
 from your old GPG certifications (below).
 
@@ -112,9 +115,9 @@ authentication subkey as your SSH key.
 > **Why:** the proof only unlocks endorsement drafts and grants no tier, so without it you collect fresh endorsements instead ([rationale](rationale.md#continuity-proof)).
 
 Up to about 80% of the people in MAINTAINERS have no pgpkeys key under
-their MAINTAINERS address. Register fresh, then
-collect fresh endorsements. The example runs as `carol`, a contributor with no
-pgpkeys key; a captain runs the same command:
+their MAINTAINERS address. Register fresh, then collect fresh
+endorsements. The example runs as `carol`, a contributor with no pgpkeys
+key; a captain runs the same command:
 
 <!-- as carol -->
 ```sh
@@ -149,12 +152,12 @@ git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 ```
 
-They push only once `check` exits 0, the list of changed paths is right,
-and they have read every `git-vouch: warning:` line. They never
-fast-forward, not even your merge of main, so the dates on the main line
-are the maintainer's clock, not yours. Until someone endorses you,
-`check` warns that your emails are not endorsed; that is expected. Then
-(as `korg`):
+They never fast-forward, not even your merge of main, so the dates on
+the main line are the maintainer's clock, not yours. They push only once
+`check` exits 0, the list of changed paths is right, and they have read
+every `git-vouch: warning:` line. Until someone endorses you, `check`
+warns that your emails are not endorsed; that is expected. Then they
+push (as `korg`):
 
 <!-- as korg -->
 ```sh
@@ -170,12 +173,13 @@ git push -q origin main
 > **Why:** a tier is a separate record the approver signs, so nobody promotes themselves ([rationale](rationale.md#tiers)).
 
 Ask people who know you in person to endorse you, as
-[vouching.md](vouching.md) describes; your old GPG certifiers get drafts
-for you if your continuity proof holds. An anchor approves you on their
-own judgement, using MAINTAINERS and the endorsements in the registry.
-There is no minimum number of endorsements. GPG supplies no tiers: the
-web of trust says nothing about who is a maintainer. The anchor then
-approves you (as `lena`):
+[vouching.md](vouching.md) describes. If your continuity proof holds,
+your old GPG certifiers get drafts for you.
+
+An anchor approves you on their own judgement, using MAINTAINERS and the
+endorsements in the registry. There is no minimum number of
+endorsements. GPG supplies no tiers: the web of trust says nothing about
+who is a maintainer. The approval (as `lena`):
 
 <!-- as lena -->
 ```sh
@@ -196,13 +200,17 @@ You can approve contributors from the commit that adds that tier record.
 
 ### Sign your endorsement drafts
 
-> **What this does:** turns your old GPG certifications into endorsement drafts, which you read and sign, and approves your contributors.\
+> **What this does:** turns your old GPG certifications into endorsement drafts for you to read and sign.\
 > **Why:** the tool reads pgpkeys only at the freeze commit, on your own machine; no one generates drafts centrally ([rationale](rationale.md#freeze-commit)).
 
 GPG certifications are not ported as records. If you certified other
-people's GPG keys, draft endorsements from those certifications on your
-own machine, read each one, sign the ones you still stand behind, and
-approve your contributors in the same branch (as `alice`):
+people's GPG keys, do this in one branch:
+
+1. Draft endorsements from those certifications on your own machine.
+2. Read each draft.
+3. Sign the ones you still stand behind, and approve your contributors.
+
+Draft them (as `alice`):
 
 <!-- as alice -->
 ```sh
@@ -217,18 +225,21 @@ cat ~/endorsement-drafts/endorsements/*/*.json
 `drafts --as` writes one draft for each registered person whose
 continuity proof holds and whose GPG key the key in your own
 `migratedFrom` certified at the freeze commit. You need no continuity
-proof yourself. A
-subject who has not registered yet gets no draft; run `drafts` again
-later into a new `--out` directory and sign only the new ones.
+proof yourself. A subject who has not registered yet gets no draft; run
+`drafts` again later into a new `--out` directory and sign only the new
+ones.
 
-**Read every draft before the loop signs it.** `subjectName` comes from
-the subject's own person file, not from your certification;
-`subjectEmails` are their emails on the user IDs you certified; `note`
-names the certified key, user IDs and date. A certification never
-covered the subject's new SSH key, so confirm the key and emails with
-them as in
+**Read every draft before the loop signs it.**
+
+- `subjectName` comes from the subject's own person file, not from your
+  certification.
+- `subjectEmails` are their emails on the user IDs you certified.
+- `note` names the certified key, user IDs and date.
+
+A certification never covered the subject's new SSH key, so confirm the
+key and emails with them as in
 [Confirming the key and emails](vouching.md#confirming-the-key-and-emails).
-Delete any draft you would not endorse today, and edit `note` or
+Delete any draft you would not endorse today. Edit `note` or
 `subjectEmails` before signing if you need to. Then sign the drafts that
 are left and approve your contributors (as `alice`):
 
@@ -274,8 +285,7 @@ git push -q origin alice-6.99
 
 `status` prints the registry commit, its age, and your own tier. Linus
 now verifies your tag against his maintainer export. From the flag day
-his tree accepts only SSH-signed tags; other trees, yours included,
-switch by the late cutoff.
+his tree accepts only SSH-signed tags.
 
 ## Day to day
 
@@ -331,13 +341,18 @@ git cat-file tag bob-6.99
 ```
 
 git prints `Good "git" signature for bob`. The export holds every
-approved contributor, so a good signature alone does not show who signed.
-Check that the name after `signature for` is the person who sent the
-pull request, and that the `tag` line and message `git cat-file` prints
-are the ones they asked you to pull. A failed verification means the
-signer is not approved at contributor or above, or their key is retired
-or revoked: do not pull. Run `git vouch sync` first if the signer says
-they were approved recently.
+approved contributor, so a good signature alone does not show who
+signed. Check that:
+
+- the name after `signature for` is the person who sent the pull
+  request;
+- the `tag` line and message `git cat-file` prints are the ones they
+  asked you to pull.
+
+A failed verification means the signer is not approved at contributor
+or above, or their key is retired or revoked: do not pull. If the signer
+says they were approved recently, run `git vouch sync` and verify
+again.
 
 ## Rotating your key
 
@@ -404,11 +419,15 @@ git verify-tag carol-6.99    # fails: carol has no tier yet
 
 An endorsement says that carol's key and emails belong to the real,
 named person, and that you know it first-hand. Any registered human may
-endorse. Approval grants a tier; as a captain you may approve
-`contributor` and `automation`. Approve on your own judgement:
-endorsements are evidence, not a count. If you know carol yourself,
-check her identity, key and emails as [vouching.md](vouching.md)
-describes, then endorse and approve her in one branch (as `alice`):
+endorse.
+
+Approval grants a tier. As a captain you may approve `contributor` and
+`automation`. Approve on your own judgement: endorsements are evidence,
+not a count.
+
+If you know carol yourself, check her identity, key and emails as
+[vouching.md](vouching.md) describes, then endorse and approve her in
+one branch (as `alice`):
 
 <!-- as alice -->
 ```sh
@@ -425,13 +444,15 @@ git push -q origin HEAD:approve-carol
 
 <!-- merge approve-carol -->
 
-Before approving someone others have endorsed, read each
-`endorsements/<handle>/*.json`: who endorsed them, which emails, and
-what the note says was checked. `endorse` covers the person's name,
-first current key and every listed email; `--email` limits it to the
-addresses you confirmed. Before signing, `endorse` prints the key's
-SHA256 fingerprint: compare it with the one you checked in person. Run
-`endorse` on the merged registry, not on a pull-request checkout.
+`endorse` covers the person's name, first current key and every listed
+email; `--email` limits it to the addresses you confirmed.
+
+- Before approving someone others have endorsed, read each
+  `endorsements/<handle>/*.json`: who endorsed them, which emails, and
+  what the note says was checked.
+- Before signing, `endorse` prints the key's SHA256 fingerprint. Compare
+  it with the one you checked in person.
+- Run `endorse` on the merged registry, not on a pull-request checkout.
 
 Once merged and synced, carol's tag verifies (as `alice`):
 
@@ -445,10 +466,11 @@ git verify-tag carol-6.99
 To remove a contributor's tier without suspecting their key, ask the
 registry maintainer to delete their `tiers/<handle>.json` in a reviewed
 merge. Their keys get `valid-before` set to that commit's date, and
-signatures they made before stay valid. `check` judges your approvals
-once, at the commit that adds them, so they stay if you later step down.
-Only a revoked key voids the records it signed (see
-[If you lose a key](#if-you-lose-a-key)).
+signatures they made before stay valid.
+
+`check` judges your approvals once, at the commit that adds them, so
+they stay if you later step down. Only a revoked key voids the records
+it signed (see [If you lose a key](#if-you-lose-a-key)).
 
 ## If you lose a key
 
@@ -457,13 +479,13 @@ Only a revoked key voids the records it signed (see
 
 Revoke rather than retire unless you are sure nobody else can use the
 key. A revoked key's signatures all stop verifying, past and future,
-and every endorsement and tier record it signed becomes void. That
-includes patches: once someone checking them has synced, patatt no
+and every endorsement and tier record it signed becomes void.
+
+That includes patches: once someone checking them has synced, patatt no
 longer finds the key. The b4 fork, set up as in
 [Check incoming patches](#check-incoming-patches), checks a signature
-again every time. Upstream b4 newer than 0.16 remembers a verdict for up
-to 24 hours, so a series it already checked can keep its tick until
-then.
+again every time; upstream b4 newer than 0.16 can keep a series' tick
+for up to 24 hours.
 
 ### With your backup key
 
@@ -508,8 +530,8 @@ git push -q origin HEAD:lost-alice
 <!-- merge lost-alice -->
 
 The new tier record replaces the void one. The new endorsement is
-`alice-2.json`; the void `alice-1.json` stays in the registry and
-`check` keeps reporting it, which does no harm.
+`alice-2.json`; the void `alice-1.json` stays in the registry, and
+`check` keeps reporting it harmlessly.
 
 The lost key's revocation leaves records your earlier, retired key
 signed, such as bob's approval, untouched. Once merged and synced, both
@@ -529,24 +551,25 @@ from a tag you re-sign with the new key.
 ### Without a backup key
 
 > **What this does:** recovers through an anchor's revocation and a new key no previous key signed.\
-> **Why:** that change prints a WARNING, and for a maintainer it suspends the tier until two anchors cosign it, so both the merger and the anchors confirm the key with you first ([rationale](rationale.md#backup-key)).
+> **Why:** the change is unsigned, so the merger and two anchors each confirm your new key before it counts ([rationale](rationale.md#backup-key)).
 
-Ask an anchor to revoke the lost key: only the key itself, another of
-your current keys, or an anchor may sign its revocation. Then register a
-new key in a change no previous key signed, with
-`git vouch register --from people/<you>.json` and your new key, and
-retire the lost one signed by the new key. The registry maintainer's
-`check` prints an unsigned-change WARNING on that version, and they must
-confirm the new key with you over a channel they already trust before
-merging. Your tier is suspended from that merge until two anchors
-confirm the new key with you and each run
-`git vouch cosign people/<you>.json`; once their cosigns merge, it
-counts as if the change had been signed, and your past grants stand.
-Endorsements made with your revoked key are void, so re-endorse and
-re-approve as above, after the cosigns.
+1. Ask an anchor to revoke the lost key. Only the key itself, another
+   of your current keys, or an anchor may sign its revocation.
+2. Register a new key in a change no previous key signed: run
+   `git vouch register --from people/<you>.json` with your new key, and
+   retire the lost one signed by the new key.
+3. The registry maintainer's `check` prints an unsigned-change WARNING
+   on that version. They must confirm the new key with you over a
+   channel they already trust before merging.
+4. Your tier is suspended from that merge until two anchors confirm the
+   new key with you and each run `git vouch cosign people/<you>.json`.
+   Once their cosigns merge, the change counts as if it had been signed,
+   and your past grants stand.
+5. Endorsements made with your revoked key are void. After the cosigns,
+   re-endorse and re-approve as above.
 
-The anchors guide runs these steps for a maintainer who lost her only
-key: [Revoke a compromised key](guide-anchors.md#revoke-a-compromised-key)
+The anchors guide runs these steps for a member who lost her only key,
+by then a contributor: [Revoke a compromised key](guide-anchors.md#revoke-a-compromised-key)
 has the revocation, and the recovery follows the table in
 [Read check warnings in registry merges](guide-anchors.md#read-check-warnings-in-registry-merges).
 
@@ -582,14 +605,18 @@ fetch that branch from github.com/MarkAtwood/patatt and check it out
 there.
 
 `misc/vouch-check.sh` in the b4 fork tests the pair offline in a
-throwaway home: it signs a series with a registry key and checks that
-`b4 am` passes it, then fails it once the key is revoked. Unless
-git-vouch and the patatt fork are checked out next to b4 and b4 has a
-`.venv`, set `GIT_VOUCH` to the git-vouch script, `PATATT_FORK` to a pip
-requirement for the patatt fork and `PYTHON` to a Python with b4's
-dependencies. It also needs `uv`, with setuptools in its cache. It sets
-up its own config: set yours as this page does, not as the script's
-header shows.
+throwaway home. It signs a series with a registry key, checks that
+`b4 am` passes it, then checks that it fails once the key is revoked. It
+needs:
+
+- `uv`, with setuptools in its cache;
+- unless git-vouch and the patatt fork are checked out next to b4 and b4
+  has a `.venv`: `GIT_VOUCH` set to the git-vouch script, `PATATT_FORK`
+  to a pip requirement for the patatt fork, and `PYTHON` to a Python
+  with b4's dependencies.
+
+The script sets up its own config. Set yours as this page does, not as
+the script's header shows.
 
 ### Sign with your registry key
 
@@ -598,9 +625,8 @@ header shows.
 
 patatt signs with the key git signs with, under the selector
 `git vouch status` prints, which is derived from the key. It signs as
-your `user.email`, so that must be an endorsed email. `b4 send`, or
-`git send-email` after `patatt install-hook`, then signs every patch
-(as `alice`):
+your `user.email`. `b4 send`, or `git send-email` after
+`patatt install-hook`, then signs every patch (as `alice`):
 
 <!-- patch as alice -->
 ```shell
@@ -616,9 +642,7 @@ sending.
 > **What this does:** points patatt and b4 at the registry first and the frozen pgpkeys keyring second, then checks a series.\
 > **Why:** the registry is the keyring; pgpkeys at the freeze commit stays second, with a warning, until the late cutoff ([rationale](rationale.md#patch-fallback)).
 
-Tell patatt and b4 where to find keys: the registry first, then the
-frozen pgpkeys keyring you cloned on the flag day, checked out at the
-freeze commit (as `alice`):
+This uses the pgpkeys clone from the flag day (as `alice`):
 
 <!-- patch as alice -->
 ```shell
@@ -633,20 +657,21 @@ patatt reads the keyring as files on disk, so leave that clone at the
 freeze commit: a key added after it would verify too. The checkout
 fails if the clone does not hold the freeze commit.
 
-b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
-documentation suggests, so the second line removes `b4.keyringsrc`.
+b4's documentation suggests setting `b4.keyringsrc`, but b4 ignores
+`patatt.keyringsrc` while it is set, so the second line removes it.
 
 `b4.attestation-recheck-hours = 0` is a setting of the b4 fork: b4
 checks every signature again instead of remembering a verdict for up to
 24 hours, so a revoked key stops verifying at your next `git vouch
 sync`. Any other b4 ignores it, and upstream b4 newer than 0.16 keeps a
-pass for up to 24 hours. The fork names the keyring after every registry
-pass: if `b4 am` prints `✓ Signed: openssh/...` with no
-`(key: vouch:...)` after it, the b4 you run is not the fork. Check
-`command -v b4`.
+pass for up to 24 hours.
+
+The fork names the keyring after every registry pass. If `b4 am` prints
+`✓ Signed: openssh/...` with no `(key: vouch:...)` after it, the b4 you
+run is not the fork; check `command -v b4`.
 
 Sync, then fetch the series by its message-id, here `$MSGID`, bob's
-patch from your mailbox; without `-m`, b4 fetches it from lore (as
+patch from your mailbox. Without `-m`, b4 fetches it from lore (as
 `alice`):
 
 <!-- patch as alice -->

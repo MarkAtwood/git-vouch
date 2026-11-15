@@ -1,15 +1,18 @@
 # git-vouch and OpenVTC
 
 **Status:** comparison, 2026-10-22; every OpenVTC claim re-checked
-2026-11-15. OpenVTC facts come from its public repositories
-(github.com/OpenVTC, mainly `verifiable-trust-infrastructure`, its
-`docs/`, and the `wiki` repository) at their last commit on or before
-2026-10-22, and from the ToIP specifications they implement. Where a
-number has moved since, the 2026-11-15 value follows it. git-vouch facts
-come from `DESIGN.md`. git-vouch is implemented but not released, and
-its patatt and b4 forks are not upstream. OpenVTC runs a kernel
-maintainer pilot; nothing of it is deployed in production, and its
-browser wallet has never been published.
+2026-11-15.
+
+- OpenVTC facts come from its public repositories (github.com/OpenVTC,
+  mainly `verifiable-trust-infrastructure`, its `docs/`, and the `wiki`
+  repository) at their last commit on or before 2026-10-22, and from the
+  ToIP specifications they implement. Where a number has moved since,
+  the 2026-11-15 value follows it.
+- git-vouch facts come from `DESIGN.md`.
+- git-vouch is implemented but not released, and its patatt and b4 forks
+  are not upstream.
+- OpenVTC runs a kernel maintainer pilot; none of it is deployed in
+  production, and its browser wallet has never been published.
 
 ## Verdict
 
@@ -26,8 +29,7 @@ asks the person's agent to produce an SSHSIG, which OpenVTC's CI tool
 `verify-trust` checks by resolving the signer's DID and querying the
 trust registry. git-vouch has git produce the SSHSIG from the person's
 own SSH key, and git itself verifies it against a file git-vouch
-generates. OpenVTC adds machinery on both sides of that signature: an
-agent before it, and DID resolution plus a registry query after it.
+generates.
 
 ## Side by side
 
@@ -52,9 +54,9 @@ agent before it, and DID resolution plus a registry query after it.
 ## What OpenVTC has that git-vouch gives up
 
 - **Fresh authorisation checks.** `verify-trust` queries the live
-  registry on every CI run, and the VTC checks status lists at admission. A git-vouch
-  copy is only as fresh as the last `git vouch sync`; git-vouch warns
-  after 7 days and keeps working.
+  registry on every CI run, and the VTC checks status lists at
+  admission. A git-vouch copy is only as fresh as the last
+  `git vouch sync`; git-vouch warns after 7 days and keeps working.
 - **Vetter privacy.** git-vouch publishes who endorsed whom. OpenVTC's PCS
   can hide it. OpenVTC's own documents call PCS an unaudited research
   artifact, off by default, and note that hidden vetters make per-vetter
@@ -68,14 +70,16 @@ agent before it, and DID resolution plus a registry query after it.
 - **Two-person control of everything the root does.** A 2026-10-02
   survey of VTC operations found three ways one administrator could get
   round the second-administrator rule (remove the others, lower the
-  consent threshold, replace the policy) and closed all three. Second-party
-  consent is on unless a community is installed in single-administrator
-  mode, and the host can still write an admin entry with an offline
-  break-glass command; both are audited and flagged. git-vouch needs two anchors' cosigns for any change
-  to `anchors.json` after the first and for an anchor's or maintainer's
-  unsigned key change (see Cosign in `DESIGN.md`). Review alone still
-  covers the first `anchors.json`, a contributor's unsigned key change,
-  and deleting a tier record.
+  consent threshold, replace the policy) and closed all three.
+  Second-party consent is on unless a community is installed in
+  single-administrator mode, and the host can still write an admin entry
+  with an offline break-glass command; both are audited and flagged.
+
+  git-vouch needs two anchors' cosigns for any change to `anchors.json`
+  after the first, and for an anchor's or maintainer's unsigned key
+  change (see Cosign in `DESIGN.md`). Review alone still covers the first
+  `anchors.json`, a contributor's unsigned key change, and deleting a
+  tier record.
 
 ## What git-vouch has that OpenVTC lacks
 
@@ -132,9 +136,9 @@ What it does not prove:
   verify-trust trusts one because its URL came from the registry DID's
   document, so trust rests on the DID-bound `https://` endpoint and on
   TLS to it. verify-trust 0.24.0 also accepted an `http://` endpoint and
-  followed redirects (not rechecked since), so the bridge refuses to
-  print a non-`https://` endpoint and serves `/trust-tasks` directly. Anyone can check an answer against the
-  public registry.
+  followed redirects (not rechecked since). The bridge therefore refuses
+  to print a non-`https://` endpoint and serves `/trust-tasks` directly.
+  Anyone can check an answer against the public registry.
 - **That the signer may sign this repository.** Answers are not scoped
   to a repository, and any tier counts, so the bridge can say yes where
   `git verify-commit` against the default export (contributor and

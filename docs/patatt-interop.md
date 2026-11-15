@@ -1,23 +1,27 @@
 # patatt and b4 interop (spike)
 
-This is the research done before the forks were written. What was built
-differs in places: the patatt fork (github.com/MarkAtwood/patatt, branch
-`git-vouch`) logs a failed `git vouch keys` at warning, runs
-`git vouch keys -- <identity>`, refuses any source other than exactly
-`vouch:`, and words the fallback warning as `W: <from>/<subject>
-verified via legacy keyring <source>, not the vouch registry; legacy
-keyrings stop working six months after flag day`. The b4 fork
-(github.com/MarkAtwood/b4, branch `git-vouch`) adds
-`b4.attestation-recheck-hours` and names the keyring that verified each
-pass. DESIGN.md, Patch signing, describes both as built.
+This is the research done before the forks were written. DESIGN.md,
+Patch signing, describes both forks as built. What was built differs in
+places:
+
+- The patatt fork (github.com/MarkAtwood/patatt, branch `git-vouch`)
+  logs a failed `git vouch keys` at warning, runs
+  `git vouch keys -- <identity>`, refuses any source other than exactly
+  `vouch:`, and words the fallback warning as `W: <from>/<subject>
+  verified via legacy keyring <source>, not the vouch registry; legacy
+  keyrings stop working six months after flag day`.
+- The b4 fork (github.com/MarkAtwood/b4, branch `git-vouch`) adds
+  `b4.attestation-recheck-hours` and names the keyring that verified
+  each pass.
 
 The `vouch:` keyring source fits patatt with one new branch in
 `get_public_key` and a helper of about 30 lines, plus about 5 lines in
 `validate_message` for the fallback warning. b4 needs no change to
 verify through `vouch:`: it passes its keyring source strings straight
-through to patatt. The main caveats are that upstream b4 caches verdicts
-for up to 24 hours, which delays revocation, and that a warning raised
-inside patatt is invisible on b4 cache hits.
+through to patatt. The main caveats, both in upstream b4:
+
+- It caches verdicts for up to 24 hours, which delays revocation.
+- A warning raised inside patatt is invisible on b4 cache hits.
 
 Sources read (all citations are to these trees):
 
@@ -143,11 +147,15 @@ directory. The callers are:
 becomes `keysrc` in the result (P:1234, P:1248). On a miss, raise
 `KeyError` (P:1251, P:1656). Map every other failure to `KeyError` as
 well: `git vouch` missing, a non-zero exit, an unknown email, or a
-non-openssh `keytype`. Any other exception escapes `validate_message`,
-which catches only `KeyError` around lookup. `cmd_validate` catches only
-`RuntimeError` (P:1752), and b4 calls `validate_message` with no
-`try` at all (B:2323), so a stray exception crashes `b4 am`. It also
-skips the GPG fallback source.
+non-openssh `keytype`.
+
+Any other exception escapes `validate_message`, which catches only
+`KeyError` around lookup:
+
+- `cmd_validate` catches only `RuntimeError` (P:1752).
+- b4 calls `validate_message` with no `try` at all (B:2323), so a stray
+  exception crashes `b4 am`.
+- A stray exception also skips the GPG fallback source.
 
 Cache the `git vouch keys` output per email for the life of the
 process. b4 validates every message in a series, possibly twice because
@@ -225,15 +233,18 @@ per signature: `(code, identity, signtime, keysrc, algo, errors)`
 when verbose; `NOKEY`, `ERROR` and `BADSIG` print with their errors.
 The exit code is the highest code seen (P:1722-1756).
 
-**How b4 gets patatt.** b4 imports the *installed* package
-(`import patatt`, B:66), with dependency `patatt>=0.7,<2.0` in
-`b4/pyproject.toml:34`, pinned to `patatt==0.8.0` in
-`requirements.txt:223`. `patatt/` in the b4 tree is a git submodule
-(`b4/.gitmodules`), not initialised in this clone. It is used only
-by `b4.sh`, which puts `patatt/src` on `PYTHONPATH` to run from a
-checkout (`b4/b4.sh:10`). The DESIGN.md plan, installing the fork
-in place of patatt, works for pip/uv installs. For `b4.sh` users it
-means pointing the submodule at the fork.
+**How b4 gets patatt.**
+
+- b4 imports the *installed* package (`import patatt`, B:66), with
+  dependency `patatt>=0.7,<2.0` in `b4/pyproject.toml:34`, pinned to
+  `patatt==0.8.0` in `requirements.txt:223`.
+- `patatt/` in the b4 tree is a git submodule (`b4/.gitmodules`), not
+  initialised in this clone. It is used only by `b4.sh`, which puts
+  `patatt/src` on `PYTHONPATH` to run from a checkout (`b4/b4.sh:10`).
+
+The DESIGN.md plan, installing the fork in place of patatt, works for
+pip/uv installs. For `b4.sh` users it means pointing the submodule at
+the fork.
 
 **Where b4 calls patatt:**
 
@@ -259,8 +270,8 @@ means pointing the submodule at the fork.
 | fail with key | `✗ BADSIG: openssh/<email>` | B:2795-2796 |
 | no key | `✗ No key: openssh/<email>` | B:2797-2798 |
 
-- With the default `softfail` policy (B:324), "no key" is not fatal
-  even under `hardfail` (B:2645-2654). BADSIG under `hardfail` exits
+- "No key" is not fatal under the default `softfail` policy (B:324),
+  nor under `hardfail` (B:2645-2654). BADSIG under `hardfail` exits
   128 (B:1323-1331).
 - Marks are `✓`/`✗` in colour, or `v`/`x` with simple checkmarks
   (B:268-271).
