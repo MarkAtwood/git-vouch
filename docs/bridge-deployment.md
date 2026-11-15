@@ -4,9 +4,10 @@
 vouch-faq3.8). Behaviour comes from `git-vouch-trqp`, `git-vouch` and
 DESIGN.md, TRQP bridge. The unit files were checked with
 `systemd-analyze verify`. The bridge speaks `registry/authorization/0.2`
-only, so it needs verify-trust 0.27.0 or later; the verify-trust results
+only, so it needs verify-trust 0.27.0 or later. The verify-trust results
 below were measured with `tests/trqp/test_verify_trust.py` against
-0.24.0, before the switch, and that test now targets 0.33.0.
+verify-trust 0.33.0's release binary on Debian 13, 2026-11-15: all 15
+end-to-end tests pass.
 
 ## Verdict
 
@@ -197,7 +198,7 @@ Failures, and where they show:
 | The fetch fails | `git vouch sync` exits 1 with the reason on stderr (`systemctl status git-vouch-sync`, `journalctl -u git-vouch-sync`). The stamp keeps its old time; the bridge answers until it is 24 hours old. |
 | The registry host rewrote history | `sync` refuses (`cannot fetch the registry; a rewritten history is refused`), since its refspec has no `+`. Same as a failed fetch. |
 | The fetch works but `git vouch check` fails | `sync` exits 1 and writes only the revocation file. The stamp is fresh, but every query fails the check, so the bridge answers 503 and logs `git-vouch-trqp: git vouch query exited 1: ...`. |
-| No sync for 24 hours | 503, a retryable `unavailable` error with the message `the registry copy was last synced TIME, over 24h ago`. verify-trust reports `registryUnavailable` (`test_stale_bridge_fails_closed`; read from verify-trust 0.33.0's source, not yet run). |
+| No sync for 24 hours | 503, a retryable `unavailable` error with the message `the registry copy was last synced TIME, over 24h ago`. verify-trust reports `registryUnavailable` (measured, `test_stale_bridge_fails_closed`). |
 | The bridge is down | The proxy's own error. verify-trust reports `registryUnavailable` (measured, `test_bridge_down_fails_closed`). |
 
 **Why the stale reply is a retryable error.** verify-trust 0.25.0 and
