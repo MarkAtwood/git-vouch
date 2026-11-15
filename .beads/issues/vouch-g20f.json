@@ -2,15 +2,15 @@
   "id": "vouch-g20f",
   "title": "trqp: answer a stale copy with a retryable trust-task-error, not a bare 503",
   "description": "The bare 503 exists because verify-trust before 0.25.0 read any trust-task-error as unauthorized. OpenVTC #176 (0.25.0) maps a retryable one to registryUnavailable, and the bridge now needs 0.27.0+. Switch the stale reply to a retryable trust-task-error/0.6 with retryAfter, once the end-to-end test (vouch-ius2) can confirm verify-trust 0.33.0 reports registryUnavailable for it. See docs/bridge-deployment.md, Freshness.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 3,
   "issue_type": "task",
   "assignee": "Mark Atwood",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-11-15T04:41:13.798889724Z",
   "created_by": "Mark Atwood",
-  "updated_at": "2026-11-15T05:06:07.595475552Z",
+  "updated_at": "2026-11-15T05:10:19.927643952Z",
   "started_at": "2026-11-15T05:06:07.595475552Z",
-  "lease_expires_at": "2026-11-15T05:11:07.595475552Z",
-  "heartbeat_at": "2026-11-15T05:06:07.595475552Z"
+  "closed_at": "2026-11-15T05:10:19.927643952Z",
+  "close_reason": "Closed"
 }
