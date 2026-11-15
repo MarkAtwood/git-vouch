@@ -8,17 +8,18 @@ DESIGN.md, TRQP bridge. The unit files were checked with
 
 ## Verdict
 
-**The bridge is optional, and kernel.org runs the one instance that
-counts.** `git vouch`, patatt and b4 read the registry directly, so no
-kernel developer needs it. It exists for verifiers outside the kernel's
-tools, such as OpenVTC's `verify-trust`, which asks a TRQP registry
-whether a DID may sign. The canonical instance is LF devops' (the
-kernel.org admins), and verifiers find it through the registry's DID
-document, not through this page.
+The bridge is optional. `git vouch`, patatt and b4 read the registry
+directly, so no kernel developer needs it. It exists for verifiers
+outside the kernel's tools, such as OpenVTC's `verify-trust`, which asks
+a TRQP registry whether a DID may sign. We expect LF devops, who run
+kernel.org, to run the canonical instance beside the registry; kernel.org
+has not decided. Verifiers find it through the registry's DID document,
+not through this page.
 
 ## Who runs it
 
-- **The canonical instance:** LF devops, beside the registry repository.
+- **The canonical instance:** expected to be LF devops', beside the
+  registry repository.
   DESIGN.md proposes the DID `did:web:registry.kernel.org`, so its
   document sits at `https://registry.kernel.org/.well-known/did.json`;
   kernel.org decides the name. The `TRQPRest` endpoint in that document
@@ -33,10 +34,9 @@ document, not through this page.
   `--registry-url` instead of a DID document (see Checking with
   verify-trust).
 
-The whole operating burden is one Python process behind a TLS reverse
-proxy, an hourly `git vouch sync`, and no secrets. The one duty is
-staying in sync: the bridge refuses every query once its copy is 24 hours
-old.
+It needs one Python process behind a TLS reverse proxy and an hourly
+`git vouch sync`, and holds no secrets. It refuses every query once its
+copy is 24 hours old.
 
 ## Install
 
@@ -115,8 +115,9 @@ systemctl enable --now git-vouch-sync.timer git-vouch-trqp.service
 The timer has no `Persistent=`: systemd.timer(5) says it acts only on
 `OnCalendar=` timers, and `OnBootSec=` already syncs after a boot.
 `--bind` defaults to 127.0.0.1 and `--port` to 8080; only the proxy
-should reach the bridge. On start the bridge prints `git-vouch-trqp:
-serving DID at http://127.0.0.1:8080/trust-tasks`. A port it cannot
+should reach the bridge. On start the bridge prints its DID and address,
+for example `git-vouch-trqp: serving did:web:registry.kernel.org at
+http://127.0.0.1:8080/trust-tasks`. A port it cannot
 take prints `git-vouch-trqp: cannot listen on HOST:PORT: reason` and
 exits 1, and `Restart=on-failure` retries it.
 
@@ -168,7 +169,8 @@ The bridge speaks plain HTTP. The proxy in front of it must:
 
 The bridge refuses a body over 64 KiB with a 400 `malformedRequest`,
 answers other paths 404 and other methods on `/trust-tasks` 405, and
-sends `Cache-Control: no-store` on every answer. Do not cache it.
+sends `Cache-Control: no-store` on every Trust Task answer and on the
+stale 503. Do not cache it.
 
 ## Freshness
 
@@ -200,10 +202,10 @@ as a rejection, so a Trust Task error document would make verify-trust
 report the commit `unauthorized`. A bare 503 is a transport error, so it
 reports `registryUnavailable`, as for a bridge that is down. Either way
 the check fails closed. Other refusals, including a failed or timed-out
-query, keep the retryable `trust-task-error` document.
-OpenVTC/verifiable-git-infrastructure#170 asks OpenVTC to treat that
-document as `registryUnavailable` too; if it lands, the stale reply can
-go back to one.
+query, keep the retryable `trust-task-error` document. OpenVTC#176,
+in verify-trust 0.25.0, treats a retryable trust-task-error as
+`registryUnavailable`, so the stale reply can return to one once the
+verify-trust the tests pin is 0.25.0 or later.
 
 ## Registry merges
 
@@ -229,12 +231,12 @@ copy's commit changes and after 60 seconds.
 - **Always checked fresh:** a request with `context.time` (one DID's
   `query --at` each time) and a served copy with local changes. Do not
   edit the copy; `sync` checks it out with `--force` anyway.
-- **Limits:** each git run gets 30 s, and at most 4 run at once. A check
-  that times out, or a request that finds all 4 slots taken, gets a
-  retryable 503 at once, never a queue. Each such 503 writes one line to
-  the bridge's stderr, so to the journal: `git-vouch-trqp: git vouch
-  query exited N: ...` or `git-vouch-trqp: git vouch timed out after
-  30s`. The reply to the client stays generic.
+- **Limits:** each git run gets 30 s, and at most 4 run at once, never
+  a queue. A request that finds all 4 slots taken gets a retryable 503
+  at once and logs nothing. A check that times out gets one after 30 s
+  and logs `git-vouch-trqp: git vouch timed out after 30s` to stderr,
+  so to the journal; a failed query logs `git-vouch-trqp: git vouch
+  query exited N: ...`. The reply to the client stays generic.
 
 ## Checking with verify-trust
 
@@ -251,11 +253,11 @@ verify-trust --range origin/master..HEAD \
 ```
 
 Against a local bridge, add `--registry-url http://127.0.0.1:8080`, and
-pass the local bridge's `--did` as both DIDs. verify-trust accepts only
-plain `ssh-ed25519` signatures today
-(https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169), so
-a FIDO, P-256 or RSA signer the bridge authorizes still fails as
-`malformed`.
+pass the local bridge's `--did` as both DIDs. verify-trust 0.24.0, which
+the tests pin, accepts only plain `ssh-ed25519` signatures, so a FIDO,
+P-256 or RSA signer the bridge authorizes fails there as `malformed`.
+OpenVTC fixed this in #177, in v0.25.0
+(https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169).
 
 **The end-to-end test** (`tests/trqp/test_verify_trust.py`) is opt-in:
 it skips unless `VERIFY_TRUST` names a verify-trust binary or one is on
@@ -277,4 +279,5 @@ VERIFY_TRUST=/path/to/verifiable-git-infrastructure/target/release/verify-trust 
     python -m pytest tests/trqp
 ```
 
-No release gates on it and no script builds it.
+No release depends on this test, and no script here builds
+verify-trust.

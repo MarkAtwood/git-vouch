@@ -1,6 +1,6 @@
 # git-vouch: Kernel Identity Without GPG
 
-**Status:** 2026-10-23. Every tool in Tools is implemented: `git-vouch`
+**Status:** 2026-11-15. Every tool in Tools is implemented: `git-vouch`
 (including `git vouch keys` and `git vouch query`), `git-vouch-migrate`,
 `git-vouch-attest`, the patatt fork and `git-vouch-trqp`. Nothing is
 tagged as a release, and the patatt and b4 forks are not upstream.
@@ -8,7 +8,7 @@ tagged as a release, and the patatt and b4 forks are not upstream.
 ## Summary
 
 `git-vouch` replaces the kernel's GPG keyring and web of trust with three
-things that already exist and one small script:
+things that already exist and one Python file:
 
 - **git's SSH signing** (`gpg.format=ssh`) signs and verifies tags and
   commits.
@@ -35,7 +35,8 @@ keeps them on GPG. git-vouch replaces the keyring, not every use of
 tiers and continuity do not apply to them. A release tarball is
 `git archive` of a signed tag, which git-vouch covers, so anyone can
 regenerate it and compare. Moving distributions' `gpg --verify` scripts
-to `ssh-keygen` would cost them a lot for little gain. Rejected: SSH
+to `ssh-keygen` would gain them nothing while kernel.org keeps GPG for
+kup anyway. Rejected: SSH
 signatures on release files alongside GPG during an overlap.
 
 Every person is identified by DIDs, and person files are JSON-LD that
@@ -45,8 +46,8 @@ Every signature check `git-vouch` relies on is done by `ssh-keygen`,
 either directly or through git. `git-vouch` contains no cryptography.
 Version 1 runs on today's git; the aim is to upstream registry support
 into git later (see Upstream path). An auditor needs to trust Python 3,
-git and OpenSSH, which every kernel developer already has, plus one file
-short enough to read in a sitting.
+git and OpenSSH, which every kernel developer already has, plus one
+Python file of about 4,500 lines.
 
 ## Constraints
 
@@ -128,9 +129,10 @@ contributors. The registry records that tree directly.
 
 **The approver sets the tier.** A tier is granted by a tier record that
 the approver signs (see The registry), never by the person's own file, so
-nobody can promote themselves. The one way round this is an unsigned key
-change that review lets through, which for an anchor or maintainer also
-needs two anchors' cosigns (see Cosign). The approver must sit above the tier they
+nobody can promote themselves. Review can still let a merger take over
+someone else's tier, by an unsigned key change to their person file; for
+an anchor or maintainer that also needs two anchors' cosigns (see
+Cosign). The approver must sit above the tier they
 grant, as in the table, at the commit that adds the tier record. To
 lower someone, they must also sit above the tier that person held just
 before that commit, judged from history and not from the record's own
@@ -169,7 +171,8 @@ commits. They cannot endorse or
 approve anyone. Their person file must name the accountable maintainer,
 who must hold the maintainer or anchor tier at the commit that adds the
 bot's tier record. Like any approval, that is judged once: if the
-accountable maintainer later steps down, the bot keeps its tier.
+accountable maintainer later steps down, the bot keeps its tier. Naming a
+different accountable maintainer needs a new approval.
 
 ## What git and OpenSSH already do
 
@@ -276,9 +279,9 @@ datetime, and gives OpenSSH four-digit years.
 commits rather than from a field anyone could write: which commit first
 listed a key, which commit deleted a tier record and its effective date,
 which revocations were ever committed, and what a person file said in
-the previous version. Two times come from signed fields instead: a key's
-`retired`, written by its holder, and a demotion's `date`, written by the
-approver. Either signer could backdate them; review is the check.
+the previous version. Three times come from signed fields instead: a
+key's `added` and `retired`, written by its holder, and a demotion's
+`date`, written by the approver. Either signer could backdate them; review is the check.
 
 **Effective dates.** Every commit on HEAD's first-parent line has an
 effective date: the later of its committer date and its first parent's
@@ -439,9 +442,9 @@ Two git behaviours address that:
   toward the limit. A key
   with `retired` set becomes `valid-before` in the export. Its did:key
   is not stored; `git-vouch` derives it. If a key appears in two files,
-  a listing as a current key (proven by the file's signature) beats any
-  listing of it as retired (unproven), and the unproven claimant is
-  flagged. Between equally proven listings, the file whose commit listed
+  a listing as a current key in a version that key itself signed
+  (proven) beats any other listing (unproven), and the unproven claimant
+  is flagged. Between equally proven listings, the file whose commit listed
   it first wins.
 - **`attestation`** is optional and only meaningful for FIDO (`sk-`)
   keys: an object with `blob` and `challenge`, both base64, from
@@ -476,10 +479,10 @@ Two git behaviours address that:
   side retired gets the WARNING below.
 - **A signature by a revoked key counts as none.** A change whose only
   signature by a previous key is by a key revoked before it (by
-  ancestry) gets the WARNING below. Pending decision: `check` also
-  warns when the signing key is revoked concurrently or later. A
-  revocation signed by a later-revoked key still counts (see
-  Revocation), so this case may yet be treated the same way.
+  ancestry) gets the WARNING below. `check` also warns when the signing
+  key is revoked concurrently or later; whether it should is Open
+  question 3. For the cosign rule, only a revocation at or before the
+  change counts (see Cosign).
 - **A change not signed by a previous key** (a lost key, or a swapped
   one) is not refused. For an anchor or maintainer it suspends their
   tier until two anchors cosign it (see Cosign); for anyone else,
@@ -518,8 +521,8 @@ Two git behaviours address that:
   registry review (see Person file).
 - **When the subject's key is revoked**, endorsements that named it are
   not void: they carry over to the person's later keys, as on rotation.
-  Endorsers are encouraged, not required, to re-confirm after a
-  compromise.
+  The guides ask endorsers to re-confirm after a compromise; nothing
+  enforces it.
 - **When the endorser retires a key**, endorsements made with it stay
   valid.
 - **When the endorser's key is revoked**, every endorsement made with it
@@ -565,16 +568,14 @@ history is not rewritten (`sync` refuses rewinds). Registry maintainers
 refuse such commits in review, and the warning on the branch is the
 signal. If a registry ever wants the warning gone, the only route is a
 coordinated history rewrite after which every user reruns `git vouch
-setup`; that is not recommended. A commit dated in the future is
+setup`. A commit dated in the future is
 different: it blocks `allowed_signers` until that time passes, which for
 a far date (past year 9999, say) is in practice forever, so repairing it
 needs that same rewrite, and maintainers must refuse such commits.
 
-Removing someone without suspecting their key is different: their tier
-record is deleted in a reviewed merge, and the export gives
-their keys `valid-before` set to the deleting commit's effective date (a
-deletion merged from a branch counts from its merge), so their earlier
-signatures stay valid.
+Removing someone without suspecting their key is not a revocation but a
+tier-record deletion (see Tier record), so their earlier signatures stay
+valid.
 
 ## Anchors
 
@@ -585,7 +586,9 @@ There is no local pinning: the registry is the root of trust.
 **Accepted risk:** whoever controls the registry repository chooses the
 first `anchors.json`, which needs no cosignature because no anchor
 exists yet. After that, adding or removing an anchor needs two anchors
-in effect before the change; a lone merger's edit changes nothing.
+in effect before the change, or all of them when there are fewer; a
+lone merger's edit changes nothing, and deleting the file changes
+nothing either.
 History is visible to anyone, and `git vouch sync` refuses a rewritten
 history. Control of the registry repository is still as sensitive as an
 anchor key for a registry with one anchor, whose changes then rest on
@@ -611,7 +614,9 @@ and it is signed in its own namespace. Two kinds of change need two:
 
 - **`anchors.json`**, any version after the first. It takes effect only
   once two anchors in effect before it have cosigned it; until then the
-  anchors before it stand, and `check` reports the edit as void. Where
+  anchors before it stand, and `check` reports the edit as void.
+  Deleting the file has no effect, so writing it afresh needs cosigns
+  like any edit. Where
   branches meet, only an anchor on every side stays one. An anchor the
   change adds cannot approve it, not being an anchor yet; one it drops
   may, gaining nothing by it.
@@ -641,9 +646,12 @@ not the person whose file it approves, and the cosigner was an anchor at
 every parent of the commit that added it. Judging authority before that
 commit means no cosign lends authority to itself. A cosign committed
 after the change approves it from the cosign's commit. Deleting a cosign
-withdraws it. Revocations are judged with anchors whose cosigns ignore
-revocation, since an anchor may sign one; as with a revocation, a
-cosign by a key revoked later still lends that authority.
+withdraws it. A cosign by a revoked key does not count, whenever the
+revocation came, with one exception: deciding who was an anchor when a
+revocation was signed ignores revocations, since an anchor may sign
+one, so an anchor's revocation still counts if a key that cosigned
+their anchorship is revoked later, as a revocation by a later-revoked
+key does.
 
 **Not covered:** deleting a tier record. It only takes authority away,
 and an anchor can already revoke a key at once.
@@ -653,23 +661,26 @@ and an anchor can already revoke a key at once.
 | Command | Does |
 |---|---|
 | `git vouch setup [--registry URL] [--min-tier T] [--include-automation]` | Records the registry URL (default: the kernel's on git.kernel.org) and the export choices in git config; runs a first `sync`, then sets `gpg.format=ssh`, `gpg.ssh.allowedSignersFile`, `gpg.ssh.revocationFile`. Writes no config if the sync fails, and refuses before anything if git already signs with OpenPGP or X.509 or either file is set elsewhere |
-| `git vouch sync [--min-tier T] [--include-automation]` | Fetches the registry without allowing a rewind and runs `check`. Saves any `--min-tier` / `--include-automation` given to git config, then re-exports with the saved choices; the revocation file is written even if `check` fails |
-| `git vouch status` | Shows registry commit, fetch age (warns past 7 days), and your own tier |
-| `git vouch register [--from FILE]` | Writes your person file from an SSH public key, or completes a draft such as one from `git-vouch-migrate`, and signs it through the agent |
+| `git vouch sync [--min-tier T] [--include-automation]` | Fetches the registry without allowing a rewind, runs `check`, and re-exports with any `--min-tier` / `--include-automation` given, else the saved ones; saves those given once the sync succeeds. The revocation file is written even if `check` fails |
+| `git vouch status` | Shows the registry URL and commit, fetch age (warns past 7 days), whether `check` passes, your own tier, and your `patatt.selector` |
+| `git vouch register PUBKEY --handle H --name N --email E` / `--from FILE` | Writes and signs your person file from an SSH public key, or completes a draft such as one from `git-vouch-migrate`; `--accountable`, `--attestation` and `--challenge` as needed |
 | `git vouch add-key` / `retire-key` | Rotation: edits your person file and re-signs it |
 | `git vouch endorse <handle>` / `--from FILE` | Writes and signs an endorsement, or signs a draft such as one from `git-vouch-migrate drafts` once its `endorser` and `endorserKey` are the signer's. Before signing, prints to stderr the subject, the key (the SHA256 fingerprint `ssh-keygen -l` shows for the person file's ssh line, and its did:key), the name and the emails it signs; if the person file does not list the key, it says so. Run it on the merged registry, not a pull-request checkout |
-| `git vouch approve <handle> <tier>` | Writes and signs a tier record |
-| `git vouch revoke` | Writes and signs a revocation |
+| `git vouch approve <handle> <tier>` | Writes and signs a tier record: maintainer, contributor or automation, never anchor (see Anchors) |
+| `git vouch revoke KEY [--subject H] [--reason R]` | Writes and signs a revocation of a `.pub` file, key line or did:key |
 | `git vouch cosign <path>` | As an anchor, writes and signs a cosign of the exact bytes now at `anchors.json` or `people/<handle>.json`, after printing the anchors or the person's keys it approves (see Cosign) |
 | `git vouch show <handle> [DIR]` | Prints a valid person's tier, keys, emails (endorsed or not) and `alsoKnownAs`, then each valid endorsement of them: endorser, the endorser's tier, inside or outside the kernel graph, date, emails and note. For an outside one it adds the endorser's `alsoKnownAs` and signing did:key (see How trust maps). Exit 1 if the person has no valid person file |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
-| `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
+| `git vouch export [DIR] [--min-tier T] [--include-automation] [--allowed-signers F] [--revocation-file F]` | Writes the allowed-signers file and the revocation file, by default where git config points |
 | `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown. `git vouch query --all [--at TIME]` prints one JSON object mapping every did:key listed in a person file to that answer, from one registry check (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |
 | `git vouch keys <email>` | For an endorsed email, prints the person's current keys with their patatt selectors; exit 1 otherwise (see Patch signing) |
 | `git vouch did <key>` | Prints the did:key for an SSH public key (a `.pub` path or the key text), and the reverse (see did:key) |
 
 `DIR` defaults to the synced registry copy once `setup` has run; pass
-`.` to check or export a checkout.
+`.` to check or export a checkout. The signing commands (`register`,
+`add-key`, `retire-key`, `endorse`, `approve`, `revoke`, `cosign`) sign
+with `--sign-with FILE`, a private key file or a `.pub` whose key the
+agent holds, and default to git config `user.signingKey`.
 `check`, `query`, `keys` and `status` also work from a git worktree: the
 fetch stamp `vouch-fetched` lives in the repository's common git dir
 (`git rev-parse --git-common-dir`), which all its worktrees share.
@@ -687,9 +698,8 @@ checked-in page is stale.
 Each key's did:key is its SSH public key in another encoding: multibase
 base58btc of the multicodec prefix plus the raw key. did:keys are how
 records name keys (in endorsements and revocations), and with
-`alsoKnownAs` they tie a kernel identity to the person's other DIDs. That
-makes the registry usable by any DID or verifiable-credential tool, with
-no git-vouch code, and is what an upstream git would display. did:key is
+`alsoKnownAs` they tie a kernel identity to the person's other DIDs. Any
+tool that understands did:key can read the keys without git-vouch. did:key is
 the only method `git-vouch` interprets, because it is the only one that
 needs no resolution.
 
@@ -787,8 +797,7 @@ day freezes.
 A fork of patatt adds one keyring source, `keyringsrc = vouch:`, which
 asks `git vouch keys <email>` for the signer's current keys instead of
 reading a keyring tree. The registry is the keyring; nothing is
-generated, published or trusted in between. The fork's change is kept
-small and in upstream style so it could be offered upstream. The rules
+generated, published or trusted in between. The rules
 `git vouch keys` applies:
 
 - **Who:** any registered person with at least one endorsed email,
@@ -969,8 +978,8 @@ or change a file. For each
 unrevoked person key it writes an unsigned draft person file: a proposed
 handle, the name, emails from unrevoked UIDs, and `migratedFrom`. The
 holder adds an SSH key, signs the draft with `git vouch register --from`
-and submits it. The tool never writes a signed record, and it calls
-`git-vouch` for person-file checks rather than re-implementing them.
+and submits it. The tool never writes a signed record, and it imports
+git-vouch's own person-file checks rather than re-implementing them.
 
 **Continuity proof** is needed only to receive ported endorsement
 drafts. It grants no tier, and registering without it works; the person
@@ -1040,13 +1049,14 @@ covered separately (see Patch signing): the patatt fork reads the
 registry, with the frozen GPG keyring as a warned fallback until the late
 cutoff.
 
-**Kernel-team calls, not design:** the anchor list, the freeze date and
-the window length. The late cutoff is six months after the flag day.
+**Kernel-team calls, not design:** the anchor list, the freeze date, the
+window length, and N, the number of releases whose pulls define the core
+set. The late cutoff is six months after the flag day.
 
 ## Implementation
 
-- **One file**, `git-vouch`, executable, 3,906 lines (`wc -l`,
-  2026-10-23). Standard-library modules used: `argparse`, `base64`,
+- **One file**, `git-vouch`, executable, 4,501 lines (`wc -l`,
+  2026-11-15). Standard-library modules used: `argparse`, `base64`,
   `collections.abc`, `datetime`, `functools`, `hashlib`, `json`, `math`,
   `os`, `pathlib`, `re`, `stat`, `subprocess`, `sys`, `tempfile`,
   `typing`. The other tools are separate files.
@@ -1077,11 +1087,10 @@ chosen so that git could later take over what `git-vouch` does, one piece at
 a time, with no change to the registry:
 
 1. **DIDs in git's output.** `git verify-tag` and `log --show-signature`
-   print the signer's did:key next to the principal. That is a small,
-   self-contained patch.
+   print the signer's did:key next to the principal.
 2. **Allowed signers from a registry.** git reads the registry directly,
    instead of an `allowed_signers` file that `git vouch export` generated.
-   This needs git to apply the tier rules, so it lands only after the
+   This needs git to apply the tier rules, so it is proposed only after the
    rules have proven stable in `git-vouch`.
 3. **Native DID signing** (`gpg.format=did`), if the community wants
    signatures that name a DID rather than an SSH key.
@@ -1134,6 +1143,18 @@ specification for anyone reviewing an upstream patch.
   release tags switch on the flag day; see Flag day.
 - **Accepting GPG in Linus's tree after the flag day.** The core set is
   small and named by `pullers`, so it can register in the window.
+- **One anchor's cosign, with the merger as the second person.** `check`
+  cannot see who merged, so if the merger is an anchor one person does
+  both; two cosigners are two people `check` can count. See Cosign.
+- **Failing `check` on a change that lacks cosigns.** One bad merge
+  would then stop the export for everyone; the change is void instead.
+- **Signed merge commits instead of cosign records.** A merge carries one
+  signature, so two people would need two merges, and `check` would have
+  to verify commit signatures.
+- **Calling every untiered endorser outside the kernel graph**, which
+  would include kernel newcomers, **or judging it by the endorsement
+  graph**, which a sock puppet nobody endorsed passes anyway. `show`
+  marks an endorser outside only with no tier and an `alsoKnownAs`.
 
 ## Open questions
 
@@ -1154,7 +1175,7 @@ specification for anyone reviewing an upstream patch.
    after the freeze; `git-vouch-migrate` would still read the freeze
    commit only.
 
-Decided 2026-10-22:
+Decided (2026-10-22 unless dated):
 
 - **Rules of construction:** never replace what git does, keep the
   registry in git and read its history; small single-purpose tools
@@ -1185,7 +1206,8 @@ Decided 2026-10-22:
   end for an OpenSSH 9.6 DST bug.
 - **Person files:** a change needs one signature from any key current in
   the previous version; a change without one is allowed by review and
-  warned about loudly, and lost-key recovery keeps the tier; an
+  warned about loudly, and lost-key recovery keeps a contributor's tier,
+  and an anchor's or maintainer's once two anchors cosign; an
   all-retired file is frozen; a key in two files belongs to the proven
   (current) listing over an unproven retired one, then the first listed; an email may be in only one file; every exported key
   has its handle as a principal.
@@ -1227,7 +1249,7 @@ Decided 2026-10-22:
   commit, no manifest; encryption keys out of scope; patch signing via
   the patatt fork.
 - **CLI details:** `git vouch did` takes a `.pub` path or key text;
-  `register --from` completes a draft; no
-  man page; `setup`/`sync` remember `--min-tier` and
+  `register --from` completes a draft; man pages generated from the
+  argument parsers; `setup`/`sync` remember `--min-tier` and
   `--include-automation`; `check`/`export` take an optional registry
   directory.

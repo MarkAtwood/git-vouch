@@ -1,11 +1,10 @@
 # verify-trust interop surface
 
 **Status:** research spike for `git-vouch-trqp` (bead vouch-faq3.1),
-2026-10-22. It records what OpenVTC's `verify-trust` actually sends and
-accepts, read from source. It decides nothing: the mapping choices
-belong to vouch-faq3.2. The bridge it planned now exists: DESIGN.md,
-TRQP bridge, records its behaviour, and `docs/bridge-deployment.md`
-how to run it.
+2026-10-22, against verify-trust 0.24.0. It records what OpenVTC's
+`verify-trust` sends and accepts, read from source. The bridge is now
+built: DESIGN.md, TRQP bridge, describes it, and
+`docs/bridge-deployment.md` explains how to run it.
 
 ## Verdict
 
@@ -19,8 +18,9 @@ fix them:
    `sk-ssh-ed25519@openssh.com` (kernel.org's default FIDO type),
    `ecdsa-sha2-nistp256` or `sk-ecdsa-sha2-nistp256@openssh.com` fails as
    `malformed` before the registry is asked, and so does `ssh-rsa`.
-   git-vouch accepts all five types (DESIGN.md, did:key). Only signers with a plain software or
-   agent-held `ssh-ed25519` key can pass verify-trust.
+   git-vouch accepts all five types (DESIGN.md, did:key). Only signers
+   with a plain software or agent-held `ssh-ed25519` key can pass
+   verify-trust 0.24.0. OpenVTC fixed this in #177, in v0.25.0.
 2. **Limitation: commits only, evaluated as of now.** verify-trust
    checks commit ranges, never tags. It never sends the TRQP
    `context.time`, so the registry answers for the present moment even
@@ -189,7 +189,8 @@ did:web:registry.example --endpoint https://registry.example` prints
 it. It is shaped like verify-trust's own test fixture (VGI
 `verify-trust/src/registry.rs:1364-1396`), with the service `id` made
 absolute: affinidi-did-common 0.4.3 parses `Service.id` as a URL, so a
-relative `#rest` fails (`tests/trqp/test_did_document.py`).
+relative `#rest` fails (see the docstring of
+`tests/trqp/test_did_document.py`).
 
 ```json
 {
@@ -247,10 +248,7 @@ Option A needs `git commit --trailer` (git 2.32 or later) and keeps the
 kernel's email-based attribution. Option B also works, and git still
 verifies the SSH signature by key (`ssh-keygen -Y find-principals`), but
 the committer email is then no longer an email. `git vouch did` gives
-the did:key from the key text:
-`git vouch did "$(cat ~/.ssh/id_ed25519.pub)"`. Passing the `.pub` path,
-as DESIGN.md's Commands section allows, currently fails with `not an SSH
-public key line` (tracked in vouch-ey47.14).
+the did:key: `git vouch did ~/.ssh/id_ed25519.pub`.
 
 ## 4. did:key resolves, locally
 
@@ -306,7 +304,7 @@ VGI `verify-trust/src/lib.rs:941-950`.
 
 For git-vouch this is the main interop gap. DESIGN.md accepts
 `sk-ssh-ed25519`, P-256 and RSA for every tier and notes that kernel.org
-issues `ed25519-sk` by default with `ecdsa-sk` as the fallback. Note that
+issues `ed25519-sk` by default with `ecdsa-sk` as the fallback.
 `sk-ssh-ed25519` and `ssh-ed25519` share a did:key (DESIGN.md, did:key),
 so the DID would resolve and the raw key bytes would match. Only the
 sshsig parse refuses it.
@@ -360,7 +358,12 @@ segment    = [a-z0-9._-]+, never "." or ".."
   `verify-trust/src/lib.rs:9-13`, `:119-121`, `:1195-1196`. The bridge
   must echo it verbatim (§1).
 
-## Facts for later beads
+## Facts the bridge was built from
+
+Historical: these fed the bridge's design. Where the bridge differs,
+DESIGN.md and `docs/bridge-deployment.md` describe what was built; for
+example, the bridge answers a stale copy with a bare 503, not a
+`trust-task-error` body.
 
 - **vouch-faq3.2 (mapping):** the bridge sees `entity_id` = a did:key,
   `authority_id` = whatever the operator passes as `--vtc-did`, `action`

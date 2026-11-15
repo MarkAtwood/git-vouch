@@ -25,8 +25,8 @@ The signed record binds exactly three things about the subject:
 - `subjectKey`, the did:key of one of their keys
 - `subjectEmails`, the addresses you vouch for
 
-Only they sign anything else in their person file, such as other DIDs
-in `alsoKnownAs` or a homepage. You are not vouching for it.
+The rest of their person file, such as other DIDs in `alsoKnownAs` or a
+homepage, carries only their own signature; you do not vouch for it.
 
 What follows from the binding:
 
@@ -42,15 +42,16 @@ What follows from the binding:
   change that registry review lets through, whether lost-key recovery or
   a swapped-in key. If a merger lets a swapped key through, its holder
   inherits your endorsement; the only traces are `check`'s WARNING on
-  that version and git history.
+  that version and git history. For an anchor or maintainer, two other
+  anchors must also cosign the change, or their tier is suspended.
 - **Your key's fate matters.** Retiring the key you endorsed with leaves
   the endorsement valid. Revoking it voids every endorsement it made, and
   the people you endorsed lose that evidence. If that key may be lost or
   stolen, revoke it, not retire it: the signer sets the signing time, so
   whoever holds a retired key can backdate endorsements. Then re-endorse
   with a new key.
-- **Their key's fate matters less.** If the key you endorsed lands in
-  the revocation file, your endorsement is not void: it carries over to
+- **Their key's fate matters less.** If the key you endorsed is
+  revoked, your endorsement is not void: it carries over to
   their later keys, as on rotation. After a compromise, confirming that the new key is theirs and
   endorsing it is encouraged but not enforced.
 - **It is public.** The registry, including who endorsed whom and your
@@ -119,7 +120,7 @@ you trust (in person, on the video call), and compare it with the one in
 their person file. They print it with:
 
 ```
-git vouch did "$(cat ~/.ssh/id_ed25519_sk.pub)"
+git vouch did ~/.ssh/id_ed25519.pub
 ```
 
 Print the did:key of each key in their person file the same way, from
@@ -162,7 +163,7 @@ neither does the person's own file.
 
 | Tier | Granted by |
 |---|---|
-| `anchor` | Listed in `anchors.json` |
+| `anchor` | Listed in `anchors.json`; after its first version, once two anchors cosign the change |
 | `maintainer` | An anchor |
 | `contributor` | A maintainer or an anchor |
 | `automation` | A maintainer or an anchor |
@@ -181,7 +182,7 @@ neither does the person's own file.
   supported key type. The tool cannot prove what holds a key, so
   endorsers and approvers ask about it
   ([rationale](rationale.md#hardware-keys)).
-- **Automation identities** sign files only, never tags or commits. Their
+- **Automation identities** sign files and patches, never tags or commits. Their
   person file must name the accountable maintainer in `accountable`.
 - **The GPG web of trust does not supply tiers.** Anchors approve
   maintainers on their own judgement, using MAINTAINERS and endorsements.

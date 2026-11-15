@@ -1821,15 +1821,19 @@ class _Cosigns:
             # The anchors before it approve it. One it adds is not among
             # them; one it drops gains nothing by approving.
             eligible = set().union(*sides)
-            if data is None:
-                found: tuple[str, ...] = ()
-            elif self.is_first("anchors.json", i) or len(
-                self.cosigners("anchors.json", data, i) & eligible
-            ) >= needed(eligible):
+            if data is None and not sides:
+                found: tuple[str, ...] = ()  # never written: no anchors yet
+            elif data is not None and (
+                self.is_first("anchors.json", i)
+                or len(self.cosigners("anchors.json", data, i) & eligible)
+                >= needed(eligible)
+            ):
                 found = _anchors_at(history, i)
             else:
-                # Not approved: what stood before it stands. Where branches
-                # meet, only an anchor on every side stays one.
+                # Not approved, or a deletion, which nothing can approve:
+                # what stood before it stands, so deleting the file and
+                # writing it afresh needs cosigns like any edit. Where
+                # branches meet, only an anchor on every side stays one.
                 kept = set.intersection(*sides) if sides else set()
                 found = tuple(h for h in _anchors_at(history, i) if h in kept)
                 found += tuple(sorted(kept - set(found)))

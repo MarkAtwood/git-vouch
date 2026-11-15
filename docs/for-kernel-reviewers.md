@@ -1,7 +1,7 @@
 # git-vouch: notes for kernel reviewers
 
-Please red-pen this before anyone writes more guides: is the threat model
-right, and would you run it for the kernel? Each claim cites DESIGN.md.
+Please red-pen this: is the threat model right, and would you run it
+for the kernel? Each claim cites DESIGN.md.
 
 ## What it replaces
 
@@ -33,7 +33,8 @@ do).
 
 Tools, each one standard-library Python file: `git-vouch`;
 `git-vouch-migrate`, flag day only; `git-vouch-attest`, FIDO
-attestation (DESIGN: Tools). Patch mail uses published forks,
+attestation; `git-vouch-trqp`, an optional bridge for outside verifiers
+(DESIGN: Tools). Patch mail uses published forks,
 github.com/MarkAtwood/patatt and github.com/MarkAtwood/b4 (branch
 `git-vouch`), not yet upstream (DESIGN: Patch signing). Needs Python
 3.9, git 2.35 and OpenSSH 9.1: older git checks key lifetimes against
@@ -42,23 +43,30 @@ exported line (DESIGN: Constraints).
 
 ## What it costs
 
-Linus runs `git vouch setup --min-tier maintainer` once; `git vouch
-sync` refreshes the files (DESIGN: Commands). After the flag day, a tag
-from an unregistered or below-maintainer key fails `git verify-tag` with
-"No principal matched.", the same message for both, while `git pull`
-still merges it and shows that line only in the merge message
-(measured, git 2.55.0, OpenSSH 9.6p1; guide-anchors: Switch Linus's
-git).
+Linus runs `git vouch setup --registry <url> --min-tier maintainer`
+once, and `git vouch sync` keeps the files current. On the flag day he
+also runs `git config gpg.openpgp.program false` in his tree, so git
+fails every OpenPGP signature there (DESIGN: Commands, Flag day). From
+then on, a tag from an unregistered or below-maintainer key fails
+`git verify-tag` with "No principal matched.", the same message for
+both. `git pull` still merges it and shows that line only in the merge
+message (measured, git 2.55.0, OpenSSH 9.6p1; guide-anchors: Switch
+Linus's git).
 
 A maintainer runs `git vouch register`, collects endorsements made with
 `git vouch endorse`, and an anchor runs
 `git vouch approve <handle> maintainer`. Each command writes files for a
-registry merge (DESIGN: Commands). pgpkeys holds 645 live keys for
-about 606 people; 188 can reuse an authentication subkey as their SSH
-key; about 1,784 certifications become endorsement drafts; 1,538 of 1,935
-maintainers (79.5%) have no pgpkeys key under a MAINTAINERS address
-(DESIGN: Flag day). DESIGN has no merge-load
-estimate beyond that.
+registry merge (DESIGN: Commands).
+
+Who has to move by the flag day: since v6.15 Linus merged 4,216 signed
+tags, all OpenPGP, from 195 tagger emails; the top 100 sent 90%. 151 of
+the 195 have a pgpkeys key, and 67 of those can reuse its
+authentication subkey as their SSH key (measured 2026-11-15; DESIGN:
+Flag day). Everyone else can move any time before the late cutoff. In
+pgpkeys overall, 645 live keys belong to about 606 people, and about
+1,784 certifications become endorsement drafts; 1,538 of the 1,935
+people on MAINTAINERS `M:` lines (79.5%) have no pgpkeys key under a
+MAINTAINERS address (measured 2026-10-23; DESIGN: Flag day).
 
 If `git vouch check` fails, `export` writes nothing and `sync` writes
 only the revocation file, so git keeps the last good allowed-signers
@@ -69,7 +77,12 @@ file (DESIGN: Commands; `cmd_export`, `cmd_sync`).
 It stops:
 
 - Self-promotion: only an approver's signed record grants a tier,
-  except through an unsigned key swap (below) (DESIGN: How trust maps).
+  except through an unsigned key swap of a contributor (below) (DESIGN:
+  How trust maps).
+- A lone merger adding an anchor, or swapping an anchor's or
+  maintainer's key: the edit has no effect, or the tier is suspended,
+  until two anchors run `git vouch cosign` on its exact bytes (DESIGN:
+  Cosign).
 - A registry merger forging an endorsement, tier record or revocation
   for a key they do not hold, or passing one kind of record off as
   another (DESIGN: The registry).
@@ -82,11 +95,11 @@ It stops:
 
 It does not stop:
 
-- Whoever controls the registry repository adding an anchor, who can
-  then approve anyone; history shows it (DESIGN: Anchors).
-- A merger letting through an unsigned person-file change that swaps
-  the key (`git vouch check` only warns), or deleting a tier record
-  (DESIGN: The registry).
+- Whoever controls the registry repository choosing the first anchors;
+  history shows it (DESIGN: Anchors).
+- A merger letting through an unsigned person-file change that swaps a
+  contributor's key (`git vouch check` only warns), or deleting a tier
+  record (DESIGN: The registry).
 - A host withholding updates. `git-vouch` warns once the local copy is
   over 7 days old (DESIGN: The registry).
 - A retired key's holder backdating a signature (DESIGN: Retiring a
@@ -104,8 +117,9 @@ It does not stop:
 - No new cryptography: every signature check `git-vouch` relies on is
   done by `ssh-keygen`, directly or through git (DESIGN: Summary).
 - No OpenPGP in `git-vouch`, which never runs `gpg`. After the late
-  cutoff, `gpg` is needed only to verify old tags and for kernel.org's
-  encryption keyring (DESIGN: Tools, Flag day).
+  cutoff, `gpg` is needed only to verify old tags, for release-file
+  signatures, which stay with kernel.org, and for kernel.org's
+  encryption keyring (DESIGN: Summary, Tools, Flag day).
 - No network trust roots: the registry is the root of trust, and
   `git-vouch` never resolves a DID or fetches a JSON-LD context (DESIGN:
   Anchors, Constraints).
@@ -137,23 +151,24 @@ anchors are yours to set (DESIGN: Open questions).
 
 ## What kernel.org would operate
 
-- The registry repository on git.kernel.org, at a path you choose
-  (DESIGN: The registry).
+- The registry repository on git.kernel.org, at a path you choose. It
+  does not exist yet (DESIGN: The registry).
 - Registry maintainers who merge branches once `git vouch check` passes.
-  A merger can swap any person's key or add an anchor, so this choice
-  matters as much as the anchors (DESIGN: The registry, Anchors, Open
-  questions).
+  A merger alone can swap a contributor's key, delete a tier record, and
+  choose the first anchors, so this choice matters almost as much as the
+  anchors (DESIGN: The registry, Anchors, Open questions).
 - The freeze commit, and a small encryption-only GPG keyring for the
   remail and security lists (DESIGN: Flag day).
 - Optionally, `git-vouch-trqp`, a bridge that lets outside verifiers
-  query the registry. Nothing depends on it, and it is not yet
-  released (DESIGN: Constraints, TRQP bridge).
+  query the registry. Nothing depends on it (DESIGN: Constraints, TRQP
+  bridge).
 
 ## Where to look next
 
 - [DESIGN.md](../DESIGN.md), first
   [The registry](../DESIGN.md#the-registry),
   [Anchors](../DESIGN.md#anchors),
+  [Cosign](../DESIGN.md#cosign),
   [Flag day](../DESIGN.md#flag-day) and
   [Rejected alternatives](../DESIGN.md#rejected-alternatives).
 - Guides: [anchors](guide-anchors.md), [captains](guide-captains.md),

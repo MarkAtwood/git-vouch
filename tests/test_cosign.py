@@ -348,3 +348,20 @@ def test_held_at_ends_the_tier_at_the_recovery(
 
 def _utc(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def test_deleting_anchors_json_changes_nothing(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
+    # A lone merger deletes anchors.json, then adds it back naming mallory.
+    # Neither step has cosigns, so the old anchors stand throughout.
+    (reg.root / "anchors.json").unlink()
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert result.tiers["torvalds"] == "anchor"
+    reg.anchors("mallory")
+    reg.commit()
+    result = vouch.check_registry(reg.root)
+    assert "mallory" not in result.tiers
+    assert {"torvalds", "greg", "shuah"} <= set(result.tiers)
+    assert has(result.voids, "anchors.json: void: not cosigned by two anchors")

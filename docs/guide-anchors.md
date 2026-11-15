@@ -4,9 +4,10 @@ This guide takes an anchor through the flag day, day-to-day registry
 work and patch signing. An anchor is one of the few people
 `anchors.json` in the registry lists: Linus and whoever the kernel team
 designates. Anchors are the root of the tree. You approve maintainers,
-you can revoke anyone's key, and your own key signs releases. Only
-`anchors.json` grants the anchor tier, and a tier record for an anchor
-fails `check`.
+you can revoke anyone's key, your own key signs releases, and two of you
+cosign any later change to `anchors.json` and any anchor's or
+maintainer's recovery from a lost key. Only `anchors.json` grants the
+anchor tier, and a tier record for an anchor fails `check`.
 
 Read [What vouching for a real person means](vouching.md) before you
 endorse or approve anyone. It says what an endorsement binds, what
@@ -43,10 +44,10 @@ Put your own handle, name and email in their place.
 
 [The flag-day runbook](flag-day.md) has the full timeline for everyone.
 
-Before the flag day you approve the core set, everyone
-`git-vouch-migrate pullers` lists, as maintainers. Patches follow the
-same dates as tags. Before the flag day,
-everyone who signs or checks patches installs the patatt fork and lists
+Before the flag day you approve the core set as maintainers: everyone
+`git-vouch-migrate pullers` lists from Linus's merges. Patches follow
+the same dates as tags. Before the flag day, everyone who signs or
+checks patches installs the patatt fork and lists
 `keyringsrc = vouch:` first and the frozen pgpkeys keyring second, as
 [Patch signing](#patch-signing) shows. Patches signed with a GPG key, or
 with a key `patatt genkey` made, then keep verifying through pgpkeys,
@@ -111,9 +112,9 @@ effect before it have run `git vouch cosign anchors.json` on its exact
 bytes and those cosigns are merged, or every anchor when there are fewer
 than two ([rationale](rationale.md#cosign)). Until then `check` reports
 `anchors.json: void: not cosigned by two anchors` and the old anchors
-stand. Two cases do warn or
-fail. Promoting someone who has a tier record fails `check` unless the
-same merge deletes their `tiers/<handle>.json`. A tier record granted on
+stand. Two more cases show in `check`. Promoting someone who has a tier
+record fails it unless the same merge deletes their
+`tiers/<handle>.json`. A tier record granted on
 a branch concurrent with removing its approver from `anchors.json` is
 void, with a warning, until someone re-approves it.
 
@@ -232,12 +233,17 @@ git tag -s -m "for-6.99 from alice" alice-6.99
 git push -q origin alice-6.99
 ```
 
-and it verifies against your export:
+In your own tree, stop accepting OpenPGP signatures:
+`gpg.openpgp.program false` makes git fail every one there, while SSH
+signatures still verify. Trees other maintainers run switch on their own
+schedule, by the late cutoff ([rationale](rationale.md#one-flag-day)).
+The maintainer's tag verifies against your export:
 
 <!-- as lena -->
 ```sh
 git clone -q "$LINUX" linux
 cd linux
+git config gpg.openpgp.program false
 git verify-tag alice-6.99
 ```
 

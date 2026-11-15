@@ -1,21 +1,32 @@
-# patatt and b4 interop (spike vouch-mzkw.1)
+# patatt and b4 interop (spike)
+
+This is the research done before the forks were written. What was built
+differs in places: the patatt fork (github.com/MarkAtwood/patatt, branch
+`git-vouch`) logs a failed `git vouch keys` at warning, runs
+`git vouch keys -- <identity>`, refuses any source other than exactly
+`vouch:`, and words the fallback warning as `W: <from>/<subject>
+verified via legacy keyring <source>, not the vouch registry; legacy
+keyrings stop working six months after flag day`. The b4 fork
+(github.com/MarkAtwood/b4, branch `git-vouch`) adds
+`b4.attestation-recheck-hours` and names the keyring that verified each
+pass. DESIGN.md, Patch signing, describes both as built.
 
 The `vouch:` keyring source fits patatt with one new branch in
 `get_public_key` and a helper of about 30 lines, plus about 5 lines in
-`validate_message` for the fallback warning. b4 needs no change: it
-passes its keyring source strings straight through to patatt. Nothing
-blocks the work. The main caveats are that b4 caches verdicts for up to
-24 hours, which delays revocation, and that a warning raised inside
-patatt is invisible on b4 cache hits.
+`validate_message` for the fallback warning. b4 needs no change to
+verify through `vouch:`: it passes its keyring source strings straight
+through to patatt. The main caveats are that upstream b4 caches verdicts
+for up to 24 hours, which delays revocation, and that a warning raised
+inside patatt is invisible on b4 cache hits.
 
 Sources read (all citations are to these trees):
 
-- **P** = `~/GIT/patatt/src/patatt/__init__.py` at `a8a3d23`. The fork
-  `~/PROJECT/patatt` (branch `git-vouch`) is at the same commit with an
-  identical file, so the line numbers apply to the fork too.
-- **B** = `~/GIT/b4/src/b4/__init__.py` at `ce4c115`, plus other b4
+- **P** = upstream patatt's `src/patatt/__init__.py` at `a8a3d23`. The
+  fork branches from that commit; the line numbers apply to upstream
+  only.
+- **B** = `b4/src/b4/__init__.py` at `ce4c115`, plus other b4
   files named in full.
-- **O** = `~/GIT/openssh-portable` at `26b1363`. The installed tool is
+- **O** = `openssh-portable` at `26b1363`. The installed tool is
   `OpenSSH_9.6p1`.
 
 ## 1. Selector semantics
@@ -121,7 +132,7 @@ directory. The callers are:
 
 - patatt's `validate_message` (P:1654), the only patatt caller;
 - b4's TOFU keyring scan, `tofu.keyring_keys`, at
-  `~/GIT/b4/src/b4/tofu.py:341`. It catches
+  `b4/src/b4/tofu.py:341`. It catches
   `(KeyError, patatt.Error, OSError)` (tofu.py:344), only asks for
   ed25519, and enumerates selectors by listing directories
   (tofu.py:265-316). For `vouch:` it finds no directory and contributes
@@ -216,11 +227,11 @@ The exit code is the highest code seen (P:1722-1756).
 
 **How b4 gets patatt.** b4 imports the *installed* package
 (`import patatt`, B:66), with dependency `patatt>=0.7,<2.0` in
-`~/GIT/b4/pyproject.toml:34`, pinned to `patatt==0.8.0` in
+`b4/pyproject.toml:34`, pinned to `patatt==0.8.0` in
 `requirements.txt:223`. `patatt/` in the b4 tree is a git submodule
-(`~/GIT/b4/.gitmodules`), not initialised in this clone. It is used only
+(`b4/.gitmodules`), not initialised in this clone. It is used only
 by `b4.sh`, which puts `patatt/src` on `PYTHONPATH` to run from a
-checkout (`~/GIT/b4/b4.sh:10`). The DESIGN.md plan, installing the fork
+checkout (`b4/b4.sh:10`). The DESIGN.md plan, installing the fork
 in place of patatt, works for pip/uv installs. For `b4.sh` users it
 means pointing the submodule at the fork.
 
@@ -233,11 +244,11 @@ means pointing the submodule at the fork.
   `patatt.GPGBIN` (B:2352-2365).
 - Results become `LoreAttestorPatatt`: VALID means passing and
   `have_key`; BADSIG or worse means `have_key` (B:4283-4304).
-- Sign: `patatt.rfc2822_sign` (B:6529; `~/GIT/b4/src/b4/ez.py:281`),
+- Sign: `patatt.rfc2822_sign` (B:6529; `b4/src/b4/ez.py:281`),
   with key lookup via `patatt.get_algo_keydata`
-  (`~/GIT/b4/src/b4/ez.py:183-192`).
+  (`b4/src/b4/ez.py:183-192`).
 - `b4 kr show-keys` uses `patatt.make_pkey_path`
-  (`~/GIT/b4/src/b4/kr.py:264`) and skips openssh keys entirely
+  (`b4/src/b4/kr.py:264`) and skips openssh keys entirely
   (kr.py:236-243).
 
 **What `b4 am` prints:**
@@ -260,7 +271,7 @@ means pointing the submodule at the fork.
 
 **b4 never shows patatt's `errors` list or `keysrc` to the user**
 except in a debug `__repr__` (B:4043-4054). b4's console handler runs
-at INFO by default (`~/GIT/b4/src/b4/command.py:1552-1563`), and since
+at INFO by default (`b4/src/b4/command.py:1552-1563`), and since
 b4 installs its logger into patatt (B:2360), a `logger.warning` from
 patatt *is* printed.
 
@@ -271,15 +282,15 @@ and `gpgbin`, plus the cwd when there are `ref::` sources (B:4162-4176).
 It does not cover registry state. Two consequences:
 
 - A key that leaves `git vouch keys` keeps showing `✓` for up to a day.
-  b4 documents this window (`~/GIT/b4/docs/config.rst:554-557`).
+  b4 documents this window (`b4/docs/config.rst:554-557`).
 - On a cache hit patatt is not called, so a warning logged in patatt
   appears only on the first check.
 
 **How kernel.org publishes the keyring today.** b4 documents cloning
 `pgpkeys.git` and setting `b4.keyringsrc = ~/path/to/pgpkeys/.keyring`
-(`~/GIT/b4/docs/config.rst:542-552`). patatt documents the same
+(`b4/docs/config.rst:542-552`). patatt documents the same
 directory or `ref:` forms
-(`~/GIT/patatt/docs/maintainer-guide.rst:196-207`). Neither tool fetches
+(`patatt/docs/maintainer-guide.rst:196-207`). Neither tool fetches
 anything itself: the user's `git pull` is the update mechanism.
 
 ## 6. Smallest upstream-style patch, and CI the fork must pass
@@ -332,19 +343,19 @@ here.
 **Tests and CI the fork must keep passing.**
 
 - `ci.sh` runs, in order: `uv sync`, `ruff format --check`,
-  `ruff check` (rule set in `~/GIT/patatt/pyproject.toml:56-77`, which
+  `ruff check` (rule set in `patatt/pyproject.toml:56-77`, which
   includes the `G` logging-format rules: use `%s` arguments, not
   f-strings, in `logger.*`), `ty check`, `mypy`, `pyright`,
-  `pytest` (`~/GIT/patatt/ci.sh:22-28`).
+  `pytest` (`patatt/ci.sh:22-28`).
 - `ci-matrix.sh` runs pytest on Python 3.9 through 3.15
-  (`~/GIT/patatt/ci-matrix.sh:20`; `requires-python = ">=3.9"`,
+  (`patatt/ci-matrix.sh:20`; `requires-python = ">=3.9"`,
   pyproject.toml:14). New code must be 3.9-safe: no `match`, and PEP 604
   unions only in annotations, which is fine under
   `from __future__ import annotations` (P:5).
 - Existing tests that exercise this path:
-  - `~/GIT/patatt/tests/unit/test_byhash.py:44-106`: `get_public_key`
+  - `patatt/tests/unit/test_byhash.py:44-106`: `get_public_key`
     lookup order and the `KeyError` contract.
-  - `~/GIT/patatt/tests/test_validation.py:9-43`: samples incl.
+  - `patatt/tests/test_validation.py:9-43`: samples incl.
     `openssh-signed.txt` against `.keys`.
 - A `vouch:` test with an independent oracle: stub `_run_command` to
   return the line
@@ -354,7 +365,7 @@ here.
   with `keysrc` starting `vouch:`. Also assert that a stub with no
   matching selector falls through to `.keys` and triggers the warning.
 - Upstream submission goes to tools@kernel.org with a `Signed-off-by:`
-  per the DCO (`~/GIT/patatt/README.rst:54-58`).
+  per the DCO (`patatt/README.rst:54-58`).
 
 ## Blockers
 
@@ -362,7 +373,7 @@ None for the fork. Constraints that DESIGN.md should acknowledge:
 
 - patatt cannot enforce sk user-presence (section 4) or key validity
   times (section 3).
-- b4 can show a pass for up to 24 hours after a key leaves the registry
-  (section 5).
-- In b4, the non-vouch warning appears only on uncached checks
+- Upstream b4 can show a pass for up to 24 hours after a key leaves the
+  registry (section 5).
+- In upstream b4, the non-vouch warning appears only on uncached checks
   (section 5).

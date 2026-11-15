@@ -6,7 +6,8 @@
 how the tests run them.
 
 A captain is a subsystem maintainer an anchor has approved at the
-`maintainer` tier. Linus pulls your signed tags. You verify the tags of
+`maintainer` tier. Linus, or the maintainer above you, pulls your
+signed tags. You verify the tags of
 people who send you pull requests, approve contributors, and endorse
 people you know. Anchors, not you, approve maintainers and revoke other
 people's keys.
@@ -48,9 +49,11 @@ maintainer merges once `git vouch check` passes.
 
 These are a captain's steps in [the flag-day runbook](flag-day.md),
 which has the full timeline. The anchors register and merge first.
-If Linus pulls from you, you are in the core set and register during the
-window; your tree keeps accepting GPG-signed pulls from people below
-you until you switch it, by the late cutoff at the latest.
+If `git-vouch-migrate pullers` lists you, because Linus merged a signed
+tag of yours in the last N releases, you are in the core set: register
+during the window and get approved before the flag day. Your own tree
+keeps accepting GPG-signed pulls from people below you until you switch
+it, by the late cutoff at the latest.
 
 Set up patch signing before the flag day: install the patatt fork and
 list `keyringsrc = vouch:` first and the frozen pgpkeys keyring second,
@@ -91,11 +94,12 @@ before registering: the handle is permanent. `register --from` adds your
 SSH key and signs the file; `add-key` lists your backup key, signed by
 the main one.
 
-Make the `.asc` last. It covers the person file's exact bytes
-([rationale](rationale.md#exact-bytes)), so any later `add-key`,
-`retire-key` or email change needs a new one before the late cutoff if
-you still want endorsement drafts. The proof only unlocks drafts from
-your old GPG certifications (below).
+The `.asc` covers the person file's exact bytes
+([rationale](rationale.md#exact-bytes)). Once that version is merged,
+later signed edits such as `add-key`, `retire-key` or an email change do
+not undo the proof; only a change no previous key signed, such as a
+lost-key recovery, needs a fresh `.asc`. The proof only unlocks drafts
+from your old GPG certifications (below).
 
 The runbook's
 [Everyone else registers](flag-day.md#everyone-else-registers) covers
@@ -105,9 +109,10 @@ authentication subkey as your SSH key.
 ### Register without one
 
 > **What this does:** registers you fresh, with no continuity proof.\
-> **Why:** the proof only unlocks endorsement drafts, so without it you collect fresh endorsements and lose no tier ([rationale](rationale.md#continuity-proof)).
+> **Why:** the proof only unlocks endorsement drafts and grants no tier, so without it you collect fresh endorsements instead ([rationale](rationale.md#continuity-proof)).
 
-About 80% of maintainers have no pgpkeys key. Register fresh, then
+Up to about 80% of the people in MAINTAINERS have no pgpkeys key under
+their MAINTAINERS address. Register fresh, then
 collect fresh endorsements. The example runs as `carol`, a contributor with no
 pgpkeys key; a captain runs the same command:
 
@@ -210,8 +215,9 @@ cat ~/endorsement-drafts/endorsements/*/*.json
 ```
 
 `drafts --as` writes one draft for each registered person whose
-continuity proof holds and whose GPG key your own proven key certified
-at the freeze commit. It refuses unless your own proof holds too. A
+continuity proof holds and whose GPG key the key in your own
+`migratedFrom` certified at the freeze commit. You need no continuity
+proof yourself. A
 subject who has not registered yet gets no draft; run `drafts` again
 later into a new `--out` directory and sign only the new ones.
 
@@ -267,8 +273,9 @@ git push -q origin alice-6.99
 ```
 
 `status` prints the registry commit, its age, and your own tier. Linus
-now verifies your tag against his maintainer export. From the flag day,
-nobody accepts a GPG-signed tag or pull.
+now verifies your tag against his maintainer export. From the flag day
+his tree accepts only SSH-signed tags; other trees, yours included,
+switch by the late cutoff.
 
 ## Day to day
 
@@ -289,8 +296,9 @@ git vouch status
 `sync` fetches the registry, refuses a rewritten history, runs `check`
 and re-exports your allowed-signers and revocation files. It writes the
 revocation file even when `check` fails on something else, so a
-revocation always reaches you. Every command warns when your copy was
-last fetched more than 7 days ago. Sync before you verify.
+revocation always reaches you. `status`, `check`, `show`, `export`,
+`query` and `keys` warn when the copy `sync` keeps was last fetched more
+than 7 days ago. Sync before you verify.
 
 ### Verify pull request tags
 
@@ -363,10 +371,6 @@ git vouch sync
 cd linux
 git verify-tag alice-6.99
 ```
-
-Rotating re-signs your person file, so your `.asc` no longer covers it.
-Make a new `.asc` only if you still want endorsement drafts before the
-late cutoff.
 
 If you sign patches, the selector changes with the key: once the
 rotation is merged and synced, run the two lines in
@@ -525,7 +529,7 @@ from a tag you re-sign with the new key.
 ### Without a backup key
 
 > **What this does:** recovers through an anchor's revocation and a new key no previous key signed.\
-> **Why:** that change prints a WARNING and registry review is the only gate, so the merger confirms the key with you first ([rationale](rationale.md#backup-key)).
+> **Why:** that change prints a WARNING, and for a maintainer it suspends the tier until two anchors cosign it, so both the merger and the anchors confirm the key with you first ([rationale](rationale.md#backup-key)).
 
 Ask an anchor to revoke the lost key: only the key itself, another of
 your current keys, or an anchor may sign its revocation. Then register a
@@ -534,8 +538,12 @@ new key in a change no previous key signed, with
 retire the lost one signed by the new key. The registry maintainer's
 `check` prints an unsigned-change WARNING on that version, and they must
 confirm the new key with you over a channel they already trust before
-merging. Your tier carries over. Endorsements made with your revoked key
-are void, so re-endorse and re-approve as above.
+merging. Your tier is suspended from that merge until two anchors
+confirm the new key with you and each run
+`git vouch cosign people/<you>.json`; once their cosigns merge, it
+counts as if the change had been signed, and your past grants stand.
+Endorsements made with your revoked key are void, so re-endorse and
+re-approve as above, after the cosigns.
 
 The anchors guide runs these steps for a maintainer who lost her only
 key: [Revoke a compromised key](guide-anchors.md#revoke-a-compromised-key)
