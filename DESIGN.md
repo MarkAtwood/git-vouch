@@ -1106,7 +1106,7 @@ specification for anyone reviewing an upstream patch.
   makes the CA holder a bottleneck for every contributor, and hides the
   endorsement record that the registry exists to show.
 - **OpenVTC / VTI.** Solves the same problem with an always-on agent,
-  three transports and seven credential types, in over 900k lines of code. See
+  three transports and seven credential types, in over 1.5 million lines of code (2026-10-22). See
   `docs/vs-openvtc.md`. OpenVTC tools can still query the registry
   through the optional `git-vouch-trqp` bridge.
 - **Sigstore / gitsign.** Ties identity to an OIDC provider and depends

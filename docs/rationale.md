@@ -59,7 +59,7 @@ anchors. Every later change to them needs two anchors' cosigns
 
 **Rejected:** OpenVTC / VTI, which solves the same problem with an
 always-on agent, three transports and seven credential types in over
-900k lines. LF-wide federation and cross-project lookups: the kernel
+1.5 million lines. LF-wide federation and cross-project lookups: the kernel
 comes first. Local anchor pinning: DESIGN gives no reason beyond making
 the registry the root of trust.
 
@@ -522,7 +522,7 @@ the domain-wide name, and `did:webvh` adds machinery an optional bridge
 does not need.
 
 **Rejected:** OpenVTC / VTI as the system itself: an always-on agent,
-three transports and seven credential types in over 900k lines.
+three transports and seven credential types in over 1.5 million lines.
 
 DESIGN: [TRQP bridge](../DESIGN.md#trqp-bridge),
 [Constraints](../DESIGN.md#constraints),
