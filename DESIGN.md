@@ -129,7 +129,8 @@ contributors. The registry records that tree directly.
 **The approver sets the tier.** A tier is granted by a tier record that
 the approver signs (see The registry), never by the person's own file, so
 nobody can promote themselves. The one way round this is an unsigned key
-change that review lets through (see Merging needs one person). The approver must sit above the tier they
+change that review lets through, which for an anchor or maintainer also
+needs two anchors' cosigns (see Cosign). The approver must sit above the tier they
 grant, as in the table, at the commit that adds the tier record. To
 lower someone, they must also sit above the tier that person held just
 before that commit, judged from history and not from the record's own
@@ -235,7 +236,7 @@ their own registry anywhere git can be fetched from.
 
 ```
 README
-anchors.json                          list of anchor handles (unsigned; see Anchors)
+anchors.json                          list of anchor handles (unsigned; changes cosigned, see Cosign)
 people/<handle>.json                  identity record
 people/<handle>.json.sig              signed by one key current in the previous version   (namespace git-vouch-register)
 people/<handle>.json.asc              flag day only: optional GPG continuity proof (see Flag day)
@@ -245,6 +246,8 @@ endorsements/<subject>/<endorser>-<n>.json
 endorsements/<subject>/<endorser>-<n>.json.sig                    (namespace git-vouch-endorse)
 revocations/<handle>-<n>.json
 revocations/<handle>-<n>.json.sig                                 (namespace git-vouch-revoke)
+cosigns/<cosigner>-<n>.json
+cosigns/<cosigner>-<n>.json.sig                                   (namespace git-vouch-cosign)
 ```
 
 Every record is a JSON-LD file signed with `ssh-keygen -Y sign` under a
@@ -295,15 +298,19 @@ That includes never fast-forwarding a contributor's merge of main:
 `--no-ff` is the only protection against such a "foxtrot" merge, whose
 first parent is the contributor's own backdated branch. No date clamp
 can catch it, because the contributor's commits would then form the
-first-parent line. Three things rest on
-review instead, as accepted risks:
+first-parent line. Two changes that `check` cannot verify by a signature
+need two anchors' cosignatures instead, so one merger cannot make them
+alone (see Cosign): any change to `anchors.json` after its first
+version, and a person file change not signed by any key from the
+previous version (lost-key recovery) when that person was an anchor or
+maintainer. Three things rest on review alone, as accepted risks:
 
-- **`anchors.json`** (see Anchors).
+- **The first `anchors.json`** (see Anchors).
 - **A person file change not signed by any key from the previous
-  version** (see Person file). A merger who lets one through can swap in
-  their own key and then sign tier records and endorsements as that
-  person, and `check` accepts them. The only trace is `check`'s WARNING
-  on that version, and git history.
+  version, for a contributor or someone with no tier** (see Person
+  file). A merger who lets one through can swap in their own key and
+  then sign endorsements as that person, and `check` accepts them. The
+  only trace is `check`'s WARNING on that version, and git history.
 - **Deleting a tier record**, which is an unsigned git change, so any
   merger can remove anyone's tier (see Tier record). Restoring an older
   lower-tier record over a promotion is void unless its approver sits
@@ -467,11 +474,13 @@ Two git behaviours address that:
   revocation signed by a later-revoked key still counts (see
   Revocation), so this case may yet be treated the same way.
 - **A change not signed by a previous key** (a lost key, or a swapped
-  one) is not refused. Registry review is the gate, as for
-  `anchors.json`. `git vouch check` walks the history of `people/` and
+  one) is not refused. For an anchor or maintainer it suspends their
+  tier until two anchors cosign it (see Cosign); for anyone else,
+  registry review is the gate. `git vouch check` walks the history of `people/` and
   prints a prominent WARNING for each such version, without failing.
   Recovering from a lost key is a reviewed merge of that kind, and the
-  person's tier carries over. A file whose keys are all retired is
+  person's tier carries over, an anchor's or maintainer's once two
+  anchors have cosigned it. A file whose keys are all retired is
   frozen: any later change gets the same warning.
 
 ### Endorsement
@@ -562,14 +571,75 @@ signatures stay valid.
 
 ## Anchors
 
-Anchors are whoever `anchors.json` in the registry lists. There is no
-local pinning and no extra signature: the registry is the root of trust.
+Anchors are whoever `anchors.json` in the registry lists, once the
+change that listed them has two anchors' cosignatures (see Cosign).
+There is no local pinning: the registry is the root of trust.
 
-**Accepted risk:** whoever controls the registry repository can add an
-anchor, and that anchor can then approve anyone. The change is visible in
-the registry's git history, which anyone can audit, and `git vouch sync`
-refuses a rewritten history, but nothing in `git-vouch` prevents it. Control
-of the registry repository is therefore as sensitive as an anchor key.
+**Accepted risk:** whoever controls the registry repository chooses the
+first `anchors.json`, which needs no cosignature because no anchor
+exists yet. After that, adding or removing an anchor needs two anchors
+in effect before the change; a lone merger's edit changes nothing.
+History is visible to anyone, and `git vouch sync` refuses a rewritten
+history. Control of the registry repository is still as sensitive as an
+anchor key for a registry with one anchor, whose changes then rest on
+review (see Cosign).
+
+## Cosign
+
+```json
+{
+  "@context": ["https://w3id.org/git-vouch/v1"],
+  "cosigner": "torvalds",
+  "cosignerKey": "did:key:z6Mk...",
+  "path": "people/alice.json",
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "date": "2026-11-15T00:00:00Z"
+}
+```
+
+A cosign is an anchor's signed approval of the exact bytes of one
+version of `anchors.json` or of a person file (`git vouch cosign
+<path>`). It names that version's SHA-256, so it approves nothing else,
+and it is signed in its own namespace. Two kinds of change need two:
+
+- **`anchors.json`**, any version after the first. It takes effect only
+  once two anchors in effect before it have cosigned it; until then the
+  anchors before it stand, and `check` reports the edit as void. Where
+  branches meet, only an anchor on every side stays one. An anchor the
+  change adds cannot approve it, not being an anchor yet; one it drops
+  may, gaining nothing by it.
+- **A person file change that no key from the previous version signed**
+  (see Person file), when that person was an anchor or maintainer just
+  before it. Without two cosigns by other anchors of that time, their
+  tier is suspended from that commit: `check` reports it as void, every
+  tier they held ends at the commit's effective date, as for a deleted
+  tier record, and keys first listed by the change are never exported,
+  so a backdated `added` gains nothing. Grants they make while suspended
+  are void. A new tier record does not lift the suspension; the
+  cosignatures do, and from then their tier and grants count as if the
+  change had been signed. A key counts as revoked here only by a
+  revocation committed at or before the change, so revoking a lost key
+  later suspends no one whose earlier changes it signed.
+
+**Two, or every one when fewer.** A change needs two cosigners, or all
+the eligible anchors when fewer than two are. A registry with one anchor
+can still add a second with that anchor's cosign, and a sole anchor's
+own recovery rests on review: requiring more would leave such a
+registry unable to change for good.
+
+**Judged by history.** A cosign counts where its file is present, if its
+signature is valid by the named key of the cosigner's current person
+file, the key is unrevoked and current at its `date`, the cosigner is
+not the person whose file it approves, and the cosigner was an anchor at
+every parent of the commit that added it. Judging authority before that
+commit means no cosign lends authority to itself. A cosign committed
+after the change approves it from the cosign's commit. Deleting a cosign
+withdraws it. Revocations are judged with anchors whose cosigns ignore
+revocation, since an anchor may sign one; as with a revocation, a
+cosign by a key revoked later still lends that authority.
+
+**Not covered:** deleting a tier record. It only takes authority away,
+and an anchor can already revoke a key at once.
 
 ## Commands
 
@@ -583,6 +653,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 | `git vouch endorse <handle>` / `--from FILE` | Writes and signs an endorsement, or signs a draft such as one from `git-vouch-migrate drafts` once its `endorser` and `endorserKey` are the signer's. Before signing, prints to stderr the subject, the key (the SHA256 fingerprint `ssh-keygen -l` shows for the person file's ssh line, and its did:key), the name and the emails it signs; if the person file does not list the key, it says so. Run it on the merged registry, not a pull-request checkout |
 | `git vouch approve <handle> <tier>` | Writes and signs a tier record |
 | `git vouch revoke` | Writes and signs a revocation |
+| `git vouch cosign <path>` | As an anchor, writes and signs a cosign of the exact bytes now at `anchors.json` or `people/<handle>.json`, after printing the anchors or the person's keys it approves (see Cosign) |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
 | `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown. `git vouch query --all [--at TIME]` prints one JSON object mapping every did:key listed in a person file to that answer, from one registry check (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |
@@ -594,7 +665,7 @@ of the registry repository is therefore as sensitive as an anchor key.
 `check`, `query`, `keys` and `status` also work from a git worktree: the
 fetch stamp `vouch-fetched` lives in the repository's common git dir
 (`git rev-parse --git-common-dir`), which all its worktrees share.
-`register`, `endorse`, `approve` and `revoke` write files for a registry
+`register`, `endorse`, `approve`, `revoke` and `cosign` write files for a registry
 merge request; they never push. `export` and `sync` replace the
 allowed-signers and revocation files atomically, keeping an existing
 file's mode, and create a new one with mode 0666 minus the umask: the
@@ -1081,8 +1152,16 @@ Decided 2026-10-22:
   `git-vouch-trqp`).
 - **Registry:** URL configurable, the kernel's on git.kernel.org; one
   registry maintainer merges after `git vouch check`; warn when the copy
-  is over 7 days old; anchors are whoever the registry lists; anchors,
-  unsigned key changes and tier-record deletions rest on review.
+  is over 7 days old; anchors are whoever the registry lists; the first
+  anchors.json, contributors' unsigned key changes and tier-record
+  deletions rest on review.
+- **Cosign** (decided 2026-11-15): any anchors.json change after the
+  first, and an anchor's or maintainer's person-file change no previous
+  key signed, need cosigns by two anchors (or every eligible one when
+  fewer), neither the person affected; a cosign is a signed record
+  naming the SHA-256 of the exact bytes; without them the change has no
+  effect (anchors.json) or suspends the tier (person file), never fails
+  `check`; tier-record deletions are not covered.
 - **Tiers:** set by a signed approver record; automation is its own tier,
   files only; authority judged at the commit adding the record, so an
   approver stepping down voids nothing and only a revoked key does (the

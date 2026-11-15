@@ -104,10 +104,14 @@ git push -q origin main
 The person files go in first because `check` fails if `anchors.json`
 names a handle with no person file.
 
-Only review protects `anchors.json`: whoever can merge into the registry
-can add an anchor, and that anchor can approve anyone. Adding or
-removing an anchor later is the same edit, in a reviewed merge. An edit
-that passes `check` prints no warning about itself. Two cases do warn or
+Only review protects this first `anchors.json`: whoever can merge into
+the registry chooses the first anchors. Adding or removing an anchor
+later is the same edit, and it takes effect only once two anchors in
+effect before it have run `git vouch cosign anchors.json` on its exact
+bytes and those cosigns are merged, or every anchor when there are fewer
+than two ([rationale](rationale.md#cosign)). Until then `check` reports
+`anchors.json: void: not cosigned by two anchors` and the old anchors
+stand. Two cases do warn or
 fail. Promoting someone who has a tier record fails `check` unless the
 same merge deletes their `tiers/<handle>.json`. A tier record granted on
 a branch concurrent with removing its approver from `anchors.json` is
@@ -479,9 +483,14 @@ The version she first registered warns the same way from the moment her
 key is revoked, because a revoked key's signatures count for nothing;
 only the new warning needs a decision.
 
-This check is the only thing standing between a lost-key recovery and
-an account takeover: a merger who let a swapped key through would hand
-its holder alice's tier and endorsements. Her tier carries over. Your
+For a contributor, as `alice` is by now, this check is the only thing
+standing between a lost-key recovery and an account takeover: a merger
+who let a swapped key through would hand its holder her tier and
+endorsements. Her tier carries over. Had she still been a maintainer,
+the recovery would suspend her tier, and `check` would say so as void,
+until two other anchors each ran `git vouch cosign people/alice.json` on
+the merged file and those cosigns merged
+([rationale](rationale.md#cosign)). Your
 endorsement of her named the key now revoked; it still carries over to
 her new key, as on rotation, so her email stays exported. Confirming her
 new key as `vouching.md` describes and endorsing it again is encouraged,
@@ -515,10 +524,12 @@ code. Each warning is one line, starting `git-vouch: warning:`.
 | `people/<h>.json: <did> is revoked but not retired` | A revoked key is still listed as current | The owner should retire it |
 | `people/<h>.json: migratedFrom openpgp4fpr:<fpr> is also claimed by <h2>` | Two person files claim the same GPG key | Neither gets GPG endorsement drafts; an anchor decides which claim is genuine and the other comes out. Suspect a stolen GPG key |
 | `<record>: void: ...` | A valid record with no effect, for example one signed by a key since revoked | Re-sign what still should hold (see Lost key) |
+| `anchors.json: void: not cosigned by two anchors, so the anchors are still ...` | The edit has no effect yet | Two anchors who were anchors before it confirm it and run `git vouch cosign anchors.json` |
+| `people/<h>.json: void: changed at <commit> without a signature by a previous key, and two anchors have not cosigned it; the <tier> tier of <h> is suspended from then` | An anchor's or maintainer's lost-key recovery, or a swapped key | Confirm the new key with them; two other anchors run `git vouch cosign people/<h>.json` |
 | `the registry copy was last fetched <n> days ago` | Your copy is stale | `git vouch sync` |
 
-Some changes get neither an error nor a warning: an `anchors.json`
-edit that passes `check`, and deleting a tier record (that person's keys
+Some changes get neither an error nor a warning: the first
+`anchors.json`, and deleting a tier record (that person's keys
 get `valid-before`), an endorsement, or a revocation (no effect: a
 revocation holds once committed). Read `git diff --name-status` in the
 merge for those. Deleting a person file that other records still name

@@ -103,7 +103,26 @@ NAMESPACES = {
     "tiers": "git-vouch-tier",
     "endorsements": "git-vouch-endorse",
     "revocations": "git-vouch-revoke",
+    "cosigns": "git-vouch-cosign",
 }
+# What a cosign may approve: the two changes that otherwise rest on one
+# merger's review (DESIGN, Cosign).
+COSIGN_PATH_RE = re.compile(r"anchors\.json|people/[a-z0-9][a-z0-9_-]{0,38}\.json")
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+# Two anchors, neither the person affected, approve such a change; with
+# fewer such anchors in effect, all of them (see ``needed``).
+COSIGNERS = 2
+
+
+def needed(eligible: Collection[str]) -> int:
+    """Return how many of the ``eligible`` anchors must cosign a change.
+
+    Two, or all of them if there are fewer, so a registry with one anchor
+    can still change: a sole anchor's own recovery then rests on review.
+    """
+    return min(COSIGNERS, len(eligible))
+
+
 # One armored "ssh-keygen -Y sign" block; a .sig file is one or more of them.
 SIG_RE = re.compile(
     rb"-----BEGIN SSH SIGNATURE-----\n[A-Za-z0-9+/=\n]+-----END SSH SIGNATURE-----\n"
@@ -764,7 +783,17 @@ class Revocation(NamedTuple):
     date: datetime
 
 
-Record = Union[Person, Tier, Endorsement, Revocation]
+class Cosign(NamedTuple):
+    """A parsed ``cosigns/<cosigner>-<n>.json``: an anchor's approval of exact bytes."""
+
+    cosigner: str
+    cosigner_key: str
+    path: str  # "anchors.json" or "people/<handle>.json"
+    sha256: str  # lowercase hex SHA-256 of the approved version's exact bytes
+    date: datetime
+
+
+Record = Union[Person, Tier, Endorsement, Revocation, Cosign]
 
 
 def _reject_constant(name: str) -> object:
@@ -978,6 +1007,24 @@ def _revocation(obj: Mapping[str, object], subject: str) -> Revocation:
     )
 
 
+def _cosign(obj: Mapping[str, object], cosigner: str) -> Cosign:
+    path = _text(obj, "path")
+    if not COSIGN_PATH_RE.fullmatch(path):
+        raise VouchError(
+            f"path: must be anchors.json or people/<handle>.json, not {path!r:.60}"
+        )
+    sha = _text(obj, "sha256")
+    if not SHA256_RE.fullmatch(sha):
+        raise VouchError("sha256: must be 64 lowercase hex digits")
+    return Cosign(
+        _matching_handle(obj, "cosigner", cosigner),
+        _did_key(obj, "cosignerKey"),
+        path,
+        sha,
+        _date(obj, "date"),
+    )
+
+
 def _file_handle(name: str) -> str:
     if not HANDLE_RE.fullmatch(name):
         raise VouchError(f"invalid file name {name!r:.60}")
@@ -998,6 +1045,7 @@ def _parse_record(parts: Sequence[str], data: bytes) -> Record:
         ("people", 2),
         ("tiers", 2),
         ("revocations", 2),
+        ("cosigns", 2),
         ("endorsements", 3),
     ) or not name.endswith(".json"):
         raise VouchError("not a registry record path")
@@ -1014,6 +1062,8 @@ def _parse_record(parts: Sequence[str], data: bytes) -> Record:
         return _tier(obj, _file_handle(stem))
     if kind == "revocations":
         return _revocation(obj, _seq_handle(stem))
+    if kind == "cosigns":
+        return _cosign(obj, _seq_handle(stem))
     return _endorsement(obj, _file_handle(parts[1]), _seq_handle(stem))
 
 
@@ -1021,8 +1071,8 @@ def parse_record(rel: str, data: bytes) -> Record:
     """Parse and strictly validate the registry record ``data`` found at ``rel``.
 
     The path decides the kind: ``people/<handle>.json``,
-    ``tiers/<handle>.json``, ``endorsements/<subject>/<endorser>-<n>.json``
-    or ``revocations/<handle>-<n>.json``. The handles in the path must
+    ``tiers/<handle>.json``, ``endorsements/<subject>/<endorser>-<n>.json``,
+    ``revocations/<handle>-<n>.json`` or ``cosigns/<cosigner>-<n>.json``. The handles in the path must
     match the record's own. git-vouch's terms are checked for type and
     format; any other term is ignored. Signatures are not checked here.
 
@@ -1224,16 +1274,20 @@ def verify_person(
 
 
 def verify_approval(
-    rel: str, record: Union[Tier, Endorsement], data: bytes, sig: bytes, signer: Person
+    rel: str,
+    record: Union[Tier, Endorsement, Cosign],
+    data: bytes,
+    sig: bytes,
+    signer: Person,
 ) -> PersonKey:
-    """Check that a tier record or endorsement is signed by the key it names.
+    """Check that a tier record, endorsement or cosign is signed by the key it names.
 
     Args:
         rel: The record's path below the registry root.
         record: The record parsed from ``data``.
         data: The record file's exact bytes.
         sig: The bytes of its ``.sig`` file.
-        signer: The person file of the record's approver or endorser.
+        signer: The person file of the record's approver, endorser or cosigner.
 
     Returns:
         The signer's key that made the signature; retirement and revocation
@@ -1245,6 +1299,8 @@ def verify_approval(
     """
     if isinstance(record, Tier):
         handle, did = record.approver, record.approver_key
+    elif isinstance(record, Cosign):
+        handle, did = record.cosigner, record.cosigner_key
     else:
         handle, did = record.endorser, record.endorser_key
     if signer.handle != handle:
@@ -1285,6 +1341,9 @@ class CheckResult(NamedTuple):
     # handle -> each commit (or "the working tree") where its person file
     # changed without a signature by a key current in the version before
     unchained: dict[str, list[str]]
+    # handle -> did:keys first listed by a recovery that suspended their
+    # tier; never exported, so a backdated ``added`` gains nothing
+    unconfirmed: dict[str, frozenset[str]] = {}
 
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
@@ -1298,7 +1357,7 @@ def demotes(old: str, new: str) -> bool:
 
 # The paths whose history check reads; endorsements are judged on the tree alone.
 HISTORY_RE = re.compile(
-    r"anchors\.json|(?:people|tiers|revocations)/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
+    r"anchors\.json|(?:people|tiers|revocations|cosigns)/[a-z0-9][a-z0-9_-]*\.json(?:\.sig)?"
 )
 # The endorsement paths whose history only ``query --at`` reads, one subject at a time.
 ENDORSEMENT_RE = re.compile(
@@ -1420,11 +1479,17 @@ def _is_repo_top(root: Path) -> bool:
 def registry_history(
     root: Path,
     paths: Iterable[str],
-    sources: Sequence[str] = ("anchors.json", "people", "tiers", "revocations"),
+    sources: Sequence[str] = (
+        "anchors.json",
+        "people",
+        "tiers",
+        "revocations",
+        "cosigns",
+    ),
     pattern: re.Pattern[str] = HISTORY_RE,
     unreadable: Optional[list[str]] = None,
 ) -> History:
-    """Return the history of ``anchors.json`` and of every person, tier and revocation file.
+    """Return the history of ``anchors.json`` and every person, tier, revocation and cosign.
 
     Args:
         root: Registry checkout.
@@ -1572,7 +1637,7 @@ def _record_paths(root: Path, problems: list[str]) -> list[str]:
                 problems.append(f"{d}/{name!r}: unexpected file")
         return [n for n in names if n.isprintable()]
 
-    dirs = ["people", "tiers", "revocations"]
+    dirs = ["people", "tiers", "revocations", "cosigns"]
     try:
         subjects = printable("endorsements", list_dir(root, "endorsements"))
         dirs += [f"endorsements/{s}" for s in subjects]
@@ -1649,6 +1714,126 @@ def _anchors_at(history: History, i: int) -> tuple[str, ...]:
         return ()
 
 
+class _Cosigns:
+    """Judge cosigns, and the anchors in effect, by the history.
+
+    A version of ``anchors.json`` takes effect only if it is the file's
+    first, or if two anchors in effect before it (see ``needed``) cosign
+    its exact bytes; otherwise the anchors of the commits before it stand. A cosign counts at a position if its
+    file is there, its signature is valid by the cosigner's named key in
+    the working tree's person file, and the cosigner was an anchor at every
+    parent of the commit that added it. Judging authority before that
+    commit means no cosign can lend authority to itself, so the recursion
+    through ``anchors_at`` always moves to earlier commits.
+    """
+
+    def __init__(
+        self,
+        history: History,
+        people: Mapping[str, Person],
+        revoked: Optional[Collection[str]],
+    ) -> None:
+        """Judge with the valid ``people``; ``revoked`` None ignores revocations.
+
+        Revocations are judged with anchors that ignore them, since an
+        anchor may sign one: like a revocation, a cosign by a key revoked
+        later still lends that authority.
+        """
+        self.history = history
+        self.people = people
+        self.revoked = revoked
+        self.files = sorted(
+            rel
+            for rel in history.versions
+            if rel.startswith("cosigns/") and rel.endswith(".json")
+        )
+        self.anchors: dict[int, tuple[str, ...]] = {}
+        self.found: dict[tuple[str, str, int], frozenset[str]] = {}
+
+    def judge(
+        self, rel: str, data: bytes, sig: bytes, i: int
+    ) -> tuple[Optional[Cosign], Optional[Union[VouchError, Void]]]:
+        """Return the cosign ``rel`` at ``i`` and why it does not count, or None if it does."""
+        try:
+            cosign = parse_record(rel, data)
+        except VouchError as e:
+            return None, e
+        if not isinstance(cosign, Cosign):
+            return None, VouchError(f"{rel}: not a cosign")
+        c = cosign
+        try:
+            if c.cosigner not in self.people:
+                raise Void(f"{rel}: void: {c.cosigner} has no valid person file")
+            key = verify_approval(rel, c, data, sig, self.people[c.cosigner])
+            if self.revoked is not None and key.did in self.revoked:
+                raise Void(f"{rel}: void: {key.did} of {c.cosigner} is revoked")
+            _in_validity(rel, key, c.date)
+            history = self.history
+            for a in _adding(history, rel, i):
+                for p in history.parents[a]:
+                    if c.cosigner not in self.anchors_at(p):
+                        raise VouchError(
+                            f"{rel}: {c.cosigner} was not an anchor when it was added"
+                        )
+            if c.path == f"people/{c.cosigner}.json":
+                raise VouchError(f"{rel}: {c.cosigner} cannot cosign their own file")
+        except (VouchError, Void) as e:
+            return c, e
+        return c, None
+
+    def cosigners(self, path: str, data: bytes, i: int) -> frozenset[str]:
+        """Return the anchors whose cosigns of exactly ``data`` at ``path`` count at ``i``."""
+        sha = hashlib.sha256(data).hexdigest()
+        if (path, sha, i) not in self.found:
+            found = set()
+            for rel in self.files:
+                body, sig = _pair_at(self.history, rel, i)
+                if body is None or sig is None:
+                    continue
+                c, why = self.judge(rel, body, sig, i)
+                if c is not None and why is None and (c.path, c.sha256) == (path, sha):
+                    found.add(c.cosigner)
+            self.found[path, sha, i] = frozenset(found)
+        return self.found[path, sha, i]
+
+    def is_first(self, rel: str, i: int) -> bool:
+        """Return whether the content of ``rel`` at ``i`` has no earlier version."""
+        history = self.history
+        return not any(
+            d is not None and history.before(w, a)
+            for a in history.added(rel, i)
+            for w, d in history.versions.get(rel, [])
+        )
+
+    def anchors_at(self, i: int) -> tuple[str, ...]:
+        """Return the anchors in effect at position ``i``."""
+        if i not in self.anchors:
+            history = self.history
+            data = history.at("anchors.json", i)
+            sides = [
+                set(self.anchors_at(p))
+                for a in history.added("anchors.json", i)
+                for p in history.parents[a]
+            ]
+            # The anchors before it approve it. One it adds is not among
+            # them; one it drops gains nothing by approving.
+            eligible = set().union(*sides)
+            if data is None:
+                found: tuple[str, ...] = ()
+            elif self.is_first("anchors.json", i) or len(
+                self.cosigners("anchors.json", data, i) & eligible
+            ) >= needed(eligible):
+                found = _anchors_at(history, i)
+            else:
+                # Not approved: what stood before it stands. Where branches
+                # meet, only an anchor on every side stays one.
+                kept = set.intersection(*sides) if sides else set()
+                found = tuple(h for h in _anchors_at(history, i) if h in kept)
+                found += tuple(sorted(kept - set(found)))
+            self.anchors[i] = found
+        return self.anchors[i]
+
+
 def _pair_at(
     history: History, rel: str, i: int
 ) -> tuple[Optional[bytes], Optional[bytes]]:
@@ -1670,6 +1855,7 @@ class _Records(NamedTuple):
     parsed: dict[str, tuple[Person, bytes, bytes]]  # handle -> (person, data, sig)
     tier_records: list[tuple[str, Tier, bytes, bytes]]  # (rel, tier, data, sig)
     endorsements: list[tuple[str, Endorsement, bytes, bytes]]  # (rel, ..., sig)
+    cosigns: list[tuple[str, Cosign, bytes, bytes]]  # (rel, cosign, data, sig)
 
 
 def _load_records(root: Path, problems: list[str]) -> _Records:
@@ -1683,6 +1869,7 @@ def _load_records(root: Path, problems: list[str]) -> _Records:
     parsed: dict[str, tuple[Person, bytes, bytes]] = {}
     tier_records: list[tuple[str, Tier, bytes, bytes]] = []
     endorsements: list[tuple[str, Endorsement, bytes, bytes]] = []
+    cosigns: list[tuple[str, Cosign, bytes, bytes]] = []
     paths = _record_paths(root, problems)
     for rel in paths:
         try:
@@ -1698,6 +1885,8 @@ def _load_records(root: Path, problems: list[str]) -> _Records:
             tier_records.append((rel, record, data, sig))
         elif isinstance(record, Endorsement):
             endorsements.append((rel, record, data, sig))
+        elif isinstance(record, Cosign):
+            cosigns.append((rel, record, data, sig))
 
     # An email becomes a principal, so two files listing it could sign as each other.
     email_owner: dict[str, str] = {}
@@ -1708,7 +1897,7 @@ def _load_records(root: Path, problems: list[str]) -> _Records:
                 problems.append(
                     f"people/{handle}.json: {other} and {handle} both list the email {email}"
                 )
-    return _Records(anchors, paths, parsed, tier_records, endorsements)
+    return _Records(anchors, paths, parsed, tier_records, endorsements, cosigns)
 
 
 # (handle, position, previous keys or None, keys to name as old)
@@ -1922,11 +2111,15 @@ def _key_owners(
 def _revocations(
     history: History,
     owns: Callable[[str, str], bool],
+    anchors_at: Callable[[int], tuple[str, ...]],
     problems: list[str],
     voids: list[str],
     warnings: list[str],
-) -> dict[str, str]:
-    """Return every revoked key: did:key -> "type base64" as the person file lists it.
+) -> tuple[dict[str, str], dict[str, list[int]]]:
+    """Return every revoked key, and the commits that revoked it.
+
+    The first maps did:key -> "type base64" as the person file lists it;
+    the second did:key -> each position whose revocation of it counts.
 
     Every revocation ever committed counts, even if its file was later
     deleted, unless the key that signed it was revoked in an ancestor
@@ -1963,7 +2156,7 @@ def _revocations(
             if key is None or not owns(rev.subject, key.did):
                 raise VouchError(f"{rel}: {rev.key} is not a key of {rev.subject}")
             signers = [key]
-            for handle in (rev.subject, *_anchors_at(history, i)):
+            for handle in (rev.subject, *anchors_at(i)):
                 version = _person_at(history, handle, i)
                 signers += [
                     k
@@ -1985,7 +2178,7 @@ def _revocations(
         except Void as e:
             if is_current:
                 voids.append(str(e))
-    return revoked
+    return revoked, revoked_at
 
 
 def _warn_unchained(
@@ -2027,6 +2220,40 @@ def _warn_unchained(
     return unchained
 
 
+def _recoveries(
+    history: History,
+    person_versions: Iterable[_PersonVersion],
+    revoked_at: Mapping[str, Sequence[int]],
+) -> dict[str, list[int]]:
+    """Return handle -> each position of a person file version no previous key signed.
+
+    Unlike the warning, a key counts as revoked only by a revocation at or
+    before that version: revoking a lost key later does not turn the
+    changes it once signed into recoveries.
+    """
+    found: dict[str, list[int]] = {}
+    for handle, i, previous, _ in person_versions:
+        rel = f"people/{handle}.json"
+        version = _keys_at(history, handle, i)
+        body, signature = _pair_at(history, rel, i)
+        if version is None or body is None:
+            continue
+        then = {
+            did
+            for did, at in revoked_at.items()
+            if any(j == i or history.before(j, i) for j in at)
+        }
+        try:
+            is_chained = signature is not None and verify_person(
+                version, body, signature, previous, then
+            )
+        except VouchError:
+            is_chained = False
+        if not is_chained:
+            found.setdefault(handle, []).append(i)
+    return found
+
+
 class _Judge:
     """Judge tier records and endorsements by the history, remembering each judgement.
 
@@ -2040,11 +2267,16 @@ class _Judge:
         parsed: Mapping[str, tuple[Person, bytes, bytes]],
         people: Mapping[str, Person],
         revoked: Mapping[str, str],
+        cosigns: _Cosigns,
+        recoveries: Mapping[str, Sequence[int]],
     ) -> None:
         self.history = history
         self.parsed = parsed
         self.people = people
         self.revoked = revoked
+        self.cosigns = cosigns
+        self.recoveries = recoveries
+        self.broke: dict[tuple[str, int], bool] = {}
         self.judged: dict[tuple[str, int], Union[str, VouchError, Void]] = {}
         self.stood: dict[tuple[str, int], list[tuple[int, Union[str, Void, None]]]] = {}
 
@@ -2067,9 +2299,54 @@ class _Judge:
             raise Void(f"{rel}: void: {key.did} of {signer} is revoked")
         _in_validity(rel, key, record.date)
 
+    def is_break(self, handle: str, b: int) -> bool:
+        """Return whether the recovery of ``handle`` at ``b`` suspends their tier.
+
+        It does if they were an anchor or maintainer just before it and two
+        other anchors of that time (see ``needed``) have not cosigned its
+        exact bytes.
+        """
+        if (handle, b) not in self.broke:
+            history = self.history
+            rel = f"people/{handle}.json"
+            body = history.at(rel, b)
+            eligible = {
+                a for p in history.parents[b] for a in self.cosigns.anchors_at(p)
+            } - {handle}
+            self.broke[handle, b] = (
+                body is not None
+                and any(
+                    self.tier_at(handle, p) in ("anchor", "maintainer")
+                    for p in history.parents[b]
+                )
+                and len(self.cosigns.cosigners(rel, body, history.final) & eligible)
+                < needed(eligible)
+            )
+        return self.broke[handle, b]
+
+    def breaks(self, handle: str, i: int) -> list[int]:
+        """Return the recoveries of ``handle`` at or before ``i`` that suspend their tier."""
+        history = self.history
+        return [
+            b
+            for b in self.recoveries.get(handle, [])
+            if (b == i or history.before(b, i)) and self.is_break(handle, b)
+        ]
+
+    def break_ends(self, handle: str, i: int) -> dict[str, datetime]:
+        """Return tier -> when a suspending recovery at or before ``i`` ended it."""
+        ends: dict[str, datetime] = {}
+        for b in self.breaks(handle, i):
+            for p in self.history.parents[b]:
+                held = self.tier_at(handle, p)
+                if held is not None:
+                    end = self.history.date(b)
+                    ends[held] = max(end, ends.get(held, end))
+        return ends
+
     def claimed_at(self, handle: str, i: int) -> Optional[str]:
         """Return the tier ``handle`` claims at ``i``, valid or not."""
-        if handle in _anchors_at(self.history, i):
+        if handle in self.cosigns.anchors_at(i):
             return "anchor"
         record = _record_at(self.history, f"tiers/{handle}.json", i)
         return record.tier if isinstance(record, Tier) else None
@@ -2088,7 +2365,7 @@ class _Judge:
         history = self.history
         return [
             j
-            for path in ("anchors.json", f"tiers/{handle}.json")
+            for path in ("anchors.json", f"tiers/{handle}.json", *self.cosigns.files)
             for j, _ in history.versions.get(path, [])
             if any(history.concurrent(j, a) for a in added)
             and not self.may_grant(handle, j, tier)
@@ -2097,7 +2374,9 @@ class _Judge:
 
     def tier_at(self, handle: str, i: int) -> Optional[str]:
         """Return the valid tier of ``handle`` at ``i``, or None."""
-        if handle in _anchors_at(self.history, i):
+        if self.breaks(handle, i):
+            return None
+        if handle in self.cosigns.anchors_at(i):
             return "anchor" if handle in self.people else None
         result = self.judge(handle, i)
         return result if isinstance(result, str) else None
@@ -2306,20 +2585,25 @@ class _Judge:
         anchors.json.
         """
         # ponytail: an anchors.json version that does not parse lists nobody,
-        # so it ends every anchor its parent listed; review keeps it out.
+        # so once cosigned it ends every anchor its parent listed.
+        # The anchors in effect change only where anchors.json or a cosign does.
         history = self.history
+        anchors_at = self.cosigns.anchors_at
         ends: dict[str, datetime] = {}
-        for j, _ in history.versions.get("anchors.json", []):
-            if j != start and not history.before(j, start):
-                continue
-            for a in history.added("anchors.json", j):
-                for p in history.parents[a]:
-                    dropped = set(_anchors_at(history, p)) - set(
-                        _anchors_at(history, j)
-                    )
-                    for handle in dropped:
-                        end = history.date(a)
-                        ends[handle] = max(end, ends.get(handle, end))
+        # A change is judged where it was made (``added``), so a merge that
+        # dropped a side branch's anchor ends nothing that never held.
+        made = {
+            a
+            for rel in ("anchors.json", *self.cosigns.files)
+            for j, _ in history.versions.get(rel, [])
+            if j == start or history.before(j, start)
+            for a in history.added(rel, j)
+        }
+        for a in sorted(made):
+            for p in history.parents[a]:
+                for handle in set(anchors_at(p)) - set(anchors_at(a)):
+                    end = history.date(a)
+                    ends[handle] = max(end, ends.get(handle, end))
         return ends
 
     def endorsement(
@@ -2348,35 +2632,87 @@ class _Judge:
 
 def _judge_tiers(
     judge: _Judge,
-    anchors: Sequence[str],
+    listed: Sequence[str],
     tier_records: Iterable[tuple[str, Tier, bytes, bytes]],
     problems: list[str],
     voids: list[str],
 ) -> dict[str, str]:
-    """Return handle -> tier for every anchor and valid tier record in the working tree."""
+    """Return handle -> tier for every anchor in effect and valid tier record."""
+    history = judge.history
+    final = history.final
+    anchors = judge.cosigns.anchors_at(final)
     tiers: dict[str, str] = {}
-    for a in anchors:
+    for a in listed:
         if a not in judge.parsed:
             problems.append(f"anchors.json: no person file for {a}")
-        elif a in judge.people:
+    if tuple(listed) != anchors and history.at("anchors.json", final) is not None:
+        voids.append(
+            "anchors.json: void: not cosigned by two anchors, so the anchors"
+            f" are still {', '.join(anchors) or 'nobody'}"
+        )
+    for a in anchors:
+        if a in judge.people:
             tiers[a] = "anchor"
     for rel, t, _, _ in tier_records:
         if t.subject in anchors:
             problems.append(f"{rel}: {t.subject} is an anchor")
             continue
-        result = judge.judge(t.subject, judge.history.final)
+        result = judge.judge(t.subject, final)
         if isinstance(result, str):
             tiers[t.subject] = result
         elif isinstance(result, Void):
             voids.append(str(result))
         else:
             problems.append(str(result))
+    for handle in sorted(judge.recoveries):
+        for b in judge.breaks(handle, final):
+            held = ", ".join(sorted(judge.break_ends(handle, b))) or "a"
+            voids.append(
+                f"people/{handle}.json: void: changed at {history.name(b)} without a"
+                f" signature by a previous key, and two anchors have not cosigned it;"
+                f" the {held} tier of {handle} is suspended from then"
+            )
+            tiers.pop(handle, None)
     return tiers
 
 
-def _ended(judge: _Judge, anchors: Sequence[str]) -> dict[str, dict[str, datetime]]:
+def _judge_cosigns(
+    judge: _Judge,
+    cosigns: Iterable[tuple[str, Cosign, bytes, bytes]],
+    problems: list[str],
+    voids: list[str],
+) -> None:
+    """Report every working-tree cosign that does not count."""
+    for rel, _, data, sig in cosigns:
+        _, why = judge.cosigns.judge(rel, data, sig, judge.history.final)
+        if isinstance(why, Void):
+            voids.append(str(why))
+        elif why is not None:
+            problems.append(str(why))
+
+
+def _unconfirmed(judge: _Judge) -> dict[str, frozenset[str]]:
+    """Return handle -> did:keys of their file now that a suspending recovery first listed."""
+    history = judge.history
+    found: dict[str, frozenset[str]] = {}
+    for handle, person in judge.people.items():
+        before = {
+            k.did
+            for b in judge.breaks(handle, history.final)
+            for p in history.parents[b]
+            for v in [_keys_at(history, handle, p)]
+            if v
+            for k in v.keys
+        }
+        if judge.breaks(handle, history.final):
+            found[handle] = frozenset(k.did for k in person.keys) - before
+    return found
+
+
+def _ended(judge: _Judge) -> dict[str, dict[str, datetime]]:
     """Return handle -> tier -> when it ended, for valid people who are not anchors now."""
     history = judge.history
+    anchors = judge.cosigns.anchors_at(history.final)
     ended: dict[str, dict[str, datetime]] = {}
     for rel in history.versions:
         handle = rel[len("tiers/") : -len(".json")]
@@ -2392,6 +2728,11 @@ def _ended(judge: _Judge, anchors: Sequence[str]) -> dict[str, dict[str, datetim
         if handle in judge.people and handle not in anchors:
             ends = ended.setdefault(handle, {})
             ends["anchor"] = max(end, ends.get("anchor", end))
+    for handle in judge.recoveries:
+        if handle in judge.people:
+            for tier, end in judge.break_ends(handle, history.final).items():
+                ends = ended.setdefault(handle, {})
+                ends[tier] = max(end, ends.get(tier, end))
     return ended
 
 
@@ -2576,13 +2917,18 @@ def check_registry(root: Path) -> CheckResult:
     owns, claimants = _key_owners(history, people, continuity.versions, problems)
     for handle in claimants:
         del people[handle]
-    revoked = _revocations(history, owns, problems, voids, warnings)
-    unchained = _warn_unchained(
-        history, continuity.versions + continuity.restored, revoked, warnings
+    blind = _Cosigns(history, people, None)
+    revoked, revoked_at = _revocations(
+        history, owns, blind.anchors_at, problems, voids, warnings
     )
-    judge = _Judge(history, parsed, people, revoked)
+    versions = continuity.versions + continuity.restored
+    unchained = _warn_unchained(history, versions, revoked, warnings)
+    recoveries = _recoveries(history, versions, revoked_at)
+    cosigns = _Cosigns(history, people, revoked)
+    judge = _Judge(history, parsed, people, revoked, cosigns, recoveries)
     tiers = _judge_tiers(judge, anchors, records.tier_records, problems, voids)
-    ended = _ended(judge, anchors)
+    _judge_cosigns(judge, records.cosigns, problems, voids)
+    ended = _ended(judge)
     claimed = {t.subject: t.tier for _, t, _, _ in records.tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
     automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
@@ -2610,22 +2956,28 @@ def check_registry(root: Path) -> CheckResult:
         )
         when = when or datetime.now(timezone.utc)
         held = [t for _, t in judge.standing(handle, i) if isinstance(t, str)]
-        if handle in _anchors_at(history, i):
+        if handle in judge.cosigns.anchors_at(i):
             held.append("anchor")
+        if judge.breaks(handle, i):
+            held = []  # suspended by a recovery two anchors have not cosigned
         ends = {
             **judge.tier_ends(handle, i),
             "anchor": judge.anchor_ends(i).get(handle, when),
         }
+        for broken, end in judge.break_ends(handle, i).items():
+            ends[broken] = max(end, ends.get(broken, end))
         held += [t for t, end in ends.items() if when < end]
         # An end committed after ``when`` still counts from its own date, as
         # in export, so query never grants more than export for ``when``.
         # ponytail: a tier ended, granted again and ended again keeps only
         # its latest end, so an earlier end committed after ``when`` is
         # missed; record every end per tier if that bites.
-        ends_now = {
+        ends_now: dict[str, Optional[datetime]] = {
             **judge.tier_ends(handle, final),
             "anchor": judge.anchor_ends(final).get(handle),
         }
+        for broken, end in judge.break_ends(handle, final).items():
+            ends_now[broken] = max(end, ends_now.get(broken) or end)
         gone = {t for t, end in ends_now.items() if end is not None and end <= when}
         held = [t for t in held if t not in gone]
         humans = [t for t in held if t != "automation"]
@@ -2661,6 +3013,7 @@ def check_registry(root: Path) -> CheckResult:
         ended,
         held_at,
         unchained,
+        _unconfirmed(judge),
     )
 
 
@@ -2725,9 +3078,12 @@ def allowed_signers(
                     continue
                 until = max(ends)
             principals = ",".join((handle, *result.emails[handle]))
+            unconfirmed = result.unconfirmed.get(handle, frozenset())
             for key in result.people[handle].keys:
-                if key.did in result.revoked or (
-                    until is not None and until <= key.added
+                if (
+                    key.did in result.revoked
+                    or key.did in unconfirmed
+                    or (until is not None and until <= key.added)
                 ):
                     continue
                 options = (
@@ -3777,6 +4133,43 @@ def cmd_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cosign(args: argparse.Namespace) -> int:
+    """Write and sign a cosign of the exact bytes of anchors.json or a person file now.
+
+    Prints what it approves, so the anchor reads it before pushing.
+    """
+    root = Path(".")
+    path = args.path
+    if not COSIGN_PATH_RE.fullmatch(path):
+        raise VouchError(
+            f"{path}: only anchors.json or people/<handle>.json is cosigned"
+        )
+    data = read_capped(root, path)
+    key = _signing_key(args.sign_with)
+    cosigner = _signer_file(root, key)[0].handle
+    if path == f"people/{cosigner}.json":
+        raise VouchError("nobody can cosign their own person file")
+    if path == "anchors.json":
+        print(f"anchors: {', '.join(parse_anchors(data))}")
+    else:
+        person = parse_record(path, data)
+        assert isinstance(person, Person)  # the path decides the kind
+        print(f"{person.handle}: {person.name}")
+        for k in person.keys:
+            print(f"  {'current' if k.retired is None else 'retired'} {k.did}")
+    rel = f"cosigns/{cosigner}-{_next_seq(root, 'cosigns', cosigner)}.json"
+    obj = {
+        "@context": [CONTEXT],
+        "cosigner": cosigner,
+        "cosignerKey": key.did,
+        "path": path,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "date": _now(),
+    }
+    _write_signed(rel, _record_bytes(rel, obj)[0], key)
+    return 0
+
+
 def cmd_revoke(args: argparse.Namespace) -> int:
     """Write and sign a revocation of a key; check judges whether the signer may revoke it."""
     root = Path(".")
@@ -3905,6 +4298,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("handle")
     p.add_argument("tier", choices=TIERS[1:])  # anchors come from anchors.json
     p.set_defaults(func=cmd_approve)
+    p = signing(
+        "cosign",
+        "as an anchor, approve the exact bytes of anchors.json or a person file",
+    )
+    p.add_argument("path", metavar="PATH", help="anchors.json or people/<handle>.json")
+    p.set_defaults(func=cmd_cosign)
     p = signing("revoke", "write and sign a revocation")
     p.add_argument("key", metavar="KEY", help=".pub file, key text or did:key")
     p.add_argument(
