@@ -1,0 +1,215 @@
+.TH GIT-VOUCH 1 "" "git-vouch" "git-vouch Manual"
+.nh
+.ad l
+.SH NAME
+git-vouch \- check a kernel identity registry and export git's allowed-signers files
+.SH SYNOPSIS
+\fBgit vouch\fR \fIcommand\fR [\fIoptions\fR]
+.br
+\fBgit vouch\fR \fIcommand\fR \fB\-h\fR
+.SH DESCRIPTION
+git-vouch answers whether a signer is a real person whom real people vouch for, and whether their key may sign here. People, endorsements and tier grants are signed files in a registry git repository; git vouch checks the registry's rules and writes the allowed_signers and revocation files that git's SSH signing reads. After \fBgit vouch setup\fR, plain \fBgit verify-tag\fR and \fBgit log \-\-show-signature\fR verify against the registry.
+.PP
+All signing and verification is done by \fBssh-keygen\fR(1) and \fBgit\fR(1); git-vouch contains no cryptography and uses only the Python standard library.
+.PP
+Commands that write records (\fBregister\fR, \fBadd-key\fR, \fBretire-key\fR, \fBendorse\fR, \fBapprove\fR, \fBrevoke\fR, \fBcosign\fR) work in the registry checkout in the current directory and never push: commit the files and send a branch for the registry maintainer to merge.
+.PP
+\fBgit vouch \-h\fR lists the commands, and \fBgit vouch\fR \fIcommand\fR \fB\-h\fR prints one command's help, which is what this page is made from.
+.SH COMMANDS
+.SS setup
+\fBgit vouch setup\fR [\fB\-\-registry\fR \fIURL\fR] [\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR] [\fB\-\-include\-automation\fR | \fB\-\-no\-include\-automation\fR]
+.PP
+record the registry URL, configure git for SSH signing, and sync
+.TP
+\fB\-\-registry\fR \fIURL\fR
+registry repository URL (default: the one configured, else the kernel's)
+.TP
+\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR
+lowest tier exported, saved for later syncs (default: contributor)
+.TP
+\fB\-\-include\-automation\fR | \fB\-\-no\-include\-automation\fR
+also export automation keys, with namespaces="file"; saved
+.SS sync
+\fBgit vouch sync\fR [\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR] [\fB\-\-include\-automation\fR | \fB\-\-no\-include\-automation\fR]
+.PP
+fetch the registry without allowing a rewind, check it, and re-export
+.TP
+\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR
+lowest tier exported, saved for later syncs (default: contributor)
+.TP
+\fB\-\-include\-automation\fR | \fB\-\-no\-include\-automation\fR
+also export automation keys, with namespaces="file"; saved
+.SS status
+\fBgit vouch status\fR
+.PP
+show the registry commit, its fetch age, and your own tier
+.SS register
+\fBgit vouch register\fR [\fB\-\-sign\-with\fR \fIFILE\fR] [\fIPUBKEY\fR] [\fB\-\-from\fR \fIFILE\fR] [\fB\-\-handle\fR \fIHANDLE\fR] [\fB\-\-name\fR \fINAME\fR] [\fB\-\-email\fR \fIEMAIL\fR] [\fB\-\-accountable\fR \fIHANDLE\fR] [\fB\-\-attestation\fR \fIFILE\fR] [\fB\-\-challenge\fR \fIFILE\fR]
+.PP
+write your person file and sign it in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIPUBKEY\fR
+your .pub file
+.TP
+\fB\-\-from\fR \fIFILE\fR
+complete this draft
+.TP
+\fB\-\-email\fR \fIEMAIL\fR
+repeat for more addresses
+.TP
+\fB\-\-accountable\fR \fIHANDLE\fR
+automation: your maintainer
+.TP
+\fB\-\-attestation\fR \fIFILE\fR
+ssh-keygen -O write-attestation output
+.TP
+\fB\-\-challenge\fR \fIFILE\fR
+the -O challenge file it was made with
+.SS add\-key
+\fBgit vouch add\-key\fR [\fB\-\-sign\-with\fR \fIFILE\fR] \fIPUBKEY\fR [\fB\-\-attestation\fR \fIFILE\fR] [\fB\-\-challenge\fR \fIFILE\fR]
+.PP
+add a key to your person file and re-sign it in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIPUBKEY\fR
+the new key's .pub file
+.TP
+\fB\-\-attestation\fR \fIFILE\fR
+ssh-keygen -O write-attestation output
+.TP
+\fB\-\-challenge\fR \fIFILE\fR
+the -O challenge file it was made with
+.SS retire\-key
+\fBgit vouch retire\-key\fR [\fB\-\-sign\-with\fR \fIFILE\fR] \fIKEY\fR
+.PP
+retire a key in your person file and re-sign it in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIKEY\fR
+\&.pub file, key text or did:key
+.SS endorse
+\fBgit vouch endorse\fR [\fB\-\-sign\-with\fR \fIFILE\fR] [\fIhandle\fR] [\fB\-\-from\fR \fIFILE\fR] [\fB\-\-email\fR \fIEMAIL\fR] [\fB\-\-note\fR \fINOTE\fR]
+.PP
+write and sign an endorsement in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIhandle\fR
+whose current key, name and emails to endorse, as the checkout has them: check out the merged registry, not a pull request
+.TP
+\fB\-\-from\fR \fIFILE\fR
+sign this draft, such as one from git-vouch-migrate drafts
+.TP
+\fB\-\-email\fR \fIEMAIL\fR
+endorse only this address (repeatable)
+.TP
+\fB\-\-note\fR \fINOTE\fR
+how you know them
+.SS approve
+\fBgit vouch approve\fR [\fB\-\-sign\-with\fR \fIFILE\fR] \fIhandle\fR \fI{maintainer,contributor,automation}\fR
+.PP
+write and sign a tier record in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.SS cosign
+\fBgit vouch cosign\fR [\fB\-\-sign\-with\fR \fIFILE\fR] \fIPATH\fR
+.PP
+as an anchor, approve the exact bytes of anchors.json or a person file in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIPATH\fR
+anchors.json or people/<handle>.json
+.SS revoke
+\fBgit vouch revoke\fR [\fB\-\-sign\-with\fR \fIFILE\fR] \fIKEY\fR [\fB\-\-subject\fR \fIHANDLE\fR] [\fB\-\-reason\fR \fIREASON\fR]
+.PP
+write and sign a revocation in the registry checkout in the current directory
+.TP
+\fB\-\-sign\-with\fR \fIFILE\fR
+private key file, or .pub to sign through the agent (default: git config user.signingKey)
+.TP
+\fIKEY\fR
+\&.pub file, key text or did:key
+.TP
+\fB\-\-subject\fR \fIHANDLE\fR
+whose key, if two files list it
+.TP
+\fB\-\-reason\fR \fIREASON\fR
+default: compromise
+.SS check
+\fBgit vouch check\fR [\fIDIR\fR]
+.PP
+validate every signature and compute every tier
+.TP
+\fIDIR\fR
+registry checkout (default: the synced copy once setup has run, else the current directory; pass . to check a checkout)
+.SS export
+\fBgit vouch export\fR [\fIDIR\fR] [\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR] [\fB\-\-include\-automation\fR] [\fB\-\-allowed\-signers\fR \fIFILE\fR] [\fB\-\-revocation\-file\fR \fIFILE\fR]
+.PP
+write the allowed-signers file and the revocation file
+.TP
+\fIDIR\fR
+registry checkout (default: the synced copy once setup has run, else the current directory)
+.TP
+\fB\-\-min\-tier\fR \fI{anchor,maintainer,contributor}\fR
+lowest tier exported (default: contributor)
+.TP
+\fB\-\-include\-automation\fR
+also export automation keys, with namespaces="file"
+.TP
+\fB\-\-allowed\-signers\fR \fIFILE\fR
+output file (default: git config gpg.ssh.allowedSignersFile)
+.TP
+\fB\-\-revocation\-file\fR \fIFILE\fR
+output file (default: git config gpg.ssh.revocationFile)
+.SS did
+\fBgit vouch did\fR \fI<.pub file | ssh\-pubkey | did:key>\fR
+.PP
+print the did:key for an SSH public key, or the reverse
+.SS query
+\fBgit vouch query\fR (\fI<did:key>\fR | \fB\-\-all\fR) [\fB\-\-at\fR \fITIME\fR]
+.PP
+print a did:key's holder, tier and validity as JSON
+.TP
+\fB\-\-all\fR
+print every listed did:key's answer as one JSON object
+.TP
+\fB\-\-at\fR \fITIME\fR
+RFC 3339 time to answer for (default: now)
+.SS keys
+\fBgit vouch keys\fR \fI<email>\fR
+.PP
+print an endorsed email's current keys with their patatt selectors
+.SH CONFIGURATION
+.TP
+\fBvouch.registry\fR
+The registry URL; set by \fBsetup\fR.
+.TP
+\fBvouch.minTier, vouch.includeAutomation\fR
+Export choices saved by \fBsetup\fR and \fBsync\fR.
+.TP
+\fBgpg.ssh.allowedSignersFile, gpg.ssh.revocationFile, gpg.format\fR
+Set globally by \fBsetup\fR, only after its first sync succeeds, and never over a different existing value.
+.TP
+\fBuser.signingKey\fR
+The default key for the signing commands; \fB\-\-sign-with\fR overrides it.
+.SH FILES
+.TP
+\fI$XDG_DATA_HOME/git\-vouch/, else ~/.local/share/git\-vouch/\fR
+The synced registry copy in \fIregistry/\fR, and the \fIallowed_signers\fR and \fIrevoked_keys\fR files git verifies against.
+.SH EXIT STATUS
+0 on success. 1 on any error: for \fBcheck\fR, any problem in the registry (warnings and void records alone exit 0); for \fBquery\fR and \fBkeys\fR, an unknown key or email.
+.SH SEE ALSO
+\fBgit-verify-tag\fR(1), \fBgit-config\fR(1), \fBssh-keygen\fR(1), \fBgit-vouch-migrate\fR(1).
+.PP
+README.md, DESIGN.md and docs/ in the git-vouch repository: https://github.com/MarkAtwood/git-vouch

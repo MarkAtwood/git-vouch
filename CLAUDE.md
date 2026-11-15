@@ -78,6 +78,9 @@ uv run --with mypy mypy --python-version 3.10 git-vouch
 
 A new doc walkthrough module must be added to `SLOW` in `tests/conftest.py`.
 
+After changing any command, option or help text, run `python3 man/mkman.py`;
+`tests/test_man.py` fails while `man/*.1` is stale.
+
 ## Architecture Overview
 
 _Add a brief overview of your project architecture_
