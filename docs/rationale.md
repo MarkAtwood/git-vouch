@@ -52,10 +52,10 @@ history instead of inventing records for what git already records.
 Order and removal come from commits rather than from a field anyone
 could write. The formats are plain files and git's own allowed-signers
 format, so a future git could read the registry itself. The cost is an
-accepted risk: whoever controls the repository can add an anchor, who
-can then approve anyone. The change shows in public history and
-`git vouch sync` refuses a rewrite, so control of the repository is as
-sensitive as an anchor key.
+accepted risk: whoever controls the repository chooses the first
+anchors. Every later change to them needs two anchors' cosigns
+([cosign](#cosign)), the change shows in public history, and
+`git vouch sync` refuses a rewrite.
 
 **Rejected:** OpenVTC / VTI, which solves the same problem with an
 always-on agent, three transports and seven credential types in over
@@ -71,13 +71,15 @@ DESIGN: [Constraints](../DESIGN.md#constraints),
 <a id="nothing-pushes"></a>
 ## Nothing pushes for you
 
-**What:** `register`, `endorse`, `approve` and `revoke` write and sign
-files in your checkout. You commit and push a branch; a registry
+**What:** `register`, `endorse`, `approve`, `revoke` and `cosign` write
+and sign files in your checkout. You commit and push a branch; a registry
 maintainer merges it once `git vouch check` passes.
 
 **Why:** changes arrive as reviewed merges. Review is the only gate for
-three accepted risks: edits to `anchors.json`, person-file changes no
-previous key signed, and deleted tier records. Every command takes its
+three accepted risks: the first `anchors.json`, person-file changes no
+previous key signed for anyone below maintainer, and deleted tier
+records. Two anchors' cosigns guard the rest of what review used to
+carry alone ([cosign](#cosign)). Every command takes its
 input from arguments and files and never prompts, so it works in
 scripts, CI and over ssh. DESIGN gives no reason specific to the
 commands stopping short of a push.
@@ -88,6 +90,36 @@ DESIGN: [Summary](../DESIGN.md#summary),
 [Constraints](../DESIGN.md#constraints),
 [The registry](../DESIGN.md#the-registry) (Merging needs one person),
 [Commands](../DESIGN.md#commands).
+
+<a id="cosign"></a>
+## Two anchors cosign what one merger cannot check
+
+**What:** a change to `anchors.json` after its first version, and an
+anchor's or maintainer's person-file change no previous key signed, need
+cosigns by two anchors, neither the person affected (`git vouch cosign
+<path>`). A cosign is a signed record naming the SHA-256 of the exact
+bytes it approves. Without two, the `anchors.json` edit has no effect,
+and the person's tier is suspended from that commit; `check` reports
+both as void and still passes. With fewer than two eligible anchors,
+every eligible one must cosign.
+
+**Why:** these were the changes `check` could not verify by a
+signature, so one registry maintainer's merge decided them: adding an
+anchor, or swapping in a key that keeps an anchor's or maintainer's
+tier. Two cosigners are two people `check` can count, whoever merged.
+Voiding instead of failing means one bad merge cannot stop the export
+for everyone. Cosign authority is judged before the commit that added
+the cosign, so no cosign lends authority to itself, as tier records are
+judged where they were added.
+
+**Rejected:** one anchor's cosign with the merger as the second person,
+since `check` cannot see who merged. Failing `check`, which would stop
+every export. Signed merge commits, which carry one signature each.
+Covering tier-record deletions, which only take authority away; an
+anchor can already revoke a key at once.
+
+DESIGN: [Cosign](../DESIGN.md#cosign),
+[Anchors](../DESIGN.md#anchors).
 
 <a id="endorse-vs-approve"></a>
 ## Endorse versus approve

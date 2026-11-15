@@ -140,8 +140,11 @@ def test_approver_demoted_keeps_grants(
     }
 
 
-def test_anchor_leaving_keeps_grants(vouch: ModuleType, reg: GitRegistry) -> None:
+def test_anchor_leaving_keeps_grants(
+    vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
+) -> None:
     reg.anchors("dave")
+    reg.cosign("anchors.json", "torvalds", key("torvalds"))
     reg.commit()
     result = vouch.check_registry(reg.root)
     assert result.problems == []
@@ -525,6 +528,7 @@ def test_revoked_key_under_accountables_tier_voids_automation(
     vouch: ModuleType, reg: GitRegistry, key: Callable[[str], Key]
 ) -> None:
     reg.anchors("torvalds", "dave")
+    reg.cosign("anchors.json", "torvalds", key("torvalds"))
     reg.person("kees", key("kees"))
     reg.tier("kees", "maintainer", "dave", key("dave"))
     reg.person("bot", key("bot"), accountable="kees")
@@ -568,6 +572,7 @@ def test_merging_an_old_branch_keeps_grants(
     reg.commit()
     reg.git("checkout", "-q", "side")
     reg.anchors("torvalds", "dave")
+    reg.cosign("anchors.json", "torvalds", key("torvalds"))
     reg.commit()
     reg.git("checkout", "-q", "main")
     reg.git("merge", "-q", "--no-edit", "side")
@@ -1319,8 +1324,11 @@ def test_anchor_removal_ends_at_the_removing_commit(
     # Like a deleted tier record: dave's keys end at the committer date of
     # the commit that dropped him from anchors.json (day 3).
     reg.anchors("torvalds", "dave")
+    reg.cosign("anchors.json", "torvalds", key("torvalds"))
     reg.commit()
     reg.anchors("torvalds")
+    reg.cosign("anchors.json", "torvalds", key("torvalds"), n=2)
+    reg.cosign("anchors.json", "dave", key("dave"))
     reg.commit(author="2026-01-02T06:00:00Z")
     result = vouch.check_registry(reg.root)
     assert result.problems == [] and "dave" not in result.tiers

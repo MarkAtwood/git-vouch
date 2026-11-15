@@ -319,10 +319,11 @@ git push -q origin main
 ```
 
 Reject a `register-*`, `endorse-*` or `approve-*` branch whose list shows
-`anchors.json` or a `D` line. `check` does not cover two changes, which
-rest on this review alone (`DESIGN.md`, Merging needs one person): any
-change to `anchors.json`, and deleting a file, such as someone's tier
-record under `tiers/`. Neither fails `check` or warns. A registration
+`anchors.json` or a `D` line. Deleting a file, such as someone's tier
+record under `tiers/`, rests on this review alone (`DESIGN.md`, Merging
+needs one person): it neither fails `check` nor warns. A later change to
+`anchors.json` has no effect until two anchors cosign it (`DESIGN.md`,
+Cosign), and `check` reports it as void until then. A registration
 touches only `people/`; endorsements and approvals add files under
 `endorsements/` and `tiers/`.
 

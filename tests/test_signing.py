@@ -1035,3 +1035,50 @@ def test_endorse_says_when_the_key_is_not_in_the_person_file(
         f"{fingerprint(keys['alice2'].public)} {did(keys['alice2'])}"
         " (not in people/alice.json; shown as ssh-ed25519)"
     )
+
+
+def test_cosign_approves_an_anchors_json_edit(tree: Path, keys: dict[str, Key]) -> None:
+    register(tree, "mallory", keys["mallory"])
+    (tree / "anchors.json").write_text('["torvalds", "mallory"]\n')
+    commit(tree)
+    out = ok(tree, "check")
+    assert "mallory none" in out
+    sign = ("--sign-with", str(keys["torvalds"].private))
+    printed = ok(tree, "cosign", "anchors.json", *sign)
+    assert printed.splitlines() == [
+        "anchors: torvalds, mallory",
+        "cosigns/torvalds-1.json",
+        "cosigns/torvalds-1.json.sig",
+    ]
+    rel = tree / "cosigns" / "torvalds-1.json"
+    verify(rel, keys["torvalds"], "git-vouch-cosign")
+    record = json.loads(rel.read_text())
+    assert record["path"] == "anchors.json"
+    assert record["cosignerKey"] == did(keys["torvalds"])
+    # The oracle for the hash is sha256sum, not git-vouch.
+    digest = subprocess.run(
+        ["sha256sum", str(tree / "anchors.json")], capture_output=True, text=True
+    ).stdout.split()[0]
+    assert record["sha256"] == digest
+    commit(tree)
+    assert "mallory anchor" in ok(tree, "check")
+
+
+def test_cosign_refuses_own_file_and_other_paths(
+    tree: Path, keys: dict[str, Key]
+) -> None:
+    sign = ("--sign-with", str(keys["torvalds"].private))
+    own = vouch(tree, "cosign", "people/torvalds.json", *sign)
+    assert own.returncode == 1 and "own person file" in own.stderr
+    other = vouch(tree, "cosign", "tiers/alice.json", *sign)
+    assert other.returncode == 1 and "only anchors.json or people" in other.stderr
+    assert not (tree / "cosigns").exists()
+
+
+def test_cosign_prints_the_keys_it_approves(tree: Path, keys: dict[str, Key]) -> None:
+    sign = ("--sign-with", str(keys["torvalds"].private))
+    out = ok(tree, "cosign", "people/alice.json", *sign)
+    assert out.splitlines()[:2] == [
+        "alice: Alice",
+        f"  current {did(keys['alice'])}",
+    ]

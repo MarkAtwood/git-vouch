@@ -8,6 +8,7 @@ git-vouch's own output.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -162,6 +163,21 @@ class Registry:
             "date": date,
         }
         self.write(rel, record, key, ns="git-vouch-endorse")
+        return rel
+
+    def cosign(
+        self, path: str, cosigner: str, key: Key, n: int = 1, date: str = BEFORE
+    ) -> str:
+        """Cosign the exact bytes now at ``path`` as ``cosigner``; return the record path."""
+        rel = f"cosigns/{cosigner}-{n}.json"
+        record = {
+            "cosigner": cosigner,
+            "cosignerKey": did(key),
+            "path": path,
+            "sha256": hashlib.sha256((self.root / path).read_bytes()).hexdigest(),
+            "date": date,
+        }
+        self.write(rel, record, key, ns="git-vouch-cosign")
         return rel
 
     def revoke(self, subject: str, revoked: Key, signer: Key, n: int = 1) -> str:
