@@ -69,7 +69,7 @@ only signing does:
 
 ```sh
 D=~/.local/share/git-vouch
-git config --global vouch.registry https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git
+git config --global vouch.registry "$REGISTRY"   # a registry URL; see Status
 git config --global gpg.ssh.allowedSignersFile "$D/allowed_signers"
 git config --global gpg.ssh.revocationFile "$D/revoked_keys"
 git vouch sync
@@ -81,6 +81,14 @@ git config gpg.format ssh   # in each repository that signs with SSH
 Under active development. The core commands, the migration tool, the
 attestation verifier, the TRQP bridge and the patatt fork are implemented
 and tested. Nothing is tagged as a release. Formats may still change.
+
+**The kernel's registry does not exist yet.** The default URL,
+`https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git`, is
+a placeholder until the kernel.org administrators create it, so
+`git vouch setup` without `--registry` fails. To try git-vouch now, make
+your own registry, a bare git repository, and pass its URL with
+`--registry`. [The flag-day runbook](docs/flag-day.md) builds one from
+nothing, and its test suite runs every step.
 
 ## Read more
 

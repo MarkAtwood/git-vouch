@@ -2937,6 +2937,11 @@ def _fetch(url: str, copy: Path) -> None:
             cwd=copy,
         )
     except VouchError as e:
+        if url == DEFAULT_REGISTRY:
+            raise VouchError(
+                f"cannot fetch the kernel's registry: it does not exist yet; "
+                f"pass --registry URL or set vouch.registry: {e}"
+            ) from e
         raise VouchError(
             f"cannot fetch the registry; a rewritten history is refused: {e}"
         ) from e

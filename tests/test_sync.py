@@ -11,6 +11,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -168,6 +169,18 @@ def test_failed_setup_leaves_git_config_unchanged(home: Path, tmp_path: Path) ->
     assert "cannot fetch the registry" in proc.stderr
     for name in SETUP_CONFIG:
         assert unset(name), name
+
+
+def test_missing_default_registry_says_it_does_not_exist_yet(
+    vouch: ModuleType, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A local path stands in for the kernel's URL, so no network is needed.
+    missing = str(tmp_path / "missing.git")
+    monkeypatch.setattr(vouch, "DEFAULT_REGISTRY", missing)
+    with pytest.raises(
+        vouch.VouchError, match="it does not exist yet; pass --registry"
+    ):
+        vouch._fetch(missing, tmp_path / "copy")
 
 
 def test_failed_setup_keeps_the_working_config(

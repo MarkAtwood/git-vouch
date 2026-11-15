@@ -58,8 +58,9 @@ sudo -u git-vouch -H git vouch setup
 ```
 
 `setup` with no `--registry` uses the kernel's registry,
-`https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git`.
-For a mirror, pass `--registry URL`. `setup` also sets that user's
+`https://git.kernel.org/pub/scm/linux/kernel/git/vouch/registry.git`,
+which does not exist yet: until it does, pass `--registry URL`, as you
+would for a mirror. `setup` also sets that user's
 `gpg.format` and allowed-signers paths and runs the first sync.
 
 ## systemd units
