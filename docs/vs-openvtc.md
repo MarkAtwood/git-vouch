@@ -118,7 +118,7 @@ and `docs/trqp-interop.md` records verify-trust's side.
 
 The bridge speaks only 0.2, which verify-trust asks first from 0.27.0
 on; earlier verify-trust, which asks only 0.1, gets `unsupportedVersion`.
-The end-to-end test targets verify-trust 0.33.0.
+The end-to-end test passes against verify-trust 0.33.0 (2026-11-15).
 
 What a yes proves: the did:key is a current key of a registered person
 with at least one endorsed email, any tier, in a registry copy synced
