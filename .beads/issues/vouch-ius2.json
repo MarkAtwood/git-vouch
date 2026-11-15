@@ -2,15 +2,15 @@
   "id": "vouch-ius2",
   "title": "trqp: run the end-to-end test against verify-trust v0.33.0",
   "description": "The bridge now speaks registry/authorization/0.2 only (PR trqp-0.2). tests/trqp/test_verify_trust.py targets verify-trust v0.33.0 and expects FIDO and P-256 signers trusted, RSA refused; it has not been run, because building verify-trust (about 1,100 crates' build scripts) needs Mark's go-ahead. Build: git checkout v0.33.0 in OpenVTC/verifiable-git-infrastructure; cargo build --locked --release -p verify-trust; VERIFY_TRUST=... pytest tests/trqp.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "issue_type": "task",
   "assignee": "Mark Atwood",
   "owner": "mark@reviewcommit.com",
   "created_at": "2026-11-15T04:31:40.689968718Z",
   "created_by": "Mark Atwood",
-  "updated_at": "2026-11-15T05:00:45.251902215Z",
+  "updated_at": "2026-11-15T06:32:08.417388617Z",
   "started_at": "2026-11-15T05:00:45.251902215Z",
-  "lease_expires_at": "2026-11-15T05:05:45.251902215Z",
-  "heartbeat_at": "2026-11-15T05:00:45.251902215Z"
+  "closed_at": "2026-11-15T06:32:08.417388617Z",
+  "close_reason": "Closed"
 }
