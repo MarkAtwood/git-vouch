@@ -1,20 +1,20 @@
 # git-vouch and OpenVTC
 
-**Status:** comparison, 2026-10-22. OpenVTC facts come from
-`~/PROJECT/ToIP/docs/openvtc-explainer.md` (OpenVTC HEAD 2026-10-22);
-git-vouch facts come from `DESIGN.md`. git-vouch is a design under
-implementation; OpenVTC is a running pilot with no production deployment.
+**Status:** comparison, 2026-10-22, updated 2026-11-15. OpenVTC facts
+come from its repositories at github.com/OpenVTC as of 2026-10-22;
+git-vouch facts come from `DESIGN.md`. git-vouch is implemented but not
+released, and its patatt and b4 forks are not upstream; OpenVTC is a
+running pilot with no production deployment.
 
 ## Verdict
 
-**Both answer the same question, and git-vouch answers only that
-question.** The question is "is this kernel contributor a real person whom
-real people vouch for, and may their key sign for the kernel?" OpenVTC
+Both answer one question: is this kernel contributor a real person whom
+real people vouch for, and may their key sign for the kernel? OpenVTC
 answers it with an always-on agent per person, three transports, seven
 credential types and over 900k lines of code. git-vouch
 answers it with the SSH keys and git that kernel developers already use,
-a git repository of signed files, and one Python file planned at
-1,000–1,500 lines.
+a git repository of signed files, and one Python file of about 4,500
+lines.
 
 Both stacks use the same signature format: OpenVTC's git signing (VGI)
 asks the person's agent to produce an SSHSIG, which OpenVTC's CI tool
@@ -29,7 +29,7 @@ agent before it, and DID resolution plus a registry query after it.
 | | OpenVTC | git-vouch |
 |---|---|---|
 | Scope | Know Your Developer, plus data rooms, elections, directory, personas, agent hosting, chat bridges, EU wallet interop | Kernel signing identity only |
-| Size | About 655k lines of Rust plus 75k of TypeScript in the core repo, and about 245k in satellites; 1,104 crates in the lockfile | One file, planned 1,000–1,500 lines; no dependencies beyond Python 3, git and OpenSSH |
+| Size | About 655k lines of Rust plus 75k of TypeScript in the core repo, and about 245k in satellites; 1,104 crates in the lockfile | One file of about 4,500 lines; no dependencies beyond Python 3, git and OpenSSH |
 | Spec | ToIP VTI Working Draft 0.2.0: 8,524 lines, about 1,250 MUSTs, plus 350–386 Trust Task versions | `DESIGN.md`; the Python is the reference |
 | Runtime | An always-on VTA per person and a VTC per community, plus mediator, DID host, push gateway and trust registry | None. Commands run and exit |
 | Person's key | Derived from one seed held by the VTA | The SSH key the person already has: agent, FIDO token, gpg-agent |
@@ -40,13 +40,11 @@ agent before it, and DID resolution plus a registry query after it.
 | Revocation | Bitstring Status List | A signed revocation file; git rejects the key through `gpg.ssh.revocationFile` |
 | Distribution | Trust Tasks over TSP, DIDComm v2 or HTTPS | `git fetch` of the registry; changes arrive as merges |
 | CI check | `verify-trust` checks the signer DID against the registry and fails closed | Plain `git verify-tag` / `verify-commit` against the exported `allowed_signers` |
-| Moving from PGP | `cnm vetting bootstrap-pgp` turns the strong set into founding vetters | A single flag day: `pgpkeys.git` is frozen and ported, everyone re-signs with SSH keys, and a GPG continuity proof unlocks locally generated endorsement drafts but grants no tier |
+| Moving from PGP | `cnm vetting bootstrap-pgp` turns the strong set into founding vetters | `pgpkeys.git` is frozen and ported; on the flag day only Linus's tree and release tags stop accepting GPG, and every other tree switches by the late cutoff six months later; a GPG continuity proof unlocks locally generated endorsement drafts but grants no tier |
 | Privacy | Correlation scopes; PCS hides which vetters vouched | None. Public by design |
 | Release cadence | Breaking changes by policy: 203 in the Eucalyptus release | Formats are plain files and SSH signatures, chosen so a future git can read them unchanged |
 
 ## What OpenVTC has that git-vouch gives up
-
-These are real capabilities, deliberately left out of git-vouch:
 
 - **Fresh authorisation checks.** `verify-trust` queries the live
   registry on every CI run, and the VTC checks status lists at admission. A git-vouch
@@ -61,13 +59,15 @@ These are real capabilities, deliberately left out of git-vouch:
 - **Trust that travels.** OpenVTC credentials are W3C VCs usable across
   communities. git-vouch is one registry for one project, though its
   records are JSON-LD with did:keys that other tools can read.
-- **Two-person control of the root.** OpenVTC found three single-admin
-  takeover paths and closed them with second-party consent for VTC admin
-  actions, on by default. The host can still waive it with
-  single-administrator mode or offline break-glass, both audited and
-  loudly flagged, so host control remains a risk there too. git-vouch
-  lets one registry maintainer merge and treats control of the
-  registry repository as an accepted risk (see Anchors in `DESIGN.md`).
+- **Two-person control of everything the root does.** OpenVTC found
+  three single-admin takeover paths and closed them with second-party
+  consent for VTC admin actions, on by default; the host can still waive
+  it with single-administrator mode or offline break-glass, both audited
+  and loudly flagged. git-vouch needs two anchors' cosigns for any change
+  to `anchors.json` after the first and for an anchor's or maintainer's
+  unsigned key change (see Cosign in `DESIGN.md`). Review alone still
+  covers the first `anchors.json`, a contributor's unsigned key change,
+  and deleting a tier record.
 
 ## What git-vouch has that OpenVTC lacks
 
@@ -89,9 +89,9 @@ These are real capabilities, deliberately left out of git-vouch:
 
 The explainer's own "minimal KYD system" (did:webvh for communities and did:key for
 people, one HTTPS transport, two credential types, a revocation list, a
-registry, commit signing checked in CI) is close to git-vouch. git-vouch takes it one step further: the
-registry is a git repository rather than a service, and git checks the
-signatures rather than a separate CI tool.
+registry, commit signing checked in CI) is close to git-vouch. git-vouch
+differs in two ways: the registry is a git repository rather than a
+service, and git checks the signatures rather than a separate CI tool.
 
 ## Compatibility: the TRQP bridge
 

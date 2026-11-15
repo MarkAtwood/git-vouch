@@ -17,7 +17,7 @@ says which.
 ## What the commands assume
 
 > **What this does:** names the URLs, keys and checkouts the commands use.\
-> **Why:** changes arrive as reviewed merges, and review is the only gate for three accepted risks ([rationale](rationale.md#nothing-pushes)).
+> **Why:** commands only write and sign files; every change arrives as a reviewed merge ([rationale](rationale.md#nothing-pushes)).
 
 - `$REGISTRY` is the registry's URL and `$LINUX` a kernel tree you push
   to. `$PGPKEYS`, `$FREEZE_COMMIT` and `$SIGNER` are the frozen
@@ -42,15 +42,17 @@ people are named where they act.
 > **What this does:** gets you registered before GPG-signed tags and patches stop being accepted.\
 > **Why:** only Linus's tree switches on the flag day; every other tree switches by the late cutoff ([rationale](rationale.md#one-flag-day)).
 
-If Linus pulls from you, you are in the core set: register during the
-window, before the flag day, when his tree stops accepting GPG-signed
-tags. Everyone else registers before the late cutoff, six months later,
-when GPG-signed tags and patches stop being accepted anywhere; the tree
-you send to may switch sooner. [The flag-day runbook](flag-day.md) has
-the full timeline.
+If `git-vouch-migrate pullers` lists you, because Linus merged a signed
+tag of yours in the last N releases, you are in the core set: you need
+the maintainer tier before the flag day, so follow
+[the captains guide](guide-captains.md#flag-day). Everyone else
+registers before the late cutoff, six months after the flag day, when
+GPG-signed tags and patches stop being accepted anywhere; the tree you
+send to may switch sooner. [The flag-day runbook](flag-day.md) has the
+full timeline.
 
-Patches follow the same dates. Before the flag day,
-install the patatt fork and list `keyringsrc = vouch:` first and the
+Patches change only at the late cutoff. Before the flag day, install
+the patatt fork and list `keyringsrc = vouch:` first and the
 frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
 Patches signed with a GPG key, or a key `patatt genkey` made, then keep
 verifying through pgpkeys, with a warning, for everyone until the late
@@ -63,7 +65,7 @@ cutoff, six months after the flag day.
 
 ed25519, P-256 and RSA keys of 2048 to 4096 bits are accepted, whether
 software, on a token, or a GPG authentication subkey
-([key types](rationale.md#rsa-cap)). If yours is RSA, upgrade now.
+([key types](rationale.md#rsa-cap)). For a new key, prefer ed25519.
 Hardware is recommended, not required. kernel.org issues FIDO tokens
 and backup tokens (korg.docs.kernel.org/fido2.html); make one key on
 each, touching the token when asked:
@@ -156,7 +158,7 @@ git vouch check .
 ```
 
 `korg` pushes once `check` exits 0 and its warnings are read. The merge
-never fast-forwards, not even your merge of main, so the dates on the
+never fast-forwards, even when your branch already contains main, so the dates on the
 main line are the maintainer's clock, not yours. Until someone endorses
 you, `check` warns that your email is not endorsed; that is expected:
 
@@ -214,10 +216,8 @@ git push -q origin HEAD:endorse-alice
 
 The [captains guide](guide-captains.md#sign-your-endorsement-drafts)
 says what each draft field means. Someone with no GPG history with you
-endorses with `git vouch endorse bob --note "..."` instead. Before
-signing, `endorse` prints the key's SHA256 fingerprint: compare it with
-the one you checked in person, and run `endorse` on the merged registry,
-not on a pull-request checkout.
+endorses with `git vouch endorse bob --note "..."` instead (see
+[Endorsing and approving](#endorsing-and-approving)).
 
 ### Switch git to SSH signing
 
@@ -289,8 +289,9 @@ git vouch status
 
 `sync` fetches the registry, refuses a rewritten history, runs `check`
 and re-exports the allowed-signers and revocation files, so new
-approvals and revocations reach your git. Every command warns once your
-copy is more than 7 days old.
+approvals and revocations reach your git. `status`, `check`, `show`,
+`export`, `query` and `keys` warn when that copy was last fetched more
+than 7 days ago.
 
 ## Rotating your key
 
@@ -328,10 +329,6 @@ late while your timezone is on daylight saving time. The export allows
 for that by ending every key an hour after its retirement, so a
 signature made just before it still verifies
 ([rationale](rationale.md#extra-hour)).
-
-Your `.asc` no longer covers the re-signed person file. That matters
-only if you still want endorsement drafts before the late cutoff; make a
-new one then.
 
 If you sign patches, the selector changes with the key: once the
 rotation is merged and synced, run the two lines in
@@ -379,9 +376,8 @@ endorsement it signed becomes void. That includes patches: once someone
 checking your patches has synced, patatt no longer finds the key. With
 the b4 fork set up as in
 [Check other people's patches](#check-other-peoples-patches), b4 checks
-a signature again every time. Upstream b4 newer than 0.16 remembers a
-verdict for up to 24 hours, so a series it already checked can keep its
-tick until then.
+a signature again every time; other b4 can keep a revoked key's pass for
+up to 24 hours.
 
 ### With your backup key
 

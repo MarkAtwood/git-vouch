@@ -1,6 +1,6 @@
 # Why git-vouch works the way it does
 
-**Status:** reference, 2026-10-23. One entry per design choice the
+**Status:** reference, 2026-11-15. One entry per design choice the
 guides make you follow. Every reason comes from `DESIGN.md`, and each
 entry links its section; where DESIGN gives no reason, the entry says
 so.
@@ -17,8 +17,8 @@ autosigner) and kup upload authentication stay with kernel.org on GPG.
 purpose limits, revocation and key storage, so `git-vouch` adds only the
 approval rules and contains no cryptography. An auditor trusts Python 3,
 git and OpenSSH, which every kernel developer already has, plus one file
-short enough to read in a sitting. DESIGN states no fault in GPG itself:
-git-vouch replaces the keyring and web of trust, not every use of `gpg`.
+short enough to read in a sitting. git-vouch replaces the keyring and
+web of trust, not every use of `gpg`.
 Release files stay on GPG because a handful of release signers is not a
 keyring, a release tarball is `git archive` of a signed tag that
 git-vouch covers, and moving distributions' `gpg --verify` scripts would
@@ -42,7 +42,7 @@ DESIGN: [Summary](../DESIGN.md#summary),
 ## The registry lives in git
 
 **What:** the registry is a git repository holding one signed file per
-person, per endorsement, per tier grant and per revocation. `git fetch`
+person, per endorsement, per tier grant, per revocation and per cosign. `git fetch`
 distributes it, and `git-vouch` reads commit order, committer dates and
 deletions as part of the registry. `anchors.json` in it names the
 anchors; nothing is pinned locally.
@@ -60,9 +60,8 @@ anchors. Every later change to them needs two anchors' cosigns
 **Rejected:** OpenVTC / VTI, which solves the same problem with an
 always-on agent, three transports and seven credential types in over
 900k lines. LF-wide federation and cross-project lookups: the kernel
-comes first. Local anchor pinning or an extra signature on
-`anchors.json`: DESIGN gives no reason beyond making the registry the
-root of trust.
+comes first. Local anchor pinning: DESIGN gives no reason beyond making
+the registry the root of trust.
 
 DESIGN: [Constraints](../DESIGN.md#constraints),
 [The registry](../DESIGN.md#the-registry),
@@ -96,8 +95,8 @@ DESIGN: [Summary](../DESIGN.md#summary),
 
 **What:** a change to `anchors.json` after its first version, and an
 anchor's or maintainer's person-file change no previous key signed, need
-cosigns by two anchors, neither the person affected (`git vouch cosign
-<path>`). A cosign is a signed record naming the SHA-256 of the exact
+cosigns by two anchors in effect before the change, never the person
+whose file it is (`git vouch cosign <path>`). A cosign is a signed record naming the SHA-256 of the exact
 bytes it approves. Without two, the `anchors.json` edit has no effect,
 and the person's tier is suspended from that commit; `check` reports
 both as void and still passes. With fewer than two eligible anchors,
@@ -146,8 +145,8 @@ did.
 **Rejected:** minimum endorsement counts per tier, because the approver
 decides. Calling every untiered endorser outside, which would include
 kernel newcomers; and judging by the endorsement graph, which a sock
-puppet nobody endorsed passes anyway. Tiers from the GPG web of trust: Linus certifies 2 keys, so it
-says nothing about who is a maintainer.
+puppet nobody endorsed passes anyway. Tiers from the GPG web of trust:
+Linus certifies 2 keys, so it says nothing about who is a maintainer.
 
 DESIGN: [How trust maps](../DESIGN.md#how-trust-maps),
 [Endorsement](../DESIGN.md#endorsement),
@@ -237,13 +236,15 @@ signatures.
 **Why:** adding a key is signed by an existing key, which is how
 rotation works, and the backup token can stay in a drawer. kernel.org's
 backup tokens fit this rule. Without a backup, recovery is a change no
-previous key signed: `check` prints a WARNING and review is the gate. A
+previous key signed, and `check` prints a WARNING. For an anchor or
+maintainer the tier is then suspended until two anchors cosign the
+change ([cosign](#cosign)); for anyone else review is the gate, and a
 merger who lets a swapped key through hands its holder your tier and
 endorsements. The caps bound how many `ssh-keygen` runs a hostile file
 costs `check`.
 
 **Rejected:** refusing a change no previous key signed. DESIGN keeps it
-as the route for lost-key recovery and makes registry review the gate.
+as the route for lost-key recovery.
 
 DESIGN: [Person file](../DESIGN.md#person-file),
 [Keys](../DESIGN.md#keys),
@@ -253,9 +254,9 @@ DESIGN: [Person file](../DESIGN.md#person-file),
 ## Signatures cover exact bytes
 
 **What:** every record's signature covers the file's exact bytes, under
-a namespace for its kind. Any edit means re-signing, and your `.asc`
-stops covering your person file after `add-key`, `retire-key` or an
-email change, so make it last.
+a namespace for its kind. Any edit means re-signing. A continuity
+`.asc` covers the exact bytes it signed; once that version is
+committed, later signed edits keep the proof.
 
 **Why:** records carry arbitrary user metadata, and canonicalising it
 would need exact number formatting (JCS) or context fetching (RDF
@@ -403,8 +404,10 @@ population only shrinks. The core set comes from git history, so nobody
 picks names and anyone can rerun it. A tree that has not switched is no
 weaker than today.
 
-**Rejected:** a kernel-wide flag day with no period accepting both. A
-manifest of old signatures: DESIGN gives no reason.
+**Rejected:** a kernel-wide flag day with no period accepting both.
+Accepting GPG in Linus's tree after the flag day: the core set is small
+and named by `pullers`, so it can register in the window. A manifest of
+old signatures: DESIGN gives no reason.
 
 DESIGN: [Flag day](../DESIGN.md#flag-day),
 [Rejected alternatives](../DESIGN.md#rejected-alternatives).
@@ -462,7 +465,8 @@ Endorsements, What continuity cannot catch),
 ## The six-month late cutoff
 
 **What:** six months after the flag day, extendable by the anchors'
-announcement. After it, registry maintainers merge no change that adds
+announcement. From then no tree accepts a new GPG-signed tag or patch.
+Registry maintainers merge no change that adds
 or alters `migratedFrom` or adds a `people/*.json.asc`, judged by merge
 date; everyone deletes the legacy patatt keyring line; and
 `git-vouch-migrate` is retired. Late registrants register as newcomers.
@@ -510,9 +514,8 @@ It is a thin shim over `git vouch query`, and it refuses to answer once
 24 hours pass without a successful sync. For the kernel we propose the
 authority DID `did:web:registry.kernel.org`; kernel.org decides.
 
-**Why:** it lets OpenVTC tools query the registry while kernel
-developers never depend on it. It is the one service, and nothing
-depends on it; a job that needs an HTTP listener gets its own tool, so
+**Why:** it is the one service, and nothing in the kernel's own use of
+git-vouch depends on it; a job that needs an HTTP listener gets its own tool, so
 `git-vouch` stays a CLI. Answers over HTTPS are unsigned, and anyone can
 check one against the public registry. `did:web:kernel.org` would spend
 the domain-wide name, and `did:webvh` adds machinery an optional bridge

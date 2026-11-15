@@ -124,12 +124,12 @@ No kernel discussion of Sigstore was found.
 
 - Every project already keeps a reviewed list of people in git.
   git-vouch puts keys and signatures in that list; a project that
-  already runs Peribolos or CLOWarden is one tool away (vouch-9ogq).
+  already runs Peribolos or CLOWarden is one tool away.
 - Signed tags cost nothing extra once the list holds keys: `git vouch
   export` writes the file `git verify-tag` reads.
-- Recent signed tags are moving to SSH (Prometheus, Sigstore's own).
-  gitsign's network dependence and lack of revocation are the objections
-  distributions already raised.
+- Some projects already sign tags with SSH (Prometheus, Sigstore).
+  Distributions objected to Sigstore's reliance on a few providers and
+  its lack of offline verification; gitsign shares both, and has no
+  revocation.
 - Release artifacts are a separate problem that projects solve with
-  checksums, GPG or keyless cosign; git-vouch leaves them out of scope
-  (vouch-omzm.15).
+  checksums, GPG or keyless cosign; git-vouch leaves them out of scope.
