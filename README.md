@@ -43,6 +43,34 @@ one job. Patch email adds a patatt fork.
 | `git-vouch-trqp` | Optional bridge that answers OpenVTC's `verify-trust` from the registry |
 | [patatt fork](https://github.com/MarkAtwood/patatt) | Lets b4 check patch-email signatures against the registry |
 
+## Install
+
+You need Python 3.9 or later, git 2.35 or later, and OpenSSH 9.1 or
+later. There is nothing to build and no Python package to install. When
+you type `git vouch`, git runs the executable `git-vouch` it finds on
+your `PATH`, so cloning the repository and linking the tools into a
+directory on `PATH` is the whole install:
+
+```sh
+git clone https://github.com/MarkAtwood/git-vouch.git ~/src/git-vouch
+mkdir -p ~/.local/bin   # or any directory on your PATH
+ln -s ~/src/git-vouch/git-vouch ~/.local/bin/
+git vouch -h
+```
+
+Link the other tools the same way if you need them: anchors and
+pgpkeys holders need `git-vouch-migrate` for the flag day, and it finds
+`git-vouch` next to its own file. To update, run
+`git -C ~/src/git-vouch pull`.
+
+`git vouch -h` and `git vouch <command> -h` print the help. Plain
+`git vouch --help` does not: git takes it as `git help vouch` and looks
+for a man page, which git-vouch does not have.
+
+Patch signing also needs the b4 and patatt forks; the guides' Patch
+signing sections install them. Next, run `git vouch setup` (below). The
+kernel's registry does not exist yet (see Status), so pass `--registry`.
+
 ## What `git vouch setup` changes
 
 `setup` changes git's config and its own directory, nothing else. It
