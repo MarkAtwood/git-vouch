@@ -1,13 +1,16 @@
 # Running the TRQP bridge
 
 **Status:** deployment note for `git-vouch-trqp`, 2026-10-23 (bead
-vouch-faq3.8). Behaviour comes from `git-vouch-trqp`, `git-vouch` and
-DESIGN.md, TRQP bridge. The unit files were checked with
-`systemd-analyze verify`. The bridge speaks `registry/authorization/0.2`
-only, so it needs verify-trust 0.27.0 or later. The verify-trust results
-below were measured with `tests/trqp/test_verify_trust.py` against
-verify-trust 0.33.0's release binary on Debian 13, 2026-11-15: all 15
-end-to-end tests pass.
+vouch-faq3.8).
+
+- Behaviour comes from `git-vouch-trqp`, `git-vouch` and DESIGN.md,
+  TRQP bridge.
+- The unit files were checked with `systemd-analyze verify`.
+- The bridge speaks `registry/authorization/0.2` only, so it needs
+  verify-trust 0.27.0 or later.
+- The verify-trust results below were measured with
+  `tests/trqp/test_verify_trust.py` against verify-trust 0.33.0's
+  release binary on Debian 13, 2026-11-15: all 15 end-to-end tests pass.
 
 ## Verdict
 
@@ -147,13 +150,15 @@ It prints the document on stdout and where to serve it on stderr
 
 Serve that file as static JSON at that exact URL, on a public host, with
 no redirect: verify-trust's resolver fetches only from public hosts and
-follows no redirect (`docs/trqp-interop.md`, section 2). The endpoint is
-a base URL; verify-trust appends `/trust-tasks`. `did-document` refuses
-any endpoint that is not `https://`, or that has a query, fragment,
-userinfo or backslash. The document carries one `TRQPRest` entry and
-nothing else, because verify-trust prefers TSP and DIDComm over HTTPS
-with no fallback. For `did:webvh`, sign the document into the log with
-an existing webvh tool; `git-vouch-trqp` adds no cryptography.
+follows no redirect (`docs/trqp-interop.md`, section 2).
+
+- The endpoint is a base URL; verify-trust appends `/trust-tasks`.
+- `did-document` refuses any endpoint that is not `https://`, or that
+  has a query, fragment, userinfo or backslash.
+- The document carries one `TRQPRest` entry and nothing else, because
+  verify-trust prefers TSP and DIDComm over HTTPS with no fallback.
+- For `did:webvh`, sign the document into the log with an existing
+  webvh tool; `git-vouch-trqp` adds no cryptography.
 
 ## Reverse proxy
 
@@ -180,11 +185,16 @@ stale 503. Do not cache it.
 `git vouch sync` touches `vouch-fetched` in the copy's git directory
 after each successful fetch. The bridge reads that stamp before every
 answer and refuses when the stamp is missing, over 24 hours old, or
-dated more than 5 minutes in the future: HTTP 503 with `Retry-After: 3600`
-and a `trust-task-error` whose code is `unavailable`, `retryable` true,
-`retryAfter` an hour on, and the reason as its `message`. An hourly
-sync leaves 23 failed attempts before the refusal. `git vouch` itself
-only warns after 7 days and keeps working.
+dated more than 5 minutes in the future. The refusal is HTTP 503 with
+`Retry-After: 3600` and a `trust-task-error` with:
+
+- code `unavailable`;
+- `retryable` true;
+- `retryAfter` an hour on;
+- the reason as its `message`.
+
+An hourly sync leaves 23 failed attempts before the refusal. `git vouch`
+itself only warns after 7 days and keeps working.
 
 Every answer carries the copy's state in
 `ext["org.kernel.git-vouch"]` as `{"commit": ..., "synced": ...}`.
@@ -203,12 +213,13 @@ Failures, and where they show:
 
 **Why the stale reply is a retryable error.** verify-trust 0.25.0 and
 later (OpenVTC #176) report a retryable `trust-task-error` as
-`registryUnavailable`, failing closed as for a bridge that is down, not
-as a denial blamed on the signer; verify-trust 0.33.0's own test of this
-case names stale registry data. Earlier verify-trust read it as
-`unauthorized`, which is why the bridge once sent a bare 503, but those
-versions cannot use this bridge anyway: it speaks authorization 0.2
-only.
+`registryUnavailable`. That fails closed as for a bridge that is down,
+instead of as a denial blamed on the signer; verify-trust 0.33.0's own
+test of this case names stale registry data.
+
+Earlier verify-trust read it as `unauthorized`, which is why the bridge
+once sent a bare 503. Those versions cannot use this bridge anyway: it
+speaks authorization 0.2 only.
 
 ## Registry merges
 
@@ -234,12 +245,13 @@ copy's commit changes and after 60 seconds.
 - **Always checked fresh:** a request with `context.time` (one DID's
   `query --at` each time) and a served copy with local changes. Do not
   edit the copy; `sync` checks it out with `--force` anyway.
-- **Limits:** each git run gets 30 s, and at most 4 run at once, never
-  a queue. A request that finds all 4 slots taken gets a retryable 503
-  at once and logs nothing. A check that times out gets one after 30 s
-  and logs `git-vouch-trqp: git vouch timed out after 30s` to stderr,
-  so to the journal; a failed query logs `git-vouch-trqp: git vouch
-  query exited N: ...`. The reply to the client stays generic.
+- **Limits:** each git run gets 30 s, and at most 4 run at once, with
+  no queue. The client always gets a generic reply; stderr (so the
+  journal) gets the detail:
+  - all 4 slots taken: a retryable 503 at once, nothing logged;
+  - a check that times out: a retryable 503 after 30 s, and
+    `git-vouch-trqp: git vouch timed out after 30s`;
+  - a failed query: `git-vouch-trqp: git vouch query exited N: ...`.
 
 ## Checking with verify-trust
 
@@ -273,9 +285,9 @@ git checkout v0.33.0
 cargo build --locked --release -p verify-trust
 ```
 
-The release's prebuilt Linux binary needs glibc 2.38 or later, so on an
-older system, such as Debian 12, build it as above; the test fails at once,
-saying so, if the binary cannot run. Then run the tests with
+The release's prebuilt Linux binary needs glibc 2.38 or later; on an
+older system, such as Debian 12, build it as above. If the binary cannot
+run, the test fails at once and says so. Then run the tests with
 `VERIFY_TRUST` set to `target/release/verify-trust` in that tree:
 
 ```sh

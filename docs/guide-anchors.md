@@ -3,11 +3,16 @@
 This guide takes an anchor through the flag day, day-to-day registry
 work and patch signing. An anchor is one of the few people
 `anchors.json` in the registry lists: Linus and whoever the kernel team
-designates. Anchors are the root of the tree. You approve maintainers,
-you can revoke anyone's key, your own key signs releases, and two of you
-cosign any later change to `anchors.json` and any anchor's or
-maintainer's recovery from a lost key. Only `anchors.json` grants the
-anchor tier, and a tier record for an anchor fails `check`.
+designates. Anchors are the root of the tree:
+
+- You approve maintainers.
+- You can revoke anyone's key.
+- Your own key signs releases.
+- Two of you cosign any later change to `anchors.json`, and any anchor's
+  or maintainer's recovery from a lost key.
+
+Only `anchors.json` grants the anchor tier; a tier record for an anchor
+fails `check`.
 
 Read [What vouching for a real person means](vouching.md) before you
 endorse or approve anyone. It says what an endorsement binds, what
@@ -15,7 +20,7 @@ evidence to ask for, and how to read the endorsements you approve on.
 
 ## What the commands assume
 
-> **What this does:** lists the variables and checkouts, and the keys you sign with and where to keep them.\
+> **What this does:** lists the variables, checkouts and signing keys the blocks below use.\
 > **Why:** the tool cannot prove what holds a key, so hardware tokens are advice for you, not a rule it enforces ([rationale](rationale.md#hardware-keys)).
 
 - `$REGISTRY` is the registry's URL and `$LINUX` is a kernel tree you
@@ -29,7 +34,7 @@ evidence to ask for, and how to read the endorsements you approve on.
   signing key and `~/.ssh/backup` a backup key that stays in a drawer.
   Keep both on hardware tokens: kernel.org issues FIDO keys and backup
   tokens (korg.docs.kernel.org/fido2.html). `git-vouch` accepts any
-  supported key, so this is advice, not a rule.
+  supported key.
 - `registry` is your checkout of the registry and `linux` your kernel
   tree, both in your home directory.
 
@@ -44,15 +49,18 @@ Put your own handle, name and email in their place.
 
 [The flag-day runbook](flag-day.md) has the full timeline for everyone.
 
-Before the flag day you approve the core set as maintainers: everyone
-`git-vouch-migrate pullers` lists from Linus's merges. Patches follow
-the same dates as tags. Before the flag day, everyone who signs or
-checks patches installs the patatt fork and lists
-`keyringsrc = vouch:` first and the frozen pgpkeys keyring second, as
-[Patch signing](#patch-signing) shows. Patches signed with a GPG key, or
-with a key `patatt genkey` made, then keep verifying through pgpkeys,
-with a warning, for everyone until the late cutoff, six months after the
-flag day.
+Before the flag day:
+
+- You approve the core set as maintainers: everyone
+  `git-vouch-migrate pullers` lists from Linus's merges.
+- Everyone who signs or checks patches installs the patatt fork and
+  lists `keyringsrc = vouch:` first and the frozen pgpkeys keyring
+  second, as [Patch signing](#patch-signing) shows.
+
+Patches follow the same dates as tags. Patches signed with a GPG key, or
+with a key `patatt genkey` made, keep verifying through pgpkeys, with a
+warning, for everyone until the late cutoff, six months after the flag
+day.
 
 ### Register and merge first
 
@@ -75,9 +83,9 @@ git push -q origin HEAD:register-lena
 ```
 
 Register the backup key now, while your main key can sign for it. A
-person file change needs a signature from a key in the previous version,
-so with a backup listed, losing your main key is a signed change and
-not one that rests on review (see Lost key and
+person file change needs a signature from a key in the previous version.
+With a backup listed, recovering from a lost main key is a signed change
+rather than one that rests on review (see [Lost key](#lost-key) and
 [rationale](rationale.md#backup-key)).
 
 **If you hold a key in `pgpkeys.git`,** register from your
@@ -106,17 +114,22 @@ The person files go in first because `check` fails if `anchors.json`
 names a handle with no person file.
 
 Only review protects this first `anchors.json`: whoever can merge into
-the registry chooses the first anchors. Adding or removing an anchor
-later is the same edit, and it takes effect only once two anchors in
-effect before it have run `git vouch cosign anchors.json` on its exact
-bytes and those cosigns are merged, or every anchor when there are fewer
-than two ([rationale](rationale.md#cosign)). Until then `check` reports
-`anchors.json: void: not cosigned by two anchors` and the old anchors
-stand. Two more cases show in `check`. Promoting someone who has a tier
-record fails it unless the same merge deletes their
-`tiers/<handle>.json`. A tier record granted on
-a branch concurrent with removing its approver from `anchors.json` is
-void, with a warning, until someone re-approves it.
+the registry chooses the first anchors.
+
+Adding or removing an anchor later is the same edit. It takes effect
+only once two anchors in effect before it (every anchor, when there are
+fewer than two) have run `git vouch cosign anchors.json` on its exact
+bytes and those cosigns are merged ([rationale](rationale.md#cosign)).
+Until then `check` reports `anchors.json: void: not cosigned by two
+anchors` and the old anchors stand.
+
+Two more cases show in `check`:
+
+- Promoting someone who has a tier record fails `check` unless the same
+  merge deletes their `tiers/<handle>.json`.
+- A tier record granted on a branch concurrent with removing its
+  approver from `anchors.json` is void, with a warning, until someone
+  re-approves it.
 
 The kernel team decides who the registry maintainers are, and that list
 matters as much as the anchor list. Registry maintainers also enforce
@@ -160,12 +173,17 @@ not even of a contributor's merge of main, so the dates on the main
 line are the maintainer's clock and not the contributor's
 ([rationale](rationale.md#no-ff-merges)).
 
-Stop here. Push only once `check` exits 0, the list of changed paths is
-right, and you have read every `git-vouch: warning:` line (see Read
-check warnings in registry merges). For an unsigned-change WARNING,
-first confirm the new key with its owner over a channel you already
-trust. If anything is wrong, `git reset -q --hard origin/main` drops the
-merge. Then the registry maintainer pushes:
+Stop here. Push only when:
+
+- `check` exits 0;
+- the list of changed paths is right;
+- you have read every `git-vouch: warning:` line (see
+  [Read check warnings in registry merges](#read-check-warnings-in-registry-merges)).
+
+For an unsigned-change WARNING, first confirm the new key with its owner
+over a channel you already trust. If anything is wrong,
+`git reset -q --hard origin/main` drops the merge. Otherwise the
+registry maintainer pushes:
 
 <!-- as korg -->
 ```sh
@@ -174,10 +192,17 @@ git push -q origin main
 ```
 
 Approve maintainers on your own judgement, using MAINTAINERS and their
-endorsements. GPG supplies no tiers: Linus certified 2 keys in pgpkeys,
-so the web of trust says nothing about who is a maintainer. No minimum
-number of endorsements applies; you read them and decide. If you know
-the person yourself, endorse them too, following
+endorsements; no minimum number of endorsements applies. GPG supplies no
+tiers: Linus certified 2 keys in pgpkeys, so the web of trust says
+nothing about who is a maintainer.
+
+Before you approve someone others endorsed, run
+`git vouch show <handle>`. It lists each valid endorsement: who made it,
+their tier, which emails, and what the note says was checked. It marks
+endorsements from outside the kernel graph and names the identities to
+check them against. `vouching.md` has a checklist.
+
+If you know the person yourself, endorse them too, following
 [vouching.md](vouching.md). Then approve:
 
 <!-- as lena -->
@@ -196,15 +221,11 @@ git push -q origin HEAD:approve-alice
 <!-- merge approve-alice -->
 
 The registry maintainer merges and pushes it as above, with
-`branch=approve-alice`. Before you approve someone others endorsed, run
-`git vouch show <handle>`: it lists each valid endorsement with who made
-it, their tier, which emails and what the note says was checked, and
-marks those from outside the kernel graph with the identities to check
-them against. `vouching.md` has a checklist.
+`branch=approve-alice`.
 
 `check` judges your approval once, at the commit that adds it. If you
 later step down, the tiers you granted stay. Only a revoked key voids
-the tier records it signed (see Lost key).
+the tier records it signed (see [Lost key](#lost-key)).
 
 ### Switch Linus's git to the maintainer export
 
@@ -235,7 +256,7 @@ git push -q origin alice-6.99
 
 In your own tree, stop accepting OpenPGP signatures:
 `gpg.openpgp.program false` makes git fail every one there, while SSH
-signatures still verify. Trees other maintainers run switch on their own
+signatures still verify. Other maintainers' trees switch on their own
 schedule, by the late cutoff ([rationale](rationale.md#one-flag-day)).
 The maintainer's tag verifies against your export:
 
@@ -253,16 +274,20 @@ does not hold fail the same way. `git verify-tag` exits 1 and prints:
     Good "git" signature with ED25519 key SHA256:<fingerprint>
     No principal matched.
 
-"Good" means only that the signature matches the key; "No principal
-matched" means the key is not in your export. `git pull` of that tag does
-not fail. It merges, exits 0, and puts the same two lines in the merge
-message only as `#` comments; `git log --show-signature` repeats them
-under `merged tag '<tag>'`. `git pull --verify-signatures` checks commit
-signatures, not the tag, so it rejects even a maintainer's good tag on
-unsigned commits. Run `git verify-tag` on the tag before you merge it.
+"Good" means only that the signature matches the key. "No principal
+matched" means the key is not in your export.
 
-Reply to the sender with what they must do; `git vouch status` shows
-them their own tier:
+Run `git verify-tag` on the tag before you merge it. The pull commands
+do not catch this:
+
+- `git pull` of that tag merges and exits 0. It puts the same two lines
+  in the merge message only as `#` comments, and
+  `git log --show-signature` repeats them under `merged tag '<tag>'`.
+- `git pull --verify-signatures` checks commit signatures, not the tag,
+  so it rejects even a maintainer's good tag on unsigned commits.
+
+Tell the sender what to do; `git vouch status` shows them their own
+tier:
 
 - **Not registered:** register, collect endorsements, and get approved
   as maintainer. Then re-sign the tag: git checks the tag's signing time
@@ -284,7 +309,7 @@ Linus's tree does not accept a GPG-signed tag or pull.
 Release tooling verifies against anchors only. It names its own files,
 so it also works on a machine that never ran `git vouch setup`. Here
 `export` reads the synced copy; elsewhere, pass a registry checkout as
-`DIR`.
+`DIR`:
 
 <!-- as lena -->
 ```sh
@@ -299,17 +324,21 @@ git -c gpg.ssh.allowedSignersFile="$HOME/release-signers" \
 git push -q origin v6.99
 ```
 
-Re-run that `export` after every `git vouch sync`, so the release files
-see new revocations.
+Re-run that `export` after every `git vouch sync` so the release files
+pick up new revocations.
 
 ## Day to day
 
 > **What this does:** gives the one path every registry change takes.\
 > **Why:** changes arrive as reviewed merges, and review is the only gate for three accepted risks ([rationale](rationale.md#nothing-pushes)).
 
-Make each change on a branch from the registry's `main`: one
-`git vouch` command writes and signs the record, you commit and push,
-and the registry maintainer merges. No `git vouch` command pushes.
+Make each change on a branch from the registry's `main`:
+
+1. One `git vouch` command writes and signs the record.
+2. You commit and push the branch.
+3. The registry maintainer merges it.
+
+No `git vouch` command pushes.
 
 ### Keep your copy current
 
@@ -325,10 +354,9 @@ git vouch status
 `sync` fetches the registry, refuses a rewritten history, runs `check`
 and re-exports your allowed-signers and revocation files with the tier
 you chose at `setup`. It writes the revocation file even when `check`
-fails on something else, so a revocation always reaches you. Every
-command warns when your copy was last fetched more than 7 days ago, so
-sync often. `status` shows the registry commit, its age, and your own
-tier.
+fails on something else, so a revocation always reaches you. `status`,
+`check`, `show`, `export`, `query` and `keys` warn when your copy was
+last fetched more than 7 days ago, so sync often. `status` shows the registry commit, its age, and your own tier.
 
 ### Rotate your key
 
@@ -352,8 +380,9 @@ git push -q origin HEAD:rotate-lena
 
 <!-- merge rotate-lena -->
 
-Sign both changes with a key from the version already in the registry:
-a version signed only by a key it adds gets the unsigned-change WARNING.
+Sign both changes with a key from the version already in the registry.
+A version signed only by a key it adds gets the unsigned-change WARNING.
+
 Once you have synced, the release tag the old key made still verifies:
 
 <!-- as lena -->
@@ -377,7 +406,8 @@ check them sync.
 > **What this does:** demotes a maintainer by replacing their tier record with a lower one.\
 > **Why:** only someone above the tier being taken away may sign the lower record, so only an anchor can demote a maintainer ([rationale](rationale.md#tiers)).
 
-Approving is the step under Approve the first maintainers. A
+Approving works as in
+[Approve the first maintainers](#approve-the-first-maintainers). A
 maintainer's record lowering a peer is void.
 
 <!-- as lena -->
@@ -395,8 +425,8 @@ git push -q origin HEAD:demote-alice
 
 Her maintainer tier ends at the new record's `date`. The export adds an
 hour to every end, to get around an OpenSSH 9.6 time-zone bug
-([rationale](rationale.md#extra-hour)). A tag she signs more than an
-hour after it, here dated two hours on:
+([rationale](rationale.md#extra-hour)). Here she signs a tag dated two
+hours later:
 
 <!-- as alice -->
 ```sh
@@ -406,8 +436,8 @@ GIT_COMMITTER_DATE="$(($(date +%s) + 7200)) +0000" \
 git push -q origin alice-7.0
 ```
 
-fails against the maintainer export, while signatures she made before
-the demotion still verify:
+That tag fails against the maintainer export. Signatures she made
+before the demotion still verify:
 
 <!-- as lena -->
 ```sh
@@ -462,8 +492,8 @@ git verify-tag alice-6.99    # fails: the key is revoked
 Once committed, a revocation holds even if its file is later deleted.
 
 `alice` has no other key, so she recovers with a change no previous key
-signed. She adds a new key to her person file, signed only by the new
-key, then retires the stolen one with it:
+signed: she adds a new key to her person file, signed only by that key,
+then retires the stolen one with it:
 
 <!-- as alice -->
 ```sh
@@ -480,8 +510,8 @@ git push -q origin HEAD:recover-alice
 
 <!-- merge recover-alice -->
 
-The merge's `check` prints the warning, the registry maintainer's cue
-to confirm her new key with her before the push block:
+The merge's `check` prints this warning. It is the registry
+maintainer's cue to confirm her new key with her before the push block:
 
 ```text
 git-vouch: warning: people/alice.json: WARNING: changed at <commit> without a signature by any unrevoked key current in the previous version; only registry review let it through (old keys: did:key:z6Mk...; new keys: did:key:z6Mk...)
@@ -491,18 +521,19 @@ The version she first registered warns the same way from the moment her
 key is revoked, because a revoked key's signatures count for nothing;
 only the new warning needs a decision.
 
-For a contributor, as `alice` is by now, this check is the only thing
-standing between a lost-key recovery and an account takeover: a merger
-who let a swapped key through would hand its holder her tier and
-endorsements. Her tier carries over. Had she still been a maintainer,
-the recovery would suspend her tier, and `check` would say so as void,
-until two other anchors each ran `git vouch cosign people/alice.json` on
-the merged file and those cosigns merged
-([rationale](rationale.md#cosign)). Your
-endorsement of her named the key now revoked; it still carries over to
-her new key, as on rotation, so her email stays exported. Confirming her
-new key as `vouching.md` describes and endorsing it again is encouraged,
-not enforced:
+For a contributor, as `alice` is by now, this check is all that stands
+between a lost-key recovery and an account takeover. A merger who let a
+swapped key through would hand its holder her tier and endorsements.
+
+Her tier carries over. Had she still been a maintainer, the recovery
+would suspend her tier (`check` reports it as void) until two other
+anchors each ran `git vouch cosign people/alice.json` on the merged file
+and those cosigns merged ([rationale](rationale.md#cosign)).
+
+Your endorsement of her named the key now revoked. It still carries over
+to her new key, as on rotation, so her email stays exported. Confirming
+her new key as `vouching.md` describes and endorsing it again is
+encouraged, not enforced:
 
 <!-- as lena -->
 ```sh
@@ -522,8 +553,8 @@ git push -q origin HEAD:endorse-alice
 > **What this does:** lists each `check` warning, what it means, and what to do before merging.\
 > **Why:** `check` exits 0 on warnings, and review is the only gate for the changes they flag ([rationale](rationale.md#nothing-pushes)).
 
-Every merge needs a human to read the warnings as well as the exit
-code. Each warning is one line, starting `git-vouch: warning:`.
+Every merge needs a human to read the warnings, not only the exit
+code. Each warning is one line starting `git-vouch: warning:`.
 
 | Warning | Meaning | What to do |
 |---|---|---|
@@ -536,12 +567,15 @@ code. Each warning is one line, starting `git-vouch: warning:`.
 | `people/<h>.json: void: changed at <commit> without a signature by a previous key, and two anchors have not cosigned it; the <tier> tier of <h> is suspended from then` | An anchor's or maintainer's lost-key recovery, or a swapped key | Confirm the new key with them; two other anchors run `git vouch cosign people/<h>.json` |
 | `the registry copy was last fetched <n> days ago` | Your copy is stale | `git vouch sync` |
 
-Some changes get neither an error nor a warning: the first
-`anchors.json`, and deleting a tier record (that person's keys
-get `valid-before`), an endorsement, or a revocation (no effect: a
-revocation holds once committed). Read `git diff --name-status` in the
-merge for those. Deleting a person file that other records still name
-fails `check`.
+These changes get neither an error nor a warning, so read
+`git diff --name-status` in the merge for them:
+
+- the first `anchors.json`;
+- deleting a tier record (that person's keys get `valid-before`);
+- deleting an endorsement;
+- deleting a revocation (no effect: a revocation holds once committed).
+
+Deleting a person file that other records still name fails `check`.
 
 ### Endorse
 
@@ -550,11 +584,13 @@ fails `check`.
 
 Any registered human may endorse anyone; anchors are no different.
 `git vouch endorse <handle> --note "..."` endorses the person's name,
-first current key and every listed email (`--email` limits it), as in
-the steps above. [vouching.md](vouching.md) says what to check first
-and what to write in the note. Before signing, `endorse` prints the
-key's SHA256 fingerprint: compare it with the one you checked in person.
-Run `endorse` on the merged registry, not on a pull-request checkout.
+first current key and every listed email (`--email` limits it).
+[vouching.md](vouching.md) says what to check first and what to write
+in the note.
+
+- Before signing, `endorse` prints the key's SHA256 fingerprint. Compare
+  it with the one you checked in person.
+- Run `endorse` on the merged registry, not on a pull-request checkout.
 
 ### Lost key
 
@@ -578,8 +614,9 @@ git vouch check .
 ```
 
 Revoke rather than retire unless you are sure nobody else can use the
-key: the signing time comes from the signer, so whoever holds a retired
-key can backdate signatures. Revoking an anchor's key costs the most.
+key ([Revoke a compromised key](#revoke-a-compromised-key) says why).
+Revoking an anchor's key costs the most.
+
 `check` now reports every record the lost key signed as void, here
 alice's demotion and the endorsement you made after her recovery:
 
@@ -605,35 +642,38 @@ git push -q origin HEAD:lost-lena
 
 Every tag the revoked key signed also stops verifying, which for an
 anchor can include release tags. Keep signing keys on hardware tokens
-with a PIN, and the backup in a drawer. Patches stop verifying too: once
-someone checking them has synced, patatt no longer finds the key. With
-the b4 fork set up as in
-[Check incoming patches](#check-incoming-patches), b4 checks a signature
-again every time. Upstream b4 newer than 0.16 remembers a verdict for
-up to 24 hours, so a series it already checked can keep its tick until
-then.
+with a PIN, and the backup in a drawer.
 
-**Without a backup key,** the only way back is a change no previous key
-signed, as `alice` made above. It rests on the registry maintainer's
-review, and `check` warns about it. Another anchor revokes the lost key
-with their own.
+Patches stop verifying too: once someone checking them has synced,
+patatt no longer finds the key. With the b4 fork set up as in
+[Check incoming patches](#check-incoming-patches), b4 checks a signature
+again every time; upstream b4 newer than 0.16 can keep a series' tick
+for up to 24 hours.
+
+**Without a backup key,** another anchor revokes the lost key with
+their own. The only way back is a change no previous key signed, as
+`alice` made above. It rests on the registry maintainer's review, and
+`check` warns about it.
 
 ## Patch signing
 
 > **What this does:** signs and checks patches with patatt against the registry, with the frozen pgpkeys keyring as a fallback until the late cutoff.\
 > **Why:** the registry is the keyring, so nothing is generated, published or trusted in between ([rationale](rationale.md#patch-fallback)).
 
-Patches are signed with patatt, the signer built into b4: an
-`X-Developer-Signature` header that `b4 am` checks. A fork of patatt
-adds one keyring source, `vouch:`, which asks `git vouch keys` for the
-signer's current keys. A patch verifies when one of the signer's current
-keys signed it and it comes from an endorsed email, whatever the
-signer's tier, automation identities included.
+patatt, the signer built into b4, adds an `X-Developer-Signature`
+header that `b4 am` checks. A fork of patatt adds one keyring source,
+`vouch:`, which asks `git vouch keys` for the signer's current keys. A
+patch verifies when one of the signer's current keys signed it and it
+comes from an endorsed email, whatever the signer's tier, automation
+identities included.
 
 ### Install the forks
 
-> **What this does:** installs b4 and patatt from their forks' `git-vouch` branches in one command, so b4 gets the patatt fork in place of released patatt.\
+> **What this does:** installs b4 and patatt from their forks' `git-vouch` branches.\
 > **Why:** the b4 fork can check every patch afresh, so a revocation takes effect at once ([rationale](rationale.md#patch-fallback)).
+
+Install both in one command, so b4 gets the patatt fork in place of
+released patatt:
 
 <!-- patch not-run needs-network -->
 ```shell
@@ -648,21 +688,25 @@ fetch that branch from github.com/MarkAtwood/patatt and check it out
 there.
 
 `misc/vouch-check.sh` in the b4 fork tests the pair offline in a
-throwaway home: it signs a series with a registry key and checks that
-`b4 am` passes it, then fails it once the key is revoked. Unless
-git-vouch and the patatt fork are checked out next to b4 and b4 has a
-`.venv`, set `GIT_VOUCH` to the git-vouch script, `PATATT_FORK` to a pip
-requirement for the patatt fork and `PYTHON` to a Python with b4's
-dependencies. It also needs `uv`, with setuptools in its cache. It sets
-up its own config: set yours as this page does, not as the script's
-header shows.
+throwaway home. It signs a series with a registry key, checks that
+`b4 am` passes it, then checks that it fails once the key is revoked. It
+needs:
+
+- `uv`, with setuptools in its cache;
+- unless git-vouch and the patatt fork are checked out next to b4 and b4
+  has a `.venv`: `GIT_VOUCH` set to the git-vouch script, `PATATT_FORK`
+  to a pip requirement for the patatt fork, and `PYTHON` to a Python
+  with b4's dependencies.
+
+The script sets up its own config. Set yours as this page does, not as
+the script's header shows.
 
 ### Sign with your registry key
 
 > **What this does:** makes patatt sign with the key git signs with, under the selector `git vouch status` prints.\
 > **Why:** patatt signs as your `user.email`, and only endorsed emails are exported as identities ([rationale](rationale.md#endorsed-emails)).
 
-The selector is derived from the key. Your `user.email` must be an
+The selector is derived from the key, and your `user.email` must be an
 endorsed email. `b4 send`, or `git send-email` after
 `patatt install-hook`, then signs every patch:
 
@@ -690,23 +734,24 @@ git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
 git config --global b4.attestation-recheck-hours 0
 ```
 
-Leave that clone at the freeze commit: patatt reads the keyring as files
-on disk, so a key added after the freeze would verify too. The checkout
-fails if the clone does not hold the freeze commit.
+Leave that clone at the freeze commit. The checkout fails if the clone
+does not hold the freeze commit.
 
 `b4.attestation-recheck-hours = 0` is a setting of the b4 fork: b4
 checks every signature again instead of remembering a verdict for up to
 24 hours, so a revoked key stops verifying at your next `git vouch
 sync`. Any other b4 ignores it, and upstream b4 newer than 0.16 keeps a
-pass for up to 24 hours. The fork names the keyring after every registry
-pass: if `b4 am` prints `✓ Signed: openssh/...` with no
-`(key: vouch:...)` after it, the b4 you run is not the fork. Check
-`command -v b4`.
+pass for up to 24 hours.
 
-The block removes `b4.keyringsrc` because b4 ignores `patatt.keyringsrc`
-while `b4.keyringsrc` is set, as b4's documentation suggests. Then check
-a series by its message-id, here `$MSGID`, a patch from bob in your
-mailbox; without `-m`, b4 fetches it from lore:
+The fork names the keyring after every registry pass. If `b4 am` prints
+`✓ Signed: openssh/...` with no `(key: vouch:...)` after it, the b4 you
+run is not the fork; check `command -v b4`.
+
+b4's documentation suggests setting `b4.keyringsrc`, but b4 ignores
+`patatt.keyringsrc` while it is set, so the block removes it.
+
+Check a series by its message-id, here `$MSGID`, a patch from bob in
+your mailbox. Without `-m`, b4 fetches it from lore:
 
 <!-- patch as lena -->
 ```shell
@@ -721,21 +766,23 @@ verify.
 
 ### Kernel-wide settings
 
-> **What this does:** says what to publish with the flag-day announcement, since no file in the kernel tree can set the keyring for people.\
+> **What this does:** says what to publish with the flag-day announcement.\
 > **Why:** the fallback keyring line is temporary, so everyone needs the date it stops ([rationale](rationale.md#patch-fallback)).
 
-b4 ignores `keyringsrc` in a tree's `.b4-config`. Each developer sets
-the lines of [Check incoming patches](#check-incoming-patches) in their
-own git config. Publish them with the flag-day announcement, together
-with the install line and the date they stop needing the legacy keyring
-line.
+b4 ignores `keyringsrc` in a tree's `.b4-config`, so each developer
+sets the lines of [Check incoming patches](#check-incoming-patches) in
+their own git config. Publish with the flag-day announcement:
+
+- the install line;
+- those lines;
+- the date they stop needing the legacy keyring line.
 
 ### Dropping the GPG fallback
 
 > **What this does:** ends the GPG fallback at the late cutoff, six months after the flag day; the anchors may extend it by announcement.\
 > **Why:** the cutoff ends the window in which someone holding a stolen, unrevoked GPG key can claim that person's identity ([rationale](rationale.md#late-cutoff)).
 
-No code changes: everyone deletes the legacy keyring line:
+Nothing in the code changes. Everyone deletes the legacy keyring line:
 
 <!-- patch as lena -->
 ```shell

@@ -25,17 +25,23 @@ says which.
   that signed it, all published by kernel.org at the freeze (see
   [the flag-day runbook](flag-day.md)).
 - `git-vouch` and `git-vouch-migrate` are on `PATH`, so `git vouch`
-  works. You need `git-vouch-migrate` and `gpg` only on the flag day.
+  works. You need `git-vouch-migrate` and `gpg` only for the move from
+  GPG, between the freeze and the late cutoff.
 - Your SSH keys are loaded in an agent: `~/.ssh/id_ed25519` is your
   signing key and `~/.ssh/backup` a backup that stays in a drawer.
 - `registry` is your checkout of the registry, and `linux` your kernel
   tree, both in your home directory.
 
-No `git vouch` command pushes to the registry. Every change is a branch
-from the registry's `main`, a `git vouch` command that writes and signs
-a record, a commit, a push, and a merge by the registry maintainer once
-`git vouch check` passes. The examples run as `bob`, the regular; other
-people are named where they act.
+No `git vouch` command pushes to the registry. Every change goes the
+same way:
+
+1. Branch from the registry's `main`.
+2. Run a `git vouch` command that writes and signs a record.
+3. Commit and push the branch.
+4. The registry maintainer merges it once `git vouch check` passes.
+
+The examples run as `bob`, the regular; other people are named where
+they act.
 
 ## Flag day
 
@@ -43,25 +49,26 @@ people are named where they act.
 > **Why:** only Linus's tree switches on the flag day; every other tree switches by the late cutoff ([rationale](rationale.md#one-flag-day)).
 
 If `git-vouch-migrate pullers` lists you, because Linus merged a signed
-tag of yours in the last N releases, you are in the core set: you need
+tag of yours in the last N releases, you are in the core set. You need
 the maintainer tier before the flag day, so follow
-[the captains guide](guide-captains.md#flag-day). Everyone else
-registers before the late cutoff, six months after the flag day, when
-GPG-signed tags and patches stop being accepted anywhere; the tree you
-send to may switch sooner. [The flag-day runbook](flag-day.md) has the
-full timeline.
+[the captains guide](guide-captains.md#flag-day).
+
+Everyone else registers before the late cutoff, six months after the
+flag day, when GPG-signed tags and patches stop being accepted anywhere.
+The tree you send to may switch sooner. [The flag-day runbook](flag-day.md)
+has the full timeline.
 
 Patches change only at the late cutoff. Before the flag day, install
-the patatt fork and list `keyringsrc = vouch:` first and the
-frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
+the patatt fork and list `keyringsrc = vouch:` first and the frozen
+pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
 Patches signed with a GPG key, or a key `patatt genkey` made, then keep
 verifying through pgpkeys, with a warning, for everyone until the late
-cutoff, six months after the flag day.
+cutoff.
 
 ### Create your keys
 
 > **What this does:** makes a main key and a backup key, on hardware tokens if you have them.\
-> **Why:** the tool cannot prove what holds a key, so hardware is advice that endorsers and approvers ask about, not a rule ([rationale](rationale.md#hardware-keys)).
+> **Why:** the tool cannot prove what holds a key, so hardware is advice that endorsers and approvers ask about ([rationale](rationale.md#hardware-keys)).
 
 ed25519, P-256 and RSA keys of 2048 to 4096 bits are accepted, whether
 software, on a token, or a GPG authentication subkey
@@ -77,10 +84,11 @@ ssh-keygen -t ed25519-sk -C "bob backup" -f ~/.ssh/backup
 ```
 
 If your token has no ed25519, use `-t ecdsa-sk`. Without tokens,
-`ssh-keygen -t ed25519` makes software keys that work the same way. To
-let endorsers check a key was made on a token, generate it with
-`-O challenge=<file> -O write-attestation=<file>` and pass both files to
-`register` or `add-key` with `--challenge` and `--attestation`.
+`ssh-keygen -t ed25519` makes software keys that work the same way.
+
+To let endorsers check that a key was made on a token, generate it with
+`-O challenge=<file> -O write-attestation=<file>`, then pass both files
+to `register` or `add-key` with `--challenge` and `--attestation`.
 
 ### Register
 
@@ -111,13 +119,13 @@ Read your draft before registering: the handle is permanent. The `.asc`
 is optional. It covers the person file's exact bytes, so make it last
 ([rationale](rationale.md#exact-bytes)).
 
-The runbook's [Everyone else registers](flag-day.md#everyone-else-registers)
-covers expired GPG keys and reused authentication subkeys.
+For expired GPG keys and reused authentication subkeys, see the
+runbook's [Everyone else registers](flag-day.md#everyone-else-registers).
 
 ### Register without one
 
 > **What this does:** registers you fresh when you have no pgpkeys key, with no continuity proof and no `.asc`.\
-> **Why:** a continuity proof grants no tier; it only gets you endorsement drafts from your old GPG certifiers, and you have none ([rationale](rationale.md#continuity-proof)).
+> **Why:** a continuity proof only gets you endorsement drafts from your old GPG certifiers, and you have none ([rationale](rationale.md#continuity-proof)).
 
 As `carol`, a newcomer:
 
@@ -136,7 +144,7 @@ git push -q origin HEAD:register-carol
 Add your backup key with `git vouch add-key` in the same branch, as bob
 did.
 
-To use the key a forge lists at its `.keys` URL, such as
+To register the key a forge lists at its `.keys` URL, such as
 `https://github.com/<user>.keys`, save your key's line as a `.pub` file
 and register that file.
 
@@ -157,10 +165,10 @@ git merge -q --no-ff --no-edit FETCH_HEAD
 git vouch check .
 ```
 
-`korg` pushes once `check` exits 0 and its warnings are read. The merge
-never fast-forwards, even when your branch already contains main, so the dates on the
-main line are the maintainer's clock, not yours. Until someone endorses
-you, `check` warns that your email is not endorsed; that is expected:
+The merge never fast-forwards, even when your branch already contains
+main. `korg` pushes once `check` exits 0 and its warnings are read.
+Until someone endorses you, `check` warns that your email is not
+endorsed; that is expected:
 
 <!-- as korg -->
 ```sh
@@ -173,15 +181,18 @@ git push -q origin main
 ### Get endorsed and approved
 
 > **What this does:** gets endorsements from people who know you, then an approval from a maintainer.\
-> **Why:** an endorsement is evidence about identity and grants nothing; only the approver needs authority, and the approver decides ([rationale](rationale.md#endorse-vs-approve)).
+> **Why:** an endorsement is evidence about identity and grants nothing; only the approver needs authority ([rationale](rationale.md#endorse-vs-approve)).
 
 Ask people who know you in person to endorse you; [vouching.md](vouching.md)
 says what they should check. If your continuity proof holds, the people
-who certified your GPG key get a draft endorsement for you, which they
-read, confirm with you and sign. A maintainer then approves you as a
-contributor on their own judgement; there is no minimum number of
-endorsements. `alice`, a maintainer, does both in one branch, first
-drafting her endorsements:
+who certified your GPG key get a draft endorsement for you. They read
+it, confirm it with you and sign it.
+
+A maintainer then approves you as a contributor on their own judgement.
+There is no minimum number of endorsements.
+
+`alice`, a maintainer, does both in one branch. First she drafts her
+endorsements:
 
 <!-- as alice -->
 ```sh
@@ -196,7 +207,7 @@ cat ~/endorsement-drafts/endorsements/*/*.json
 **She reads every draft before the loop signs it.** A GPG certification
 never covered your new SSH key, so she confirms your key and emails with
 you as in
-[Confirming the key and emails](vouching.md#confirming-the-key-and-emails)
+[Confirming the key and emails](vouching.md#confirming-the-key-and-emails),
 and deletes any draft she has not confirmed. Then she signs the drafts
 that are left and approves you:
 
@@ -215,20 +226,21 @@ git push -q origin HEAD:endorse-alice
 <!-- merge endorse-alice -->
 
 The [captains guide](guide-captains.md#sign-your-endorsement-drafts)
-says what each draft field means. Someone with no GPG history with you
+explains each draft field. Someone with no GPG history with you
 endorses with `git vouch endorse bob --note "..."` instead (see
 [Endorsing and approving](#endorsing-and-approving)).
 
 ### Switch git to SSH signing
 
 > **What this does:** points git at the registry's allowed-signers and revocation files and shows your tier.\
-> **Why:** the registry is a git repository, and `git vouch export` writes git's own allowed-signers format, so plain git verifies against it ([rationale](rationale.md#registry-in-git)).
+> **Why:** `git vouch export` writes git's own allowed-signers format, so plain git verifies against the registry ([rationale](rationale.md#registry-in-git)).
 
-`setup` records the registry, sets `gpg.format=ssh`, the allowed-signers
-and revocation files, and runs a first `sync`. It refuses, changing
-nothing, if git already signs with a GPG key or points at other
-allowed-signers or revocation files ([What setup changes](../README.md#what-git-vouch-setup-changes), and how to do it by
-hand). `status` then shows your tier:
+`setup` records the registry, sets `gpg.format=ssh` and the
+allowed-signers and revocation files, and runs a first `sync`. If git
+already signs with a GPG key or points at other allowed-signers or
+revocation files, it refuses and changes nothing
+([What setup changes](../README.md#what-git-vouch-setup-changes) says how
+to do it by hand). `status` then shows your tier:
 
 <!-- as bob -->
 ```sh
@@ -271,10 +283,10 @@ git verify-commit origin/bob-fixes
 git verify-tag bob-6.99
 ```
 
-A zero exit only means that some key in the allowed-signers file signed:
-git does not tie the signer to the commit's author or the tag's message.
-Check that git prints `Good "git" signature for bob`, with the handle of
-the person the pull claims to come from.
+A zero exit means only that some key in the allowed-signers file signed.
+git does not tie the signer to the commit's author or the tag's message,
+so check that git prints `Good "git" signature for bob`, with the handle
+of the person the pull claims to come from.
 
 ### Keep your copy current
 
@@ -290,13 +302,13 @@ git vouch status
 `sync` fetches the registry, refuses a rewritten history, runs `check`
 and re-exports the allowed-signers and revocation files, so new
 approvals and revocations reach your git. `status`, `check`, `show`,
-`export`, `query` and `keys` warn when that copy was last fetched more
+`export`, `query` and `keys` warn when the copy was last fetched more
 than 7 days ago.
 
 ## Rotating your key
 
 > **What this does:** replaces a key you still hold, signed by the old key.\
-> **Why:** any key current in the previous version of your person file may sign the next, which is how rotation works ([rationale](rationale.md#backup-key)).
+> **Why:** any key current in the previous version of your person file may sign the next ([rationale](rationale.md#backup-key)).
 
 Add the new key and retire the old one, both signed by the old key:
 
@@ -324,22 +336,22 @@ cd linux
 git verify-tag bob-6.99
 ```
 
-OpenSSH 9.6 reads the time git passes it as standard time, an hour
-late while your timezone is on daylight saving time. The export allows
-for that by ending every key an hour after its retirement, so a
-signature made just before it still verifies
+OpenSSH 9.6 reads the time git passes it as standard time, so it is an
+hour late while your timezone is on daylight saving time. The export
+allows for this by ending every key an hour after its retirement, so a
+signature made just before retirement still verifies
 ([rationale](rationale.md#extra-hour)).
 
-If you sign patches, the selector changes with the key: once the
+If you sign patches, the selector changes with the key. Once the
 rotation is merged and synced, run the two lines in
 [Sign with your registry key](#sign-with-your-registry-key) again.
 Patches signed with the retired key stop verifying when the people who
-check them sync, which matters little once they are merged.
+check them sync; that matters little once they are merged.
 
 ## Endorsing and approving
 
 > **What this does:** endorses someone whose key and emails you confirmed first-hand.\
-> **Why:** an endorsement grants nothing, so any registered human may make one, whatever their tier; only maintainers approve ([rationale](rationale.md#endorse-vs-approve)).
+> **Why:** an endorsement grants nothing, so any registered human may make one; only maintainers approve ([rationale](rationale.md#endorse-vs-approve)).
 
 An endorsement says that the person's key and emails belong to the real,
 named person, and that you know it first-hand. Check that as
@@ -359,11 +371,11 @@ git push -q origin HEAD:endorse-carol
 
 <!-- merge endorse-carol -->
 
-`endorse` covers the name, first current key and every listed email;
+`endorse` covers the name, the first current key and every listed email;
 `--email` limits it to the addresses you confirmed. Before signing,
 `endorse` prints the key's SHA256 fingerprint: compare it with the one
-you checked in person, and run `endorse` on the merged registry, not on
-a pull-request checkout.
+you checked in person. Run `endorse` on the merged registry, not on a
+pull-request checkout.
 
 ## If you lose a key
 
@@ -373,11 +385,9 @@ a pull-request checkout.
 Revoke rather than retire unless you are sure nobody else can use the
 key. A revoked key's signatures all stop verifying, and every
 endorsement it signed becomes void. That includes patches: once someone
-checking your patches has synced, patatt no longer finds the key. With
-the b4 fork set up as in
-[Check other people's patches](#check-other-peoples-patches), b4 checks
-a signature again every time; other b4 can keep a revoked key's pass for
-up to 24 hours.
+checking your patches has synced, patatt no longer finds the key. How
+soon b4 notices depends on its setup; see
+[Check other people's patches](#check-other-peoples-patches).
 
 ### With your backup key
 
@@ -433,18 +443,21 @@ Re-sign and push again anything you signed with the lost key.
 ### Without a backup key
 
 > **What this does:** recovers through an anchor and registry review when no current key can sign.\
-> **Why:** a change no previous key signed only warns, and review is the gate, so the registry maintainer confirms the new key with you ([rationale](rationale.md#backup-key)).
+> **Why:** a change no previous key signed only warns, so review is the gate ([rationale](rationale.md#backup-key)).
 
-Ask an anchor to revoke the lost key, then register a new key with
-`git vouch register --from people/bob.json` and retire the lost one
-signed by the new key. No previous key signs that change, so `check`
-warns and the registry maintainer must confirm the new key with you over
-a channel they already trust before merging. Your tier carries over;
-endorsements you made with the revoked key do not. The anchors guide
-runs these steps for a maintainer:
+1. Ask an anchor to revoke the lost key.
+2. Register a new key with `git vouch register --from people/bob.json`,
+   and retire the lost one, signed by the new key.
+3. No previous key signs that change, so `check` warns. Before merging,
+   the registry maintainer must confirm the new key with you over a
+   channel they already trust.
+
+Your tier carries over; endorsements you made with the revoked key do
+not. The anchors guide runs these steps for a maintainer:
 [Revoke a compromised key](guide-anchors.md#revoke-a-compromised-key)
-has the revocation, and the recovery follows the table in
-[Read check warnings in registry merges](guide-anchors.md#read-check-warnings-in-registry-merges).
+has the revocation, and the table in
+[Read check warnings in registry merges](guide-anchors.md#read-check-warnings-in-registry-merges)
+has the recovery.
 
 ## Patch signing
 
@@ -452,18 +465,18 @@ has the revocation, and the recovery follows the table in
 > **Why:** the registry is the keyring, so nothing is generated, published or trusted in between ([rationale](rationale.md#patch-fallback)).
 
 Patches you email are signed with patatt, the signer built into b4. It
-adds an `X-Developer-Signature` header, and the maintainer's `b4 am`
-checks it. A fork of patatt adds one keyring source, `vouch:`, which
-asks `git vouch keys` for the signer's current keys. Your patch
-verifies when one of your current keys signed it and it comes from an
-email someone has endorsed.
+adds an `X-Developer-Signature` header, which the maintainer's `b4 am`
+checks. A fork of patatt adds one keyring source, `vouch:`, which asks
+`git vouch keys` for the signer's current keys. Your patch verifies when
+one of your current keys signed it and it comes from an email someone
+has endorsed.
 
 ### Install the forks
 
 > **What this does:** installs b4 and patatt from their forks' `git-vouch` branches.\
-> **Why:** the patatt fork adds the `vouch:` keyring, and the b4 fork can check every signature again so a revocation takes effect at once ([rationale](rationale.md#patch-fallback)).
+> **Why:** the patatt fork adds the `vouch:` keyring, and the b4 fork can recheck every signature so a revocation takes effect at once ([rationale](rationale.md#patch-fallback)).
 
-Install both in one command, so b4 gets the patatt fork in place of
+Install both in one command, so b4 gets the patatt fork instead of
 released patatt:
 
 <!-- patch not-run needs-network -->
@@ -479,14 +492,17 @@ fetch that branch from github.com/MarkAtwood/patatt and check it out
 there.
 
 `misc/vouch-check.sh` in the b4 fork tests the pair offline in a
-throwaway home: it signs a series with a registry key and checks that
-`b4 am` passes it, then fails it once the key is revoked. Unless
-git-vouch and the patatt fork are checked out next to b4 and b4 has a
-`.venv`, set `GIT_VOUCH` to the git-vouch script, `PATATT_FORK` to a pip
-requirement for the patatt fork and `PYTHON` to a Python with b4's
-dependencies. It also needs `uv`, with setuptools in its cache. It sets
-up its own config: set yours as this page does, not as the script's
-header shows.
+throwaway home. It signs a series with a registry key and checks that
+`b4 am` passes it, then that it fails once the key is revoked. It needs:
+
+- `uv`, with setuptools in its cache;
+- unless git-vouch and the patatt fork are checked out next to b4 and b4
+  has a `.venv`: `GIT_VOUCH` set to the git-vouch script, `PATATT_FORK`
+  to a pip requirement for the patatt fork, and `PYTHON` to a Python
+  with b4's dependencies.
+
+The script sets up its own config. Set yours as this page does, not as
+the script's header shows.
 
 ### Sign with your registry key
 
@@ -520,21 +536,22 @@ git config --global --add patatt.keyringsrc ~/pgpkeys/.keyring
 git config --global b4.attestation-recheck-hours 0
 ```
 
-patatt reads the keyring as files on disk, so leave that clone at the
-freeze commit: a key added after it would verify too. The checkout
-fails if the clone does not hold the freeze commit.
+What each line is for:
 
-b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
-documentation suggests, so the second line removes `b4.keyringsrc`.
+- patatt reads the keyring as files on disk, so leave that clone at the
+  freeze commit; a key added after it would verify too. The checkout
+  fails if the clone does not hold the freeze commit.
+- b4 ignores `patatt.keyringsrc` while `b4.keyringsrc` is set, as b4's
+  documentation suggests, so the second line removes `b4.keyringsrc`.
+- `b4.attestation-recheck-hours = 0` is a setting of the b4 fork. b4
+  then checks every signature again instead of remembering a verdict for
+  up to 24 hours, so a revoked key stops verifying at your next
+  `git vouch sync`. Any other b4 ignores it, and upstream b4 newer than
+  0.16 keeps a pass for up to 24 hours.
 
-`b4.attestation-recheck-hours = 0` is a setting of the b4 fork: b4
-checks every signature again instead of remembering a verdict for up to
-24 hours, so a revoked key stops verifying at your next `git vouch
-sync`. Any other b4 ignores it, and upstream b4 newer than 0.16 keeps a
-pass for up to 24 hours. The fork names the keyring after every registry
-pass: if `b4 am` prints `✓ Signed: openssh/...` with no
-`(key: vouch:...)` after it, the b4 you run is not the fork. Check
-`command -v b4`.
+The fork names the keyring after every registry pass. If `b4 am` prints
+`✓ Signed: openssh/...` with no `(key: vouch:...)` after it, the b4 you
+run is not the fork; check `command -v b4`.
 
 ### Send
 
@@ -576,17 +593,20 @@ the key:
   ✓ Signed: openssh/bob@example.org (key: vouch:bob@example.org/...)
 ```
 
-`✗ No key: openssh/bob@example.org` means your email is not endorsed,
-the key is not current in the registry, `patatt.selector` is not the
-selector of the key that signed, or the checker's registry copy predates
-your key and needs `git vouch sync`.
+`✗ No key: openssh/bob@example.org` means one of:
+
+- your email is not endorsed;
+- the key is not current in the registry;
+- `patatt.selector` is not the selector of the key that signed;
+- the checker's registry copy predates your key and needs
+  `git vouch sync`.
 
 ### Keys `patatt genkey` made
 
 > **What this does:** moves patatt from a `patatt genkey` key to your registry SSH key.\
 > **Why:** the registry holds SSH keys only, and the pgpkeys fallback ends at the late cutoff ([rationale](rationale.md#patch-fallback)).
 
-`vouch:` serves nothing but SSH keys. A key `patatt genkey` made
+`vouch:` serves only SSH keys. A key `patatt genkey` made
 (`patatt.signingkey = ed25519:...`) verifies only through the pgpkeys
 keyring, with the warning, until the late cutoff. After it, b4 marks
 such patches `? (TOFU: new key)` instead of verified. Register an SSH
@@ -610,16 +630,17 @@ GPG-signed patches then show `✗ No key`.
 ## How this page is tested
 
 > **What this does:** says which test runs each block and who the examples' people are.\
-> **Why:** the cast has a maintainer to approve and a registry maintainer to merge, because every change is a reviewed merge ([rationale](rationale.md#nothing-pushes)).
+> **Why:** every change is a reviewed merge, so the cast needs a maintainer to approve and a registry maintainer to merge ([rationale](rationale.md#nothing-pushes)).
 
 `tests/migrate/test_guide_regulars.py` runs every command block on this
 page but the first, in order, in a throwaway registry, with real `git`,
 `ssh-keygen` and `gpg` and a synthetic `pgpkeys.git`. The first block
 needs FIDO tokens, so it is not run. `tests/patatt/test_patch_docs.py`
-runs the `shell` blocks under [Patch signing](#patch-signing) with the
-b4 and patatt forks, mail going to a local sink.
+runs the `shell` blocks under [Patch signing](#patch-signing), all but
+the install line, with the b4 and patatt forks, sending mail to a local
+sink.
 
 The cast: `bob` is the regular (you), with a key in `pgpkeys.git` that
 `alice` certified. `alice` is a maintainer, `carol` a newcomer, and
-`korg` the registry maintainer who merges branches into the registry.
-Put your own handle, name and email in their place.
+`korg` the registry maintainer who merges branches. Put your own handle,
+name and email in their place.

@@ -14,18 +14,19 @@ that with tools you already have:
 - **`git vouch`** checks the registry's rules and writes the
   `allowed_signers` and revocation files that git reads.
 
-Using it needs no service, no agent, and no new place to keep keys. Your
-SSH key, YubiKey or gpg-agent works as it is: ed25519, P-256, and RSA
-of 2048 to 4096 bits are accepted.
+It needs no service and no always-on agent, and keys stay where they
+already are: your SSH key, YubiKey or gpg-agent works as it is. Accepted keys are ed25519, P-256,
+and RSA of 2048 to 4096 bits.
 
-**If your key is RSA, now is a good time to upgrade.** 93% of the keys
-in `pgpkeys.git` are RSA. RSA keeps working, but FIDO tokens, which
-kernel.org issues, hold only ed25519 and P-256 SSH keys, and you are
-registering a key anyway. Make it `ed25519-sk` on a token (`ecdsa-sk`
-if the token has no ed25519), not a bigger RSA key.
+If your key is RSA, consider a new one while you register. 93% of the
+keys in `pgpkeys.git` are RSA. RSA keeps working, but the FIDO tokens
+kernel.org issues hold only ed25519 and P-256 SSH keys. Make it
+`ed25519-sk` on a token (`ecdsa-sk` if the token has no ed25519), not a
+bigger RSA key.
 
 An optional daemon, `git-vouch-trqp`, lets verifiers built on OpenVTC,
-an LF Decentralized Trust project, check signers in the registry. Nobody using git-vouch at the shell depends on it.
+an LF Decentralized Trust project, check signers in the registry. Nobody
+using git-vouch at the shell depends on it.
 
 ## Tools
 

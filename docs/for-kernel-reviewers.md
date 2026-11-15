@@ -19,27 +19,30 @@ your call.
 ## What it is
 
 Signing uses git's SSH signing (`gpg.format=ssh`) and `ssh-keygen -Y`,
-with keys people already hold: ed25519, FIDO `sk-` keys, P-256, and RSA from 2048
-to 4096 bits (DESIGN: Summary, did:key). Who may sign lives in a
-registry: a git repository of signed files, one per person, endorsement
-and tier record, changed by reviewed merges (DESIGN: The registry).
-Tiers are anchor, maintainer, contributor and automation; an approver
-above the tier signs each grant, and endorsements are evidence, not a
-count (DESIGN: How trust maps).
+with keys people already hold: ed25519, FIDO `sk-` keys, P-256, and RSA
+from 2048 to 4096 bits (DESIGN: Summary, did:key).
+
+Who may sign lives in a registry: a git repository of signed files, one
+per person, endorsement and tier record, changed by reviewed merges
+(DESIGN: The registry). Tiers are anchor, maintainer, contributor and
+automation. An approver above the tier signs each grant; endorsements
+are evidence, not a count (DESIGN: How trust maps).
+
 `git vouch export` writes the `allowed_signers` and revocation files git
 already reads. With `--min-tier maintainer`, plain `git verify-tag`
 rejects anyone below maintainer (DESIGN: What git and OpenSSH already
 do).
 
-Tools, each one standard-library Python file: `git-vouch`;
-`git-vouch-migrate`, flag day only; `git-vouch-attest`, FIDO
-attestation; `git-vouch-trqp`, an optional bridge for outside verifiers
-(DESIGN: Tools). Patch mail uses published forks,
-github.com/MarkAtwood/patatt and github.com/MarkAtwood/b4 (branch
-`git-vouch`), not yet upstream (DESIGN: Patch signing). Needs Python
-3.9, git 2.35 and OpenSSH 9.1: older git checks key lifetimes against
-the current time, and older OpenSSH rejects the UTC times on every
-exported line (DESIGN: Constraints).
+Each tool is one standard-library Python file: `git-vouch`;
+`git-vouch-migrate`, for the flag day only; `git-vouch-attest`, for FIDO
+attestation; and `git-vouch-trqp`, an optional bridge for outside
+verifiers (DESIGN: Tools). Patch mail uses forks of patatt and b4,
+github.com/MarkAtwood/patatt and github.com/MarkAtwood/b4, branch
+`git-vouch`, not yet upstream (DESIGN: Patch signing).
+
+It needs Python 3.9, git 2.35 and OpenSSH 9.1. Older git checks key
+lifetimes against the current time, and older OpenSSH rejects the UTC
+times on every exported line (DESIGN: Constraints).
 
 ## What it costs
 
@@ -58,15 +61,19 @@ A maintainer runs `git vouch register`, collects endorsements made with
 `git vouch approve <handle> maintainer`. Each command writes files for a
 registry merge (DESIGN: Commands).
 
-Who has to move by the flag day: since v6.15 Linus merged 4,216 signed
-tags, all OpenPGP, from 195 tagger emails; the top 100 sent 90%. 151 of
-the 195 have a pgpkeys key, and 67 of those can reuse its
-authentication subkey as their SSH key (measured 2026-11-15; DESIGN:
-Flag day). Everyone else can move any time before the late cutoff. In
-pgpkeys overall, 645 live keys belong to about 606 people, and about
-1,784 certifications become endorsement drafts; 1,538 of the 1,935
+Who has to move by the flag day (measured 2026-11-15; DESIGN: Flag
+day):
+
+- Since v6.15 Linus merged 4,216 signed tags, all OpenPGP, from 195
+  tagger emails. The top 100 sent 90%.
+- 151 of the 195 have a pgpkeys key; 67 of those can reuse its
+  authentication subkey as their SSH key.
+
+Everyone else has until the late cutoff. For scale (measured
+2026-10-23): pgpkeys holds 645 live keys for about 606 people, about
+1,784 certifications become endorsement drafts, and 1,538 of the 1,935
 people on MAINTAINERS `M:` lines (79.5%) have no pgpkeys key under a
-MAINTAINERS address (measured 2026-10-23; DESIGN: Flag day).
+MAINTAINERS address.
 
 If `git vouch check` fails, `export` writes nothing and `sync` writes
 only the revocation file, so git keeps the last good allowed-signers
@@ -104,22 +111,23 @@ It does not stop:
   over 7 days old (DESIGN: The registry).
 - A retired key's holder backdating a signature (DESIGN: Retiring a
   key versus revoking it).
-- Proof of a touch: `ssh-keygen -Y verify` does not enforce FIDO user
-  presence (DESIGN: Keys).
+- A FIDO signature made without a touch: `ssh-keygen -Y verify` does
+  not check user presence (DESIGN: Keys).
 - A stolen GPG key, not revoked by the freeze commit, claiming its
   owner's identity, as it can sign tags today (DESIGN: Flag day).
-- Prompt revocation in released b4, which caches verdicts for up to 24
-  hours. The b4 fork's `b4.attestation-recheck-hours`, set to 0 in the
-  guides, rechecks every signature (DESIGN: Patch signing).
+- Prompt revocation in upstream b4, which caches a verdict for up to 24
+  hours. The b4 fork rechecks every signature with
+  `b4.attestation-recheck-hours = 0`, as the guides set it (DESIGN:
+  Patch signing).
 
 ## What it does not do
 
 - No new cryptography: every signature check `git-vouch` relies on is
   done by `ssh-keygen`, directly or through git (DESIGN: Summary).
 - No OpenPGP in `git-vouch`, which never runs `gpg`. After the late
-  cutoff, `gpg` is needed only to verify old tags, for release-file
-  signatures, which stay with kernel.org, and for kernel.org's
-  encryption keyring (DESIGN: Summary, Tools, Flag day).
+  cutoff `gpg` has three jobs left: old tags, kernel.org's release-file
+  signatures, and its encryption keyring (DESIGN: Summary, Tools, Flag
+  day).
 - No network trust roots: the registry is the root of trust, and
   `git-vouch` never resolves a DID or fetches a JSON-LD context (DESIGN:
   Anchors, Constraints).
@@ -146,8 +154,9 @@ It does not stop:
    GPG authentication subkey reused as the SSH key) only unlocks ported
    endorsement drafts. It grants no tier.
 
-Items 1-3, 5 and 6: DESIGN: Flag day. The freeze date, window length and
-anchors are yours to set (DESIGN: Open questions).
+Source for all but item 4: DESIGN, Flag day. You set the freeze date,
+the window length, N (how many releases of pulls define the core set)
+and the anchors (DESIGN: Open questions).
 
 ## What kernel.org would operate
 
