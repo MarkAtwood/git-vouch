@@ -110,16 +110,15 @@ separate CI tool.
 
 OpenVTC's `verify-trust` can check git-vouch signers through
 `git-vouch-trqp`. The bridge answers verify-trust's Trust Task queries
-(`registry/authorization/0.1` at `POST /trust-tasks`) from
+(`registry/authorization/0.2` at `POST /trust-tasks`) from
 `git vouch query`, and `git-vouch-trqp did-document` prints the registry
 DID document with one `TRQPRest` endpoint. We expect LF devops to run
 the canonical instance; `docs/bridge-deployment.md` covers running it,
 and `docs/trqp-interop.md` records verify-trust's side.
 
-The end-to-end test pins verify-trust 0.24.0. verify-trust 0.27.0 and
-later ask `registry/authorization/0.2` first and ask again at 0.1 when a
-registry refuses 0.2 with `unsupportedVersion`, which is what the bridge
-answers; that path is not yet tested.
+The bridge speaks only 0.2, which verify-trust asks first from 0.27.0
+on; earlier verify-trust, which asks only 0.1, gets `unsupportedVersion`.
+The end-to-end test targets verify-trust 0.33.0.
 
 What a yes proves: the did:key is a current key of a registered person
 with at least one endorsed email, any tier, in a registry copy synced
@@ -132,9 +131,9 @@ What it does not prove:
 - **That the answer is authentic.** Answers over HTTPS are unsigned.
   verify-trust trusts one because its URL came from the registry DID's
   document, so trust rests on the DID-bound `https://` endpoint and on
-  TLS to it. verify-trust 0.24.0 also accepts an `http://` endpoint and
-  follows redirects, so the bridge refuses to print a non-`https://`
-  endpoint and serves `/trust-tasks` directly. Anyone can check an answer against the
+  TLS to it. verify-trust 0.24.0 also accepted an `http://` endpoint and
+  followed redirects (not rechecked since), so the bridge refuses to
+  print a non-`https://` endpoint and serves `/trust-tasks` directly. Anyone can check an answer against the
   public registry.
 - **That the signer may sign this repository.** Answers are not scoped
   to a repository, and any tier counts, so the bridge can say yes where
@@ -143,12 +142,10 @@ What it does not prove:
 - **That the key was valid when the commit was made.** verify-trust
   never sends `context.time`, so every commit is judged against the
   registry as it is now.
-- **Anything about RSA signers, and, before verify-trust 0.25.0, FIDO
-  and P-256 ones.** verify-trust refuses other key types as `malformed`
-  before it asks the bridge. 0.24.0 accepts only `ssh-ed25519`, so a
-  kernel.org-issued `ed25519-sk` key fails there. 0.25.0 and later also
-  accept P-256 and both FIDO types, and require the FIDO user-presence
-  flag, which `ssh-keygen -Y verify` does not check
+- **Anything about RSA signers.** verify-trust refuses RSA as
+  `malformed` before it asks the bridge. It accepts ed25519, P-256 and
+  both FIDO types, and requires the FIDO user-presence flag, which
+  `ssh-keygen -Y verify` does not check
   (https://github.com/OpenVTC/verifiable-git-infrastructure/pull/177).
 - **Tags.** verify-trust checks commit ranges only.
 

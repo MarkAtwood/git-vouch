@@ -2,7 +2,7 @@
 """git-vouch-trqp: answer OpenVTC verify-trust's TRQP queries from a git-vouch registry.
 
 Serves ``POST /trust-tasks`` with Trust Task documents of type
-``registry/authorization/0.1`` (the HTTPS binding verify-trust speaks) and
+``registry/authorization/0.2`` (the HTTPS binding verify-trust speaks) and
 answers each from ``git vouch query``, which stays the only judge of who
 holds which key. Stateless and unauthenticated: the registry is public.
 TLS is left to a reverse proxy, which must also buffer each whole request
@@ -35,9 +35,9 @@ from time import monotonic
 from typing import Optional
 from urllib.parse import urlsplit
 
-TASK_TYPE = "https://trusttasks.org/spec/registry/authorization/0.1"
+TASK_TYPE = "https://trusttasks.org/spec/registry/authorization/0.2"
 TASK_FAMILY = "https://trusttasks.org/spec/registry/authorization/"
-ERROR_TYPE = "https://trusttasks.org/spec/trust-task-error/0.5"
+ERROR_TYPE = "https://trusttasks.org/spec/trust-task-error/0.6"
 ACTION = "git.commit.sign"
 PATH = "/trust-tasks"
 MAX_BODY = 64 * 1024
@@ -90,7 +90,7 @@ EXT_NAMESPACE = re.compile(r"[a-z][a-z0-9-]*(\.[a-z0-9-]+)+")
 ENVELOPE_STRINGS = ("id", "threadId", "parentThreadId", "issuer", "recipient")
 # An absolute URI (RFC 3986 section 4.3): a scheme, then only URI characters.
 URI_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]*")
-PAYLOAD_KEYS = {"entity_id", "authority_id", "action", "resource", "context", "ext"}
+PAYLOAD_KEYS = {"entityId", "authorityId", "action", "resource", "context", "ext"}
 
 
 class TaskError(Exception):
@@ -163,7 +163,7 @@ def is_resource(resource: str) -> bool:
 def check_envelope(doc: object, did: str, now: datetime) -> dict[str, object]:
     """Return the request payload after checking the Trust Task envelope around it.
 
-    Applies the framework 0.5 envelope schema and SPEC.md section 7.2 items
+    Applies the framework 0.6 envelope schema and SPEC.md section 7.2 items
     3, 4, 5, 7 and 13.
 
     Raises:
@@ -209,7 +209,7 @@ def check_envelope(doc: object, did: str, now: datetime) -> dict[str, object]:
 def check_payload(
     payload: Mapping[str, object],
 ) -> tuple[Optional[str], Optional[datetime]]:
-    """Check ``payload`` against the registry/authorization 0.1 schema.
+    """Check ``payload`` against the registry/authorization 0.2 schema.
 
     Returns:
         The request's ``context.time`` as sent and parsed, or two Nones if it
@@ -222,7 +222,7 @@ def check_payload(
     extra = sorted(set(payload) - PAYLOAD_KEYS)
     if extra:
         raise TaskError("malformedRequest", f"unknown payload member {extra[0]!r:.60}")
-    for name in ("entity_id", "authority_id", "action", "resource"):
+    for name in ("entityId", "authorityId", "action", "resource"):
         if not isinstance(payload.get(name), str):
             raise TaskError("malformedRequest", f"payload.{name} must be a string")
     if "ext" in payload:
@@ -460,8 +460,8 @@ def decide(
     payload: Mapping[str, object], did: str, at: Optional[datetime]
 ) -> tuple[bool, str]:
     """Return whether the queried entity is authorized, and why (DESIGN.md, TRQP bridge)."""
-    entity = str(payload["entity_id"])
-    if payload["authority_id"] != did:
+    entity = str(payload["entityId"])
+    if payload["authorityId"] != did:
         return False, f"this registry answers only for {did}"
     if payload["action"] != ACTION:
         return False, f"this registry answers only {ACTION}"
@@ -502,11 +502,11 @@ def respond(body: bytes, did: str, now: datetime) -> tuple[int, dict[str, object
         return STATUS[e.code], error_document(doc, did, now, e.code, str(e))
     answer: dict[str, object] = {
         name: payload[name]
-        for name in ("entity_id", "authority_id", "action", "resource")
+        for name in ("entityId", "authorityId", "action", "resource")
     }
-    answer.update(authorized=authorized, time_evaluated=stamp, message=message)
+    answer.update(authorized=authorized, evaluatedAt=stamp, message=message)
     if time is not None:
-        answer["time_requested"] = time
+        answer["asOf"] = time  # 0.2: the instant the answer holds for
     answer["ext"] = {EXT: synced}
     reply = envelope(doc, did, stamp, TASK_TYPE + "#response", answer)
     return 200, reply
@@ -529,7 +529,7 @@ def envelope(
 def error_document(
     request: object, did: str, now: datetime, code: str, message: str
 ) -> dict[str, object]:
-    """Return the trust-task-error/0.5 document refusing ``request``."""
+    """Return the trust-task-error/0.6 document refusing ``request``."""
     payload: dict[str, object] = {
         "code": code,
         "retryable": code == "unavailable",

@@ -843,11 +843,15 @@ generated, published or trusted in between. The rules
 itself stays a CLI. Facts about `verify-trust` come from
 `docs/trqp-interop.md`.
 
-- **Wire format:** a Trust Task envelope (`registry/authorization/0.1`)
-  at `POST <base>/trust-tasks`, not plain TRQP `/authorization`. The
-  response echoes the tuple and sets `authorized` and `time_evaluated`;
-  errors use a `trust-task-error` body. It serves the path directly,
-  never by redirect.
+- **Wire format:** a Trust Task envelope (`registry/authorization/0.2`,
+  framework 0.6) at `POST <base>/trust-tasks`, not plain TRQP
+  `/authorization`. The response echoes the tuple (`entityId`,
+  `authorityId`, `action`, `resource`) and sets `authorized` and
+  `evaluatedAt`, and `asOf` when the query gave `context.time`; errors
+  use a `trust-task-error/0.6` body. Version 0.1 is refused with
+  `unsupportedVersion`, so verify-trust before 0.27.0, which asks only
+  0.1, cannot use the bridge (decided 2026-11-15: no deployments yet).
+  It serves the path directly, never by redirect.
 - **Authority DID:** configured by the operator: `did:web` on a domain
   of their choosing, or `did:webvh`. For the kernel we propose
   `did:web:registry.kernel.org`, its document at
@@ -859,7 +863,7 @@ itself stays a CLI. Facts about `verify-trust` come from
   prints the document with one `TRQPRest` service entry whose endpoint
   must be `https://`. For `did:webvh` the operator signs the log with an
   existing webvh tool; our tools add no cryptography. Queries naming any
-  other `authority_id` get `authorized: false`.
+  other `authorityId` get `authorized: false`.
 - **Who is authorized:** for `git.commit.sign`, a did:key that is a
   current key of a registered person with at least one endorsed email,
   any tier; automation identities never, since they do not sign commits.

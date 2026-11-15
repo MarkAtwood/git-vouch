@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://trusttasks.org/spec/trust-task-error/0.5",
+  "$id": "https://trusttasks.org/spec/trust-task-error/0.6",
   "title": "Trust Task Error \u2014 payload",
   "description": "The canonical error-response payload per SPEC.md \u00a78.2.",
   "type": "object",
@@ -29,7 +29,9 @@
             "cancelled",
             "taskFailed",
             "unavailable",
-            "internalError"
+            "internalError",
+            "unsupportedExtension",
+            "indeterminate"
           ]
         },
         {

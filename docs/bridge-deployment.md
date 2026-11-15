@@ -3,8 +3,10 @@
 **Status:** deployment note for `git-vouch-trqp`, 2026-10-23 (bead
 vouch-faq3.8). Behaviour comes from `git-vouch-trqp`, `git-vouch` and
 DESIGN.md, TRQP bridge. The unit files were checked with
-`systemd-analyze verify`; the verify-trust results are from
-`tests/trqp/test_verify_trust.py` against verify-trust 0.24.0.
+`systemd-analyze verify`. The bridge speaks `registry/authorization/0.2`
+only, so it needs verify-trust 0.27.0 or later; the verify-trust results
+below were measured with `tests/trqp/test_verify_trust.py` against
+0.24.0, before the switch, and that test now targets 0.33.0.
 
 ## Verdict
 
@@ -204,8 +206,8 @@ reports `registryUnavailable`, as for a bridge that is down. Either way
 the check fails closed. Other refusals, including a failed or timed-out
 query, keep the retryable `trust-task-error` document. OpenVTC#176,
 in verify-trust 0.25.0, treats a retryable trust-task-error as
-`registryUnavailable`, so the stale reply can return to one once the
-verify-trust the tests pin is 0.25.0 or later.
+`registryUnavailable`, so now that the bridge needs 0.27.0 or later the
+stale reply could return to one; it stays bare until that is tested.
 
 ## Registry merges
 
@@ -241,7 +243,7 @@ copy's commit changes and after 60 seconds.
 ## Checking with verify-trust
 
 verify-trust's `--registry-did` is the query's recipient and
-`--vtc-did` is its `authority_id`. Both must be the bridge's `--did`: a
+`--vtc-did` is its `authorityId`. Both must be the bridge's `--did`: a
 different recipient gets `wrongRecipient`, a different authority gets
 `authorized: false`. Against the canonical instance:
 
@@ -253,21 +255,20 @@ verify-trust --range origin/master..HEAD \
 ```
 
 Against a local bridge, add `--registry-url http://127.0.0.1:8080`, and
-pass the local bridge's `--did` as both DIDs. verify-trust 0.24.0, which
-the tests pin, accepts only plain `ssh-ed25519` signatures, so a FIDO,
-P-256 or RSA signer the bridge authorizes fails there as `malformed`.
-OpenVTC fixed this in #177, in v0.25.0
-(https://github.com/OpenVTC/verifiable-git-infrastructure/issues/169).
+pass the local bridge's `--did` as both DIDs. verify-trust accepts
+ed25519, P-256 and both FIDO types (since 0.25.0, OpenVTC #177; a FIDO
+signature needs the user-presence flag) and refuses RSA as `malformed`
+before it asks the bridge.
 
 **The end-to-end test** (`tests/trqp/test_verify_trust.py`) is opt-in:
 it skips unless `VERIFY_TRUST` names a verify-trust binary or one is on
-`PATH`. Build verify-trust 0.24.0 at the commit the tests pin (needs Rust
+`PATH`. Build verify-trust at the tag the tests target (needs Rust
 1.95.0 or later):
 
 ```sh
 git clone https://github.com/OpenVTC/verifiable-git-infrastructure
 cd verifiable-git-infrastructure
-git checkout 5d9b9b6
+git checkout v0.33.0
 cargo build --locked --release -p verify-trust
 ```
 
