@@ -195,9 +195,11 @@ git push -q origin HEAD:approve-alice
 <!-- merge approve-alice -->
 
 The registry maintainer merges and pushes it as above, with
-`branch=approve-alice`. Before you approve someone others endorsed, read
-each `endorsements/<handle>/*.json`: who endorsed them, which emails,
-and what the note says was checked. `vouching.md` has a checklist.
+`branch=approve-alice`. Before you approve someone others endorsed, run
+`git vouch show <handle>`: it lists each valid endorsement with who made
+it, their tier, which emails and what the note says was checked, and
+marks those from outside the kernel graph with the identities to check
+them against. `vouching.md` has a checklist.
 
 `check` judges your approval once, at the commit that adds it. If you
 later step down, the tiers you granted stay. Only a revoked key voids

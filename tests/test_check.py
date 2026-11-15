@@ -113,6 +113,7 @@ class Registry:
         accountable: str | None = None,
         emails: tuple[str, ...] = (),
         signers: tuple[Key, ...] = (),
+        also_known_as: tuple[str, ...] = (),
     ) -> None:
         """Write ``handle``'s person file, signed by ``signers`` or else every current key."""
         entries = [
@@ -125,6 +126,8 @@ class Registry:
             "keys": entries,
             "accountable": accountable,
         }
+        if also_known_as:
+            record["alsoKnownAs"] = list(also_known_as)
         signers = signers or current
         self.write(f"people/{handle}.json", record, *signers, ns="git-vouch-register")
 

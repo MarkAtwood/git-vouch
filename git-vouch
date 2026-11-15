@@ -749,6 +749,7 @@ class Person(NamedTuple):
     keys: tuple[PersonKey, ...]
     accountable: Optional[str]
     migrated_from: Optional[str] = None  # the uppercase fingerprint in ``migratedFrom``
+    also_known_as: tuple[str, ...] = ()  # ``alsoKnownAs``: self-claimed, never resolved
 
 
 class Tier(NamedTuple):
@@ -958,7 +959,7 @@ def _person(obj: Mapping[str, object], stem: str) -> Person:
     if migrated is not None and match is None:
         raise VouchError("migratedFrom: must be openpgp4fpr: and a 40-hex fingerprint")
     fpr = match.group(1).upper() if match else None
-    return Person(handle, name, emails, keys, accountable, fpr)
+    return Person(handle, name, emails, keys, accountable, fpr, tuple(aka or ()))
 
 
 def _tier(obj: Mapping[str, object], stem: str) -> Tier:
@@ -1344,6 +1345,8 @@ class CheckResult(NamedTuple):
     # handle -> did:keys first listed by a recovery that suspended their
     # tier; never exported, so a backdated ``added`` gains nothing
     unconfirmed: dict[str, frozenset[str]] = {}
+    # subject -> (path, record) of each valid working-tree endorsement of them
+    endorsements: dict[str, list[tuple[str, Endorsement]]] = {}
 
 
 # A lower rank sits above a higher one; an approver must have a strictly lower rank.
@@ -2742,8 +2745,12 @@ def _endorsed(
     automation: Collection[str],
     problems: list[str],
     voids: list[str],
+    valid: Optional[dict[str, list[tuple[str, Endorsement]]]] = None,
 ) -> dict[str, set[str]]:
-    """Return handle -> lowercased emails a valid working-tree endorsement endorses."""
+    """Return handle -> lowercased emails a valid working-tree endorsement endorses.
+
+    Each valid endorsement is also added to ``valid``, by subject.
+    """
     endorsed: dict[str, set[str]] = {}
     for rel, e, data, sig in endorsements:
         try:
@@ -2753,6 +2760,8 @@ def _endorsed(
             endorsed.setdefault(e.subject, set()).update(
                 m.lower() for m in e.subject_emails
             )
+            if valid is not None:
+                valid.setdefault(e.subject, []).append((rel, e))
         except VouchError as err:
             problems.append(str(err))
         except Void as err:
@@ -2932,7 +2941,10 @@ def check_registry(root: Path) -> CheckResult:
     claimed = {t.subject: t.tier for _, t, _, _ in records.tier_records}
     automation = {h for h, tier in claimed.items() if tier == "automation"}
     automation |= {h for h, (p, _, _) in parsed.items() if p.accountable is not None}
-    endorsed = _endorsed(judge, records.endorsements, automation, problems, voids)
+    valid: dict[str, list[tuple[str, Endorsement]]] = {}
+    endorsed = _endorsed(
+        judge, records.endorsements, automation, problems, voids, valid
+    )
     emails = _exported_emails(people, endorsed, revoked, warnings)
     _warn_migrated(people, warnings)
 
@@ -3014,6 +3026,7 @@ def check_registry(root: Path) -> CheckResult:
         held_at,
         unchained,
         _unconfirmed(judge),
+        valid,
     )
 
 
@@ -3504,6 +3517,85 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
     print(f"you: {_own_tier(result, key)}")
     print(f"patatt.selector: {patatt_selector(key.ssh)}")
+    return 0
+
+
+def _printable(text: str) -> str:
+    """Return untrusted ``text`` with every unprintable character escaped, for a terminal."""
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in text)
+
+
+def is_outside(result: CheckResult, endorser: str) -> bool:
+    """Return whether ``endorser`` is outside the kernel graph.
+
+    Outside means they hold no tier in this registry and their person file
+    lists identities elsewhere in ``alsoKnownAs`` (DESIGN, Endorsement).
+    Both facts come from the registry alone; the other identities are the
+    endorser's own claim, never resolved.
+    """
+    person = result.people.get(endorser)
+    return (
+        endorser not in result.tiers
+        and person is not None
+        and bool(person.also_known_as)
+    )
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    """Print one person's tier, keys, emails and valid endorsements, marking outside ones.
+
+    For an endorsement from outside the kernel graph it also prints the
+    endorser's ``alsoKnownAs`` and signing did:key, so an approver can
+    check that identity with the other community.
+    """
+    handle = validate_handle(args.handle)
+    root = _registry_dir(args.registry)
+    _fetched(root)
+    result = check_registry(root)
+    if result.problems:
+        print(
+            f"git-vouch: warning: the registry has {len(result.problems)} errors;"
+            f" run git vouch check {root}",
+            file=sys.stderr,
+        )
+    person = result.people.get(handle)
+    if person is None:
+        raise VouchError(f"{handle}: no valid person file")
+    print(f"handle: {handle}")
+    print(f"name: {person.name}")
+    print(f"tier: {result.tiers.get(handle, 'none')}")
+    for key in person.keys:
+        if key.did in result.revoked:
+            state = "revoked"
+        elif key.retired is not None:
+            state = f"retired {key.retired.strftime(DATE_FORMAT)}"
+        else:
+            state = "current"
+        print(f"key: {key.did} {state}")
+    exported = {m.lower() for m in result.emails.get(handle, ())}
+    for email in person.emails:
+        endorsed = "endorsed" if email.lower() in exported else "not endorsed"
+        print(f"email: {email} {endorsed}")
+    if person.also_known_as:
+        print(f"also known as: {', '.join(person.also_known_as)}")
+    found = sorted(result.endorsements.get(handle, []))
+    outside = 0
+    for rel, e in found:
+        where = "outside" if is_outside(result, e.endorser) else "inside"
+        outside += where == "outside"
+        tier = result.tiers.get(e.endorser, "no tier")
+        print(
+            f"endorsement: {rel} by {e.endorser} ({tier}), {where},"
+            f" {e.date.strftime(DATE_FORMAT)}"
+        )
+        print(f"  emails: {', '.join(e.subject_emails) or 'none'}")
+        if where == "outside":
+            aka = result.people[e.endorser].also_known_as
+            print(f"  endorser also known as: {', '.join(aka)}")
+            print(f"  endorser key: {e.endorser_key}")
+        if e.note is not None:
+            print(f"  note: {_printable(e.note)}")
+    print(f"endorsements: {len(found)}, {outside} from outside the kernel graph")
     return 0
 
 
@@ -4311,6 +4403,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--reason", default="compromise", help="default: compromise")
     p.set_defaults(func=cmd_revoke)
+    p = add(
+        "show",
+        "print a person's tier, keys, emails and endorsements, marking those"
+        " from outside the kernel graph",
+    )
+    p.add_argument("handle", metavar="HANDLE")
+    p.add_argument(
+        "registry",
+        nargs="?",
+        metavar="DIR",
+        help="registry checkout (default: the synced copy once setup has run,"
+        " else the current directory)",
+    )
+    p.set_defaults(func=cmd_show)
     p = add("check", "validate every signature and compute every tier")
     p.add_argument(
         "registry",

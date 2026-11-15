@@ -146,6 +146,13 @@ whose key, if two files list it
 .TP
 \fB\-\-reason\fR \fIREASON\fR
 default: compromise
+.SS show
+\fBgit vouch show\fR \fIHANDLE\fR [\fIDIR\fR]
+.PP
+print a person's tier, keys, emails and endorsements, marking those from outside the kernel graph
+.TP
+\fIDIR\fR
+registry checkout (default: the synced copy once setup has run, else the current directory)
 .SS check
 \fBgit vouch check\fR [\fIDIR\fR]
 .PP

@@ -153,6 +153,13 @@ endorses. A key used in both registries has the same did:key in both, so
 anyone can cross-check without `git-vouch` resolving anything. An
 endorsement from an independent community is valuable precisely because
 an attacker would have to infiltrate two social graphs, not one.
+`git vouch show <handle>` marks such an endorsement as from outside the
+kernel graph: its endorser holds no tier here and lists `alsoKnownAs`.
+For each one it prints those identities and the endorser's signing
+did:key, so an approver can check them with the other community. Both
+facts come from the registry alone, and anyone can register with no
+tier and any `alsoKnownAs`, so the mark says where to look, not that the
+other community vouched.
 Nobody can endorse themselves: a self-endorsement is reported as void
 and counts for nothing, but never fails `check`.
 
@@ -654,6 +661,7 @@ and an anchor can already revoke a key at once.
 | `git vouch approve <handle> <tier>` | Writes and signs a tier record |
 | `git vouch revoke` | Writes and signs a revocation |
 | `git vouch cosign <path>` | As an anchor, writes and signs a cosign of the exact bytes now at `anchors.json` or `people/<handle>.json`, after printing the anchors or the person's keys it approves (see Cosign) |
+| `git vouch show <handle> [DIR]` | Prints a valid person's tier, keys, emails (endorsed or not) and `alsoKnownAs`, then each valid endorsement of them: endorser, the endorser's tier, inside or outside the kernel graph, date, emails and note. For an outside one it adds the endorser's `alsoKnownAs` and signing did:key (see How trust maps). Exit 1 if the person has no valid person file |
 | `git vouch check [DIR]` | Validates every signature and computes every tier; non-zero exit on any error. Warnings (unsigned key change, unendorsed email, records a revocation voids, fetch age) do not fail. Run before every registry merge |
 | `git vouch export [DIR] [--min-tier T] [--include-automation]` | Writes the allowed-signers file and the revocation file |
 | `git vouch query <did> [--at TIME]` | Prints a did:key's handle, tier and key validity, now or at TIME, as JSON; exit 1 if unknown. `git vouch query --all [--at TIME]` prints one JSON object mapping every did:key listed in a person file to that answer, from one registry check (used by `git-vouch-trqp`). At TIME it reads the newest commit on HEAD's first-parent line whose effective date is at or before TIME |

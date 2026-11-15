@@ -136,9 +136,17 @@ no tier and endorse, and an attacker would then have to infiltrate two
 social graphs, not one. Endorsements are evidence, not a count: the
 approver reads them and decides, and `check` verifies signatures and
 authority, never the approver's judgement. A self-endorsement is void.
+`git vouch show` marks an endorsement as from outside the kernel graph
+when its endorser holds no tier and lists `alsoKnownAs`, and prints
+those identities: the cross-community argument helps only if the
+approver can see which endorsements it applies to. Both facts are
+self-service, so the mark says where to check, not that anyone outside
+did.
 
 **Rejected:** minimum endorsement counts per tier, because the approver
-decides. Tiers from the GPG web of trust: Linus certifies 2 keys, so it
+decides. Calling every untiered endorser outside, which would include
+kernel newcomers; and judging by the endorsement graph, which a sock
+puppet nobody endorsed passes anyway. Tiers from the GPG web of trust: Linus certifies 2 keys, so it
 says nothing about who is a maintainer.
 
 DESIGN: [How trust maps](../DESIGN.md#how-trust-maps),
