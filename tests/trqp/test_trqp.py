@@ -31,7 +31,7 @@ from test_check import AFTER, BEFORE, Registry, did, keys  # noqa: F401 (keys is
 from test_export import reg  # noqa: F401 (reg is a fixture)
 from test_query import T0, base, promoted_bot
 from test_sync import commit_change, copy_head, data_dir, home, push, remote  # noqa: F401
-from trqp.conftest import BRIDGE, DID, Bridge, Checker, schema_oracle
+from trqp.conftest import BRIDGE, DID, Bridge, Checker, check_reply, schema_oracle
 
 TYPE = "https://trusttasks.org/spec/registry/authorization/0.2"
 RESPONSE_TYPE = TYPE + "#response"
@@ -787,23 +787,32 @@ def stamp_time(registry: Path) -> str:
 
 
 def stale_reply(bridge: Bridge, req: dict) -> str:
-    """POST ``req`` and return the text of the bare 503 a stale registry gets.
+    """POST ``req`` and return the message of the error a stale registry gets.
 
-    No Trust Task document, so verify-trust reads it as a transport error
-    and reports registryUnavailable (vouch-faq3.16).
+    A retryable ``unavailable`` trust-task-error, retry after the next
+    sync, which verify-trust 0.25.0 and later report as registryUnavailable.
     """
     conn = http.client.HTTPConnection(bridge.host, bridge.port, timeout=60)
     try:
+        sent = datetime.now(timezone.utc).replace(microsecond=0)
         conn.request("POST", "/trust-tasks", json.dumps(req).encode())
         resp = conn.getresponse()
         body = resp.read()
         assert resp.status == 503, body[:200]
-        assert resp.getheader("Content-Type") == "text/plain; charset=utf-8"
+        assert resp.getheader("Content-Type") == "application/json"
         assert resp.getheader("Retry-After") == "3600"
         assert resp.getheader("Cache-Control") == "no-store"
-        return body.decode()
     finally:
         conn.close()
+    doc = json.loads(body)
+    check_reply(doc)
+    assert doc["type"] == ERROR_TYPE and doc["threadId"] == req["id"]
+    payload = doc["payload"]
+    assert (payload["code"], payload["retryable"]) == ("unavailable", True)
+    retry = datetime.strptime(payload["retryAfter"], "%Y-%m-%dT%H:%M:%SZ")
+    retry = retry.replace(tzinfo=timezone.utc)
+    assert 3600 - 5 <= (retry - sent).total_seconds() <= 3600 + 5
+    return str(payload["message"])
 
 
 def assert_stale(bridge: Bridge, req: dict) -> None:
@@ -866,9 +875,9 @@ def test_never_synced_registry_is_refused(
         subprocess.run(["git", "init", "-q", str(reg.root)], check=True)
     text = stale_reply(serve(reg.root, stamp=False), request(did(keys("torvalds"))))
     assert text == (
-        "the registry copy was never synced\n"
+        "the registry copy was never synced"
         if is_repo
-        else "the registry is not a git repository\n"
+        else "the registry is not a git repository"
     )
 
 

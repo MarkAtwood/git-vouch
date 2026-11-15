@@ -391,11 +391,11 @@ def test_stale_bridge_fails_closed(
     bridge: Bridge,
     keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
-    """A bridge synced over 24h ago answers a bare 503; verify-trust refuses.
+    """A bridge synced over 24h ago answers a retryable error; verify-trust refuses.
 
-    With no Trust Task document trql-client sees a transport error, so
-    verify-trust reports registryUnavailable, as for a bridge that is down,
-    not a denial (vouch-faq3.16).
+    verify-trust 0.25.0 and later (OpenVTC #176) report a retryable
+    trust-task-error as registryUnavailable, as for a bridge that is down,
+    not as a denial.
     """
     stamp = tmp_path / "registry" / ".git" / "vouch-fetched"
     old = stamp.stat().st_mtime - 25 * 3600

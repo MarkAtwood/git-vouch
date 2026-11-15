@@ -365,8 +365,7 @@ segment    = [a-z0-9._-]+, never "." or ".."
 
 Historical: these fed the bridge's design. Where the bridge differs,
 DESIGN.md and `docs/bridge-deployment.md` describe what was built; for
-example, the bridge answers a stale copy with a bare 503, not a
-`trust-task-error` body.
+example, the bridge speaks authorization 0.2, not 0.1.
 
 - **vouch-faq3.2 (mapping):** the bridge sees `entity_id` = a did:key,
   `authority_id` = whatever the operator passes as `--vtc-did`, `action`
