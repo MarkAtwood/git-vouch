@@ -1,0 +1,12 @@
+{
+  "id": "vouch-vq7h",
+  "title": "check: second independent signature on review-gated changes at anchor/maintainer tier",
+  "description": "Today one registry maintainer's merge decides three things check cannot verify (DESIGN, Merging needs one person): any anchors.json change, a person-file change not signed by a key from the previous version (lost-key recovery), and deleting a tier record. In practice the merger is the root of trust for these. Proposal (external review, 2026-11-15): when the person affected is anchor or maintainer tier, check requires a second, independent signature, e.g. an anchor's signed record naming the commit or change, and fails (not warns) without it. Contributor-tier changes keep today's rule. Design questions: what the second signature covers (merge commit id, or the new file bytes), who may give it (any anchor other than the merger and the subject), how it is read from git history without new tombstone-style records (metarule: read history, don't invent records), and how the flag-day first merge (anchors.json bootstrap) is exempt or handled.",
+  "status": "open",
+  "priority": 2,
+  "issue_type": "feature",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-11-15T02:47:02.882051798Z",
+  "created_by": "Mark Atwood",
+  "updated_at": "2026-11-15T02:47:02.882051798Z"
+}
