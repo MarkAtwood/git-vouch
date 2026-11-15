@@ -344,19 +344,27 @@ proves nothing.
 DESIGN: [Rejected alternatives](../DESIGN.md#rejected-alternatives).
 
 <a id="one-flag-day"></a>
-## One flag day, no dual period
+## A flag day for Linus's tree only
 
-**What:** on the flag day Linus and the release tooling switch to
-`git vouch export` files, and GPG-signed tags and pulls stop being
-accepted. No period accepts both on new tags or pulls. Old GPG-signed
-tags stay valid in history and verify with `gpg` against pgpkeys at the
-freeze commit.
+**What:** `pgpkeys.git` freezes for everyone. On the flag day only
+Linus's tree and the release tags stop accepting OpenPGP signatures and
+verify against `git vouch export` files. The core set that must register
+first is everyone `git-vouch-migrate pullers` lists from Linus's merges,
+plus the release signers. Every other tree keeps verifying both kinds,
+because git picks the verifier from the signature, and switches when its
+owner chooses. At the late cutoff GPG ends for tags and patches alike.
+A tree switches with `git config gpg.openpgp.program false`.
 
-**Why:** DESIGN states the outcome, not a threat: after the flag day,
-nothing new needs `gpg`. It gives no further reason.
+**Why:** a kernel-wide flag day gives every GPG holdout a veto over the
+date. Linus's pulls are the one place the kernel applies one policy to
+everyone; every other tree verifies on its owner's terms. The freeze
+still forces the move: no new GPG identity can enter anywhere, so the GPG
+population only shrinks. The core set comes from git history, so nobody
+picks names and anyone can rerun it. A tree that has not switched is no
+weaker than today.
 
-**Rejected:** a dual GPG/SSH transition. A manifest of old signatures:
-DESIGN gives no reason.
+**Rejected:** a kernel-wide flag day with no period accepting both. A
+manifest of old signatures: DESIGN gives no reason.
 
 DESIGN: [Flag day](../DESIGN.md#flag-day),
 [Rejected alternatives](../DESIGN.md#rejected-alternatives).
@@ -445,8 +453,8 @@ would verify new forgeries; `keys` serves current keys only. A selector
 derived from the key keeps main and backup tokens from colliding, and it
 is lowercase hex because patatt lowercases selectors and base64 would
 collide. Upstream b4 newer than 0.16 caches verdicts for up to 24 hours,
-so a revoked key can show a pass for up to a day. DESIGN gives no reason
-why patches get a fallback and tags do not.
+so a revoked key can show a pass for up to a day. Tags get the same
+fallback outside Linus's tree, and both end at the late cutoff.
 
 **Rejected:** a generated keyring.
 

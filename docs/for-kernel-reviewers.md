@@ -117,14 +117,17 @@ It does not stop:
 1. The freeze commit: `pgpkeys.git` gets one last signed commit and goes
    read-only. Its hash, the flag day and the late cutoff are published
    together.
-2. Window: anchors register first, then everyone else.
-3. Flag day: Linus and the release tooling switch to `git vouch export`
-   files; GPG-signed tags and pulls stop. No dual period.
+2. Window: anchors register first, then the core set: everyone
+   `git-vouch-migrate pullers` lists from Linus's merges.
+3. Flag day: Linus's tree and the release tooling switch to
+   `git vouch export` files and stop accepting GPG. Every other tree
+   keeps accepting both until its owner switches, by the late cutoff.
 4. Patch mail: b4 with the patatt fork checks `vouch:` first and the
    frozen GPG keyring second, with a warning, until the late cutoff
    (DESIGN: Patch signing).
-5. Late cutoff, six months after the flag day: continuity claims against the freeze commit end. Merge
-   policy, not code.
+5. Late cutoff, six months after the flag day: GPG-signed tags and
+   patches stop everywhere, and continuity claims against the freeze
+   commit end. Policy, not code.
 6. Continuity proof (a GPG signature over the new person file, or the
    GPG authentication subkey reused as the SSH key) only unlocks ported
    endorsement drafts. It grants no tier.
