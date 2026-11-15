@@ -886,8 +886,9 @@ itself stays a CLI. Facts about `verify-trust` come from
   which is also the export's `valid-before`.
 - **Freshness:** the operator runs `git vouch sync` on a timer
   (`docs/bridge-deployment.md`), and the bridge refuses to answer once
-  24 hours pass without a successful sync. The refusal is a bare HTTP
-  503 with no Trust Task document, so `verify-trust` fails closed with
+  24 hours pass without a successful sync. The refusal is HTTP 503 with
+  a retryable `unavailable` trust-task-error and a `retryAfter` an hour
+  on, so `verify-trust` (0.25.0 and later) fails closed with
   `registryUnavailable` rather than a denial.
 - **Caching:** answers for now come from one `git vouch query --all`
   run shared by every DID and every concurrent request, rerun when the
