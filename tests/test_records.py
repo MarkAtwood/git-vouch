@@ -121,6 +121,7 @@ def test_person_fields(vouch: ModuleType) -> None:
             ),
         ),
         accountable=None,
+        also_known_as=("did:web:example.org", "did:plc:abc123"),
     )
 
 

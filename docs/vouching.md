@@ -226,6 +226,13 @@ back; those DIDs are the endorser's own claim. A DID that also lists the
 person's did:key in its own `alsoKnownAs` is a stronger claim, but
 checking that is left to tools that resolve DIDs.
 
+An approver sees these endorsements with `git vouch show <handle>`. It
+marks an endorsement as from outside the kernel graph when its endorser
+holds no tier here and lists `alsoKnownAs`, and prints those DIDs and
+the endorser's did:key. That is where to start checking with the other
+community. The mark is no proof: anyone can register with no tier and
+any `alsoKnownAs`.
+
 ## Flag-day endorsement drafts
 
 > **What this does:** turns your old GPG certifications into unsigned endorsement drafts for you to review and sign.\
