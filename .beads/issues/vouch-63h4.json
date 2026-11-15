@@ -1,0 +1,12 @@
+{
+  "id": "vouch-63h4",
+  "title": "check/status: report which endorsements come from outside the kernel graph",
+  "description": "DESIGN (How trust maps) argues a cross-community endorsement is valuable because an attacker must infiltrate two social graphs. That only helps if verifiers can see which endorsements are cross-community. Add it to output: for each person (git vouch status \u003chandle\u003e, and check's per-person line or a report subcommand), mark endorsements whose endorser has no tier and lists alsoKnownAs identities elsewhere, or more strictly is not connected to the anchors through tier grants. Pick the definition first; it must come from the registry alone, offline (no foreign-registry lookups, no federation). From external review 2026-11-15.",
+  "status": "open",
+  "priority": 3,
+  "issue_type": "feature",
+  "owner": "mark@reviewcommit.com",
+  "created_at": "2026-11-15T02:47:02.954321697Z",
+  "created_by": "Mark Atwood",
+  "updated_at": "2026-11-15T02:47:02.954321697Z"
+}
