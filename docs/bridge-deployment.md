@@ -272,8 +272,10 @@ git checkout v0.33.0
 cargo build --locked --release -p verify-trust
 ```
 
-Then run the tests with `VERIFY_TRUST` set to
-`target/release/verify-trust` in that tree:
+The release's prebuilt Linux binary needs glibc 2.38 or later, so on an
+older system, such as Debian 12, build it as above; the test fails at once,
+saying so, if the binary cannot run. Then run the tests with
+`VERIFY_TRUST` set to `target/release/verify-trust` in that tree:
 
 ```sh
 VERIFY_TRUST=/path/to/verifiable-git-infrastructure/target/release/verify-trust \
