@@ -1,8 +1,11 @@
 # verify-trust interop surface
 
 **Status:** research spike for `git-vouch-trqp` (bead vouch-faq3.1),
-2026-10-22, against verify-trust 0.24.0. It records what OpenVTC's
-`verify-trust` sends and accepts, read from source. The bridge is now
+2026-10-22, against verify-trust 0.24.0, which spoke
+`registry/authorization/0.1`. It records what that verify-trust sent and
+accepted, read from source; field names below are 0.1's snake_case. The
+bridge now speaks 0.2 only (lowerCamelCase: `entityId`, `authorityId`,
+`evaluatedAt`, `asOf`) and needs verify-trust 0.27.0 or later. The bridge is now
 built: DESIGN.md, TRQP bridge, describes it, and
 `docs/bridge-deployment.md` explains how to run it.
 

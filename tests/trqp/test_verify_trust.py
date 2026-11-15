@@ -1,9 +1,11 @@
 """End to end: OpenVTC's own verify-trust checks commits against git-vouch-trqp.
 
 verify-trust is the independent oracle. It is not part of this tree: build it
-from OpenVTC verifiable-git-infrastructure (tested at commit 5d9b9b6) with
-``cargo build --locked --release -p verify-trust`` and point ``VERIFY_TRUST``
-at the binary, or put it on PATH. Without it these tests skip.
+from OpenVTC verifiable-git-infrastructure at tag v0.33.0 (the first the
+bridge must serve: it asks registry/authorization 0.2, which the bridge
+alone speaks) with ``cargo build --locked --release -p verify-trust`` and
+point ``VERIFY_TRUST`` at the binary, or put it on PATH. Without it these
+tests skip. verify-trust before 0.27.0 asks 0.1 and gets unsupportedVersion.
 
 The run is offline. verify-trust resolves did:web only from public hosts, so
 it cannot discover a local bridge from the registry's DID document; it is
@@ -16,11 +18,11 @@ for which there is no token in a test run: sk_sign.py signs those, and real
 ``git verify-commit`` (ssh-keygen) accepts each one before verify-trust sees
 it. P-256 and RSA did:keys are derived here from ssh-keygen's own output.
 
-OpenVTC issue #169 (open): verify-trust accepts only plain ssh-ed25519
-signatures. The sk-ssh-ed25519, P-256 and RSA cases assert today's refusal
-of a signer the bridge authorizes; they must flip to trusted once #169 is
-fixed. verify-trust also never sends context.time, so a retired key is judged
-as of now, even for commits made before it retired.
+Since 0.25.0 (OpenVTC #177) verify-trust accepts ssh-ed25519, P-256 and
+both FIDO types, a FIDO signature only with the user-presence flag and the
+``ssh:`` application, which sk_sign.py sets; RSA is still refused before the
+bridge is asked. verify-trust never sends context.time, so a retired key is
+judged as of now, even for commits made before it retired.
 """
 
 from __future__ import annotations
@@ -329,26 +331,26 @@ def test_forged_signer_did_is_refused(
     assert report == Report(1, "unknownKey", {"did": signer, "fingerprint": raw.hex()})
 
 
-@pytest.mark.parametrize(
-    ("kind", "algorithm"),
-    [
-        ("sk", "sk-ssh-ed25519@openssh.com"),
-        ("ecdsa", "ecdsa-sha2-nistp256"),
-        ("rsa", "rsa-sha2-512"),
-    ],
-)
-def test_only_plain_ed25519_passes_openvtc_169(
-    tmp_path: Path, bridge: Bridge, extra: Extra, kind: str, algorithm: str
+@pytest.mark.parametrize("kind", ["sk", "ecdsa"])
+def test_fido_and_p256_signers_pass(
+    tmp_path: Path, bridge: Bridge, extra: Extra, kind: str
 ) -> None:
-    """The bridge authorizes alice's key; verify-trust refuses its signature today.
-
-    When OpenVTC #169 is fixed this must become trusted.
-    """
+    """The bridge authorizes alice's FIDO and P-256 keys, and verify-trust trusts them."""
     key, signer = getattr(extra, kind)
     assert authorized(bridge, request(signer))[0] is True
     report = verify_trust(signed_repo(tmp_path, key, signer), url(bridge))
+    assert report == Report(0, "trusted", {"signer_did": signer, "resource": RESOURCE})
+
+
+def test_rsa_signer_is_refused_by_verify_trust(
+    tmp_path: Path, bridge: Bridge, extra: Extra
+) -> None:
+    """The bridge authorizes alice's RSA key; verify-trust refuses RSA before asking."""
+    key, signer = extra.rsa
+    assert authorized(bridge, request(signer))[0] is True
+    report = verify_trust(signed_repo(tmp_path, key, signer), url(bridge))
     assert report == Report(
-        1, "malformed", f"unsupported signature algorithm: {algorithm}"
+        1, "malformed", "unsupported signature algorithm: rsa-sha2-512"
     )
 
 

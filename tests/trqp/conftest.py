@@ -3,17 +3,17 @@
 The schemas under ``schemas/`` are the independent oracle. They are copied
 verbatim, upstream paths kept, from the Trust Task spec repository
 https://github.com/trustoverip/dtgwg-trust-tasks-tf at commit
-9a48a4c67b75737b0226c175c34a6a60799c15e9 (2026-10-22):
+c93ec1ee2ebe09a544fed947bb396b0ee8b3fbe5 (2026-11-15):
 
-- ``specs/_framework/0.5/trust-task.schema.json``: the envelope. The
-  registry/authorization 0.1 spec declares targetFrameworkVersion 0.5.0.
-- ``specs/registry/authorization/0.1/payload.schema.json``: the request
+- ``specs/_framework/0.6/trust-task.schema.json``: the envelope. The
+  registry/authorization 0.2 spec declares targetFrameworkVersion 0.6.0.
+- ``specs/registry/authorization/0.2/payload.schema.json``: the request
   payload, with the ``#response`` anchor for the response payload, and the
-  two files its ``$ref``s name (``_shared/0.1/registry.schema.json`` and
-  ``_framework/0.1/framework.schema.json``).
-- ``specs/registry/authorization/0.1/payload.invalid-examples.json``.
-- ``specs/trust-task-error/0.5/payload.schema.json``: the error payload,
-  the version trust-tasks-rs 0.32.1 (verify-trust's) emits.
+  two files its ``$ref``s name (``_shared/0.2/registry.schema.json`` and
+  ``_framework/0.4/framework.schema.json``).
+- ``specs/registry/authorization/0.2/payload.invalid-examples.json``.
+- ``specs/trust-task-error/0.6/payload.schema.json``: the error payload,
+  the version trust-tasks-rs 0.37.2 (verify-trust 0.33.0's) emits.
 
 The schema oracle needs ``jsonschema`` and ``referencing``, and checks
 ``format`` with ``rfc3339-validator`` (date-time) and ``rfc3986-validator``
@@ -49,8 +49,8 @@ BRIDGE = Path(__file__).resolve().parent.parent.parent / "git-vouch-trqp"
 SCHEMAS = Path(__file__).resolve().parent / "schemas" / "specs"
 DID = "did:web:registry.example"
 REPLY_KINDS = {
-    "https://trusttasks.org/spec/registry/authorization/0.1#response": "response",
-    "https://trusttasks.org/spec/trust-task-error/0.5": "error",
+    "https://trusttasks.org/spec/registry/authorization/0.2#response": "response",
+    "https://trusttasks.org/spec/trust-task-error/0.6": "error",
 }
 # Runs the bridge at argv[1] with QUERY_TIMEOUT set to argv[2] seconds unless
 # blank, and, unless argv[3] is blank, its monotonic clock ahead by the
@@ -219,14 +219,14 @@ def schema_checker() -> Checker:
     """
     jsonschema, referencing = schema_oracle()
     formats = jsonschema.Draft202012Validator.FORMAT_CHECKER
-    envelope = _load("_framework/0.5/trust-task.schema.json")
-    payload = _load("registry/authorization/0.1/payload.schema.json")
-    error = _load("trust-task-error/0.5/payload.schema.json")
+    envelope = _load("_framework/0.6/trust-task.schema.json")
+    payload = _load("registry/authorization/0.2/payload.schema.json")
+    error = _load("trust-task-error/0.6/payload.schema.json")
     # The payload's $refs are file-relative upstream; register each file at
     # the URI the ref resolves to against the payload's $id.
     refs = {
-        "../../_shared/0.1/registry.schema.json": "registry/_shared/0.1/registry.schema.json",
-        "../../../_framework/0.1/framework.schema.json": "_framework/0.1/framework.schema.json",
+        "../../_shared/0.2/registry.schema.json": "registry/_shared/0.2/registry.schema.json",
+        "../../../_framework/0.4/framework.schema.json": "_framework/0.4/framework.schema.json",
     }
     resources = [(s["$id"], s) for s in (envelope, payload, error)] + [
         (urljoin(payload["$id"], ref), _load(rel)) for ref, rel in refs.items()
@@ -260,7 +260,7 @@ def invalid_payloads() -> list[dict]:
     """Return the spec's own invalid request payloads."""
     examples: list[dict] = json.loads(
         (
-            SCHEMAS / "registry/authorization/0.1/payload.invalid-examples.json"
+            SCHEMAS / "registry/authorization/0.2/payload.invalid-examples.json"
         ).read_text()
     )
     return [e["payload"] for e in examples]

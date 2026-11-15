@@ -33,9 +33,9 @@ from test_query import T0, base, promoted_bot
 from test_sync import commit_change, copy_head, data_dir, home, push, remote  # noqa: F401
 from trqp.conftest import BRIDGE, DID, Bridge, Checker, schema_oracle
 
-TYPE = "https://trusttasks.org/spec/registry/authorization/0.1"
+TYPE = "https://trusttasks.org/spec/registry/authorization/0.2"
 RESPONSE_TYPE = TYPE + "#response"
-ERROR_TYPE = "https://trusttasks.org/spec/trust-task-error/0.5"
+ERROR_TYPE = "https://trusttasks.org/spec/trust-task-error/0.6"
 ACTION = "git.commit.sign"
 RESOURCE = "git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux"
 ISSUED = "2026-10-22T12:00:00Z"
@@ -51,8 +51,8 @@ def request(
 ) -> dict:
     """Return a request shaped as verify-trust sends it (docs/trqp-interop.md, section 1)."""
     payload: dict[str, object] = {
-        "entity_id": entity,
-        "authority_id": authority,
+        "entityId": entity,
+        "authorityId": authority,
         "action": action,
         "resource": resource,
     }
@@ -84,9 +84,9 @@ def authorized(bridge: Bridge, req: dict) -> tuple[bool, dict]:
     assert doc["threadId"] == req["id"]
     assert doc["issuer"] == DID
     answer = doc["payload"]
-    for name in ("entity_id", "authority_id", "action", "resource"):
+    for name in ("entityId", "authorityId", "action", "resource"):
         assert answer[name] == req["payload"][name]
-    evaluated = datetime.strptime(answer["time_evaluated"], "%Y-%m-%dT%H:%M:%SZ")
+    evaluated = datetime.strptime(answer["evaluatedAt"], "%Y-%m-%dT%H:%M:%SZ")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     assert abs((now - evaluated).total_seconds()) < 120
     result: bool = answer["authorized"]
@@ -146,7 +146,7 @@ def test_context_time(
     expected: bool,
 ) -> None:
     got, answer = authorized(bridge, request(did(keys("gregkh-old")), time=time))
-    assert (got, answer["time_requested"]) == (expected, time)
+    assert (got, answer["asOf"]) == (expected, time)
 
 
 def test_bot_era_signature_of_since_promoted_handle(
@@ -189,7 +189,7 @@ def test_time_before_any_key(
 ) -> None:
     """A valid early time is answered (no key existed then), not refused as an outage."""
     got, answer = authorized(bridge, request(did(keys("torvalds")), time=time))
-    assert (got, answer["time_requested"]) == (False, time)
+    assert (got, answer["asOf"]) == (False, time)
 
 
 @pytest.mark.parametrize(
@@ -204,15 +204,15 @@ def test_blank_time_means_now(
     """registry.schema.json QueryContext.time: "Blank/absent uses current server time"."""
     got, answer = authorized(bridge, request(did(keys(name)), time=""))
     assert got is expected
-    assert "time_requested" not in answer
+    assert "asOf" not in answer
 
 
-def test_no_time_requested_without_context(
+def test_no_as_of_without_context(
     bridge: Bridge,
     keys: Callable[[str], Key],  # noqa: F811
 ) -> None:
     _, doc = bridge.post(request(did(keys("torvalds"))))
-    assert "time_requested" not in doc["payload"]
+    assert "asOf" not in doc["payload"]
 
 
 @pytest.mark.parametrize(
@@ -362,7 +362,7 @@ def with_doc(**changes: object) -> dict:
             "unsupportedType",
         ),
         (
-            with_doc(type="https://trusttasks.org/spec/registry/authorization/0.2"),
+            with_doc(type="https://trusttasks.org/spec/registry/authorization/0.1"),
             422,
             "unsupportedVersion",
         ),
@@ -421,7 +421,7 @@ def test_bad_content_length_is_malformed(bridge: Bridge, length: str) -> None:
 def test_spec_invalid_payloads_are_malformed(
     bridge: Bridge, invalid_payloads: list[dict]
 ) -> None:
-    assert len(invalid_payloads) == 3
+    assert len(invalid_payloads) == 5
     for payload in invalid_payloads:
         status, answer = error(bridge, with_doc(payload=payload))
         assert (status, answer["code"]) == (400, "malformedRequest"), payload
@@ -736,8 +736,8 @@ def test_verify_trust_example_request_is_valid(check_schema: Checker) -> None:
         "recipient": "did:web:registry.example",
         "issuedAt": "2026-10-22T12:00:00Z",
         "payload": {
-            "entity_id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
-            "authority_id": "did:web:vtc.example",
+            "entityId": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+            "authorityId": "did:web:vtc.example",
             "action": "git.commit.sign",
             "resource": RESOURCE,
         },
