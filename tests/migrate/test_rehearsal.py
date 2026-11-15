@@ -125,6 +125,19 @@ def _build(world: Path) -> tuple[dict[str, str], str]:
     _git(linux, "init", "-q", "-b", "main", env=env)
     _git(linux, "add", "README", env=env)
     _git(linux, *ident, "commit", "-q", "-m", "Linux 6.98", env=env)
+    _git(linux, "tag", "v6.98", env=env)
+    # Before the flag day alice sends Linus (played by lena) a GPG-signed pull,
+    # so pullers names her and git verify-tag has an OpenPGP tag to judge.
+    _git(linux, "switch", "-q", "-c", "alice", env=env)
+    _git(linux, *ident, "commit", "-q", "--allow-empty", "-m", "alice's fix", env=env)
+    alice_sign = ["-c", "user.name=Alice Example", "-c", "user.email=alice@example.org",
+        "-c", "gpg.format=openpgp", "-c", f"user.signingkey={fprs['alice']}!"]  # fmt: skip
+    _git(linux, *alice_sign, "tag", "-s", "-m", "for-6.98 from alice",
+         "alice-for-6.98", env=dict(env, GNUPGHOME=str(alice.home)))  # fmt: skip
+    _git(linux, "switch", "-q", "main", env=env)
+    linus = ["-c", "user.name=Lena Anchor", "-c", "user.email=lena@example.org"]
+    _git(linux, *linus, "merge", "-q", "--no-ff", "--no-edit", "alice-for-6.98",
+         env=env)  # fmt: skip
     _git(world, "clone", "-q", "--bare", str(linux), "linux.git", env=env)
     _git(world, "init", "-q", "--bare", "-b", "main", "registry.git", env=env)
     return fprs, commit
@@ -267,3 +280,17 @@ def test_git_verifies_tags_by_tier(rehearsal: Rehearsal) -> None:
     # bob's tag is rejected at maintainer tier and accepted at contributor tier.
     assert err.count('Good "git" signature for bob with ED25519 key') == 1
     assert err.count("No principal matched") == 2  # bob's tag, then alice's for release
+
+
+def test_pullers_names_the_core_set(rehearsal: Rehearsal) -> None:
+    out = rehearsal.proc.stdout
+    assert "\n1 1 0 alice@example.org Alice Example\n" in out
+
+
+def test_only_linus_tree_refuses_gpg(rehearsal: Rehearsal) -> None:
+    err = rehearsal.proc.stderr
+    alice = rehearsal.fprs["alice"]
+    # gpg itself judged the tag, once: in history, with gpg.openpgp.program=gpg.
+    # In Linus's tree, where the program is false, git got no good signature.
+    assert err.count('Good signature from "Alice Example <alice@example.org>"') == 1
+    assert alice in err.replace(" ", "")

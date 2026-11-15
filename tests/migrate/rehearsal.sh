@@ -75,6 +75,15 @@ merge() { # The registry maintainer merges a submitted branch once check passes.
     git push -q origin main
 )
 
+# The core set: everyone whose signed tag Linus merged must register before
+# the flag day. Anyone can list them from Linus's tree; the anchors approve
+# them as maintainers.
+(
+    home lena
+    git clone -q "$LINUX" linux
+    git-vouch-migrate pullers linux --since v6.98
+)
+
 # Everyone else registers. A pgpkeys holder completes their draft and adds a
 # continuity proof: a detached GPG signature over the person file...
 (
@@ -199,12 +208,14 @@ merge endorse-lena
 )
 merge approve-alice
 
-# 3. Flag day. Linus switches to the export at --min-tier maintainer.
+# 3. Flag day. Linus switches to the export at --min-tier maintainer and
+#    stops accepting OpenPGP signatures in his tree. No other tree changes.
 (
     home lena
     git vouch setup --registry "$REGISTRY" --min-tier maintainer
     git vouch check
-    git clone -q "$LINUX" linux
+    cd linux
+    git config gpg.openpgp.program false
 )
 
 # Developers sign tags with SSH keys.
@@ -230,6 +241,12 @@ done
     if git verify-tag bob-6.99; then
         exit 1
     fi
+    # Linus's tree refuses alice's GPG-signed tag from before the flag day...
+    if git verify-tag alice-for-6.98; then
+        exit 1
+    fi
+    # ...which still verifies in a tree that has not switched, and in history.
+    git -c gpg.openpgp.program=gpg verify-tag alice-for-6.98
     # Release tooling verifies against anchors only.
     git vouch export --min-tier anchor --allowed-signers ~/release-signers \
         --revocation-file ~/release-revoked

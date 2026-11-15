@@ -39,14 +39,17 @@ people are named where they act.
 
 ## Flag day
 
-> **What this does:** gets you registered before GPG-signed tags and pulls stop being accepted.\
-> **Why:** there is one flag day and no period that accepts both GPG and SSH on new tags or pulls ([rationale](rationale.md#one-flag-day)).
+> **What this does:** gets you registered before GPG-signed tags and patches stop being accepted.\
+> **Why:** only Linus's tree switches on the flag day; every other tree switches by the late cutoff ([rationale](rationale.md#one-flag-day)).
 
-Register during the window, before the flag day. From the flag day, a
-GPG-signed tag or pull is not accepted. [The flag-day runbook](flag-day.md)
-has the full timeline.
+If Linus pulls from you, you are in the core set: register during the
+window, before the flag day, when his tree stops accepting GPG-signed
+tags. Everyone else registers before the late cutoff, six months later,
+when GPG-signed tags and patches stop being accepted anywhere; the tree
+you send to may switch sooner. [The flag-day runbook](flag-day.md) has
+the full timeline.
 
-Patch signing has a fallback that tags do not. Before the flag day,
+Patches follow the same dates. Before the flag day,
 install the patatt fork and list `keyringsrc = vouch:` first and the
 frozen pgpkeys keyring second, as [Patch signing](#patch-signing) shows.
 Patches signed with a GPG key, or a key `patatt genkey` made, then keep

@@ -21,9 +21,11 @@ things that already exist and one small script:
   checks the registry's rules and writes the `allowed_signers` and
   revocation files that git reads.
 
-The switch happens on one flag day: `pgpkeys.git` is frozen and ported
-into the registry, everyone re-signs with SSH keys, and GPG-signed tags
-and pulls stop being accepted (see Flag day).
+`pgpkeys.git` is frozen and ported into the registry. On the flag day
+Linus's pulls and release tags switch to SSH signatures; every other tree
+switches when its owner chooses, and GPG-signed tags and patches stop
+being accepted anywhere at the late cutoff, six months later (see Flag
+day).
 
 **Scope:** tags, commits, patch emails and the registry's own records.
 Release files (tarball `.tar.sign`, `sha256sums.asc`, the checksum
@@ -821,26 +823,61 @@ itself stays a CLI. Facts about `verify-trust` come from
 
 ## Flag day
 
-GPG and `pgpkeys.git` are retired for the kernel on one date, the flag
-day. No period accepts both GPG and SSH signatures on new tags or pulls.
-Before the flag day every pgpkeys holder who still signs registers an
-SSH key. After it, nothing new needs `gpg`.
+The flag day switches one verification point, not the whole kernel:
+from that date Linus's tree takes pulls only on tags that verify against
+the registry at maintainer tier, and release tags only at anchor tier.
+Every other tree switches when its owner chooses, up to the late cutoff.
+`pgpkeys.git` freezes for everyone at once, so no new GPG identity enters
+anywhere, and the GPG population only shrinks.
 
 1. **Freeze.** `pgpkeys.git` gets one last signed commit, the freeze
    commit, and becomes read-only. Its hash, the flag-day date and the
    late cutoff are published together.
 2. **Window.** The first registry merge holds `anchors.json` and the
-   anchors' person files. Everyone else then registers.
+   anchors' person files. The core set (below) then registers and is
+   approved as maintainers. Anyone else may register at any time.
 3. **Flag day.** Linus and the release tooling switch to files from
-   `git vouch export`, and GPG-signed tags and pulls stop being accepted.
+   `git vouch export` and stop accepting OpenPGP signatures. No other
+   tree has to change.
 4. **Late cutoff.** Six months after the flag day; the anchors may
-   extend it by announcement. Continuity claims against the freeze
-   commit are accepted until this date. After it, people register as newcomers. No
-   tool enforces it: after the cutoff, registry maintainers do not merge
-   any change that adds or alters a `migratedFrom` field or adds a
-   `people/*.json.asc`. That covers both proof routes, since reusing an
-   auth subkey also needs `migratedFrom`. The merge date counts, not the
-   commit date.
+   extend it by announcement. GPG-signed tags and patches stop being
+   accepted anywhere, one rule for both. Continuity claims against the
+   freeze commit are accepted until this date. After it, people register
+   as newcomers. No tool enforces it: after the cutoff, registry
+   maintainers do not merge any change that adds or alters a
+   `migratedFrom` field or adds a `people/*.json.asc`. That covers both
+   proof routes, since reusing an auth subkey also needs `migratedFrom`.
+   The merge date counts, not the commit date.
+
+**The core set** is everyone who must be registered by the flag day:
+each tagger whose signed tag Linus merged in the last N releases, plus
+the release signers. Nobody picks names. `git-vouch-migrate pullers
+<linux> --since <tag>` reads the `mergetag` headers on the first-parent
+merges of Linus's tree, which are his own pulls, and prints each tagger
+with their pull count; anyone who reruns it on the same two commits gets
+the same list. Since v6.15 (2025-05-25), Linus merged 4,216 tags, every
+one OpenPGP-signed and none SSH, from 195 tagger emails; the top 100
+sent 90%. 151 of the 195 are on a pgpkeys key, and 67 of those can reuse
+an authentication key. Measured 2026-11-15 at linux 23c62304 and
+pgpkeys 1391ad0a (signature verified). One person can tag from two
+emails, and a key on a different email counts as none. Branches pulled
+without a tag are not counted. A first pull from someone outside the set after
+the flag day waits until they register and are approved, as today it
+waits until they have a key in pgpkeys.
+
+**Linus's tree** switches with one git setting:
+`git config gpg.openpgp.program false` makes git fail every OpenPGP
+signature in that repository, while SSH signatures still verify against
+the exported files. No code is needed.
+
+**Every other tree** needs no flag day and no code. git picks the
+verifier from the signature itself, whatever `gpg.format` says: an
+OpenPGP signature goes to `gpg`, an SSH one to
+`gpg.ssh.allowedSignersFile`. A tree whose owner has run
+`git vouch setup` verifies GPG pulls against their GPG keyring, as
+today, and SSH pulls against the registry, so nothing is weaker than
+today. The owner switches with the same setting as Linus, at any time
+before the late cutoff.
 
 **Porting pgpkeys.** `git-vouch-migrate` reads pgpkeys only at the
 freeze commit, after verifying the freeze commit's signature. It reads
@@ -904,9 +941,16 @@ Measured 2026-10-23 at pgpkeys af88128e (signature verified) and linux
 7be4bc52. A key listing a different address than MAINTAINERS counts as
 no key, so 79.5% is an upper bound.
 
+**A GPG key lost after the freeze** cannot be revoked in pgpkeys, which
+is read-only. Until the late cutoff, trees that still accept GPG learn
+of it out of band, as they would today; the holder registers an SSH key,
+and the tree's owner can switch early. Linus's tree is not exposed after
+the flag day.
+
 **Old signatures.** GPG-signed tags stay valid in history. Verifying
-them uses `gpg` with the archived pgpkeys at the freeze commit. There is
-no manifest.
+them uses `gpg` with the archived pgpkeys at the freeze commit, in a
+tree that has switched with `git -c gpg.openpgp.program=gpg verify-tag`.
+There is no manifest.
 
 **Out of scope.** Release files and kup (see Summary), and encryption
 keys (the remail and security lists). kernel.org keeps a small
@@ -1004,7 +1048,11 @@ specification for anyone reviewing an upstream patch.
   first.
 - **`cryptography` or other dependencies.** `ssh-keygen` does all
   crypto.
-- **A dual GPG/SSH transition.** One flag day; see Flag day.
+- **A kernel-wide flag day.** Switching every tree on one date gives
+  every GPG holdout a veto over the date. Only Linus's tree and the
+  release tags switch on the flag day; see Flag day.
+- **Accepting GPG in Linus's tree after the flag day.** The core set is
+  small and named by `pullers`, so it can register in the window.
 
 ## Open questions
 
@@ -1012,12 +1060,18 @@ specification for anyone reviewing an upstream patch.
    git.kernel.org. Given the accepted risks (anchors, unsigned key
    changes, tier-record deletions), this choice matters as much as choosing the anchors. It is
    a kernel-team decision, not a design one.
-2. **Flag-day dates and anchors:** the anchor list, freeze date and
-   window length. Kernel-team decisions.
+2. **Flag-day dates and anchors:** the anchor list, freeze date,
+   window length, and N, the number of releases whose pulls define the
+   core set. Kernel-team decisions.
 3. **Person-file change signed by a key revoked later:** `check` warns,
    as it does for a key revoked before the change. A revocation signed
    by a later-revoked key still counts if committed first, so the
    person-file case might too.
+4. **GPG revocations after the freeze:** trees still accepting GPG
+   between the freeze and the late cutoff cannot learn of a lost key
+   from pgpkeys. kernel.org could keep accepting revocation-only commits
+   after the freeze; `git-vouch-migrate` would still read the freeze
+   commit only.
 
 Decided 2026-10-22:
 
@@ -1071,8 +1125,12 @@ Decided 2026-10-22:
   delegated signing scopes out of v1; FIDO attestation is `{blob,
   challenge}`, shape-checked by `git-vouch` and verified only by
   `git-vouch-attest` against a user-supplied root.
-- **Flag day:** GPG and `pgpkeys.git` replaced on one date, frozen at
-  signed commit (the freeze commit), no dual tags; ported files carry
+- **Flag day** (rescoped 2026-11-15): `pgpkeys.git` frozen for everyone
+  at a signed commit (the freeze commit); on the flag day only Linus's
+  tree and the release tags stop accepting GPG, and the core set that
+  must register first is everyone `pullers` lists; every other tree
+  switches by the late cutoff, which ends GPG for tags and patches
+  alike; a tree switches with `gpg.openpgp.program=false`; ported files carry
   `migratedFrom` and duplicate fingerprints block drafts for both;
   continuity proof (`.asc` or reused auth subkey, expired keys accepted)
   only unlocks drafts and grants no tier; drafts generated locally by

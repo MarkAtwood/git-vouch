@@ -39,11 +39,13 @@ Put your own handle, name and email in their place.
 ## Flag day
 
 > **What this does:** gives the anchors' steps in the flag-day timeline.\
-> **Why:** one switch date with no dual period, so after it nothing new needs `gpg` ([rationale](rationale.md#one-flag-day)).
+> **Why:** only Linus's tree and the release tags switch on the flag day; every other tree switches by the late cutoff ([rationale](rationale.md#one-flag-day)).
 
 [The flag-day runbook](flag-day.md) has the full timeline for everyone.
 
-Patch signing has a fallback that tags do not. Before the flag day,
+Before the flag day you approve the core set, everyone
+`git-vouch-migrate pullers` lists, as maintainers. Patches follow the
+same dates as tags. Before the flag day,
 everyone who signs or checks patches installs the patatt fork and lists
 `keyringsrc = vouch:` first and the frozen pgpkeys keyring second, as
 [Patch signing](#patch-signing) shows. Patches signed with a GPG key, or
@@ -259,8 +261,8 @@ them their own tier:
 - **Approved, but your copy predates it:** nothing; you run
   `git vouch sync`.
 
-Run `git vouch sync` before you verify again. From the flag day, a
-GPG-signed tag or pull is not accepted.
+Run `git vouch sync` before you verify again. From the flag day,
+Linus's tree does not accept a GPG-signed tag or pull.
 
 ### Release tooling and the first SSH release tag
 

@@ -44,18 +44,20 @@ maintainer merges once `git vouch check` passes.
 ## Flag day
 
 > **What this does:** registers you, gets you approved, signs your endorsement drafts and switches git to SSH.\
-> **Why:** one day switches tags and pulls to SSH, with no period that accepts both ([rationale](rationale.md#one-flag-day)).
+> **Why:** only Linus's tree switches on the flag day; your own tree switches when you choose, by the late cutoff ([rationale](rationale.md#one-flag-day)).
 
 These are a captain's steps in [the flag-day runbook](flag-day.md),
-which has the full timeline. The anchors register and merge first;
-everyone else registers during the window.
+which has the full timeline. The anchors register and merge first.
+If Linus pulls from you, you are in the core set and register during the
+window; your tree keeps accepting GPG-signed pulls from people below
+you until you switch it, by the late cutoff at the latest.
 
 Set up patch signing before the flag day: install the patatt fork and
 list `keyringsrc = vouch:` first and the frozen pgpkeys keyring second,
 as [Patch signing](#patch-signing) shows. Patches signed with a GPG key,
 or a key `patatt genkey` made, then keep verifying through pgpkeys, with
 a warning, for everyone until the late cutoff, six months after the flag
-day. Tags get no such fallback.
+day, the same date your tree stops accepting GPG-signed tags.
 
 ### Register with your pgpkeys key
 

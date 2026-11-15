@@ -1052,6 +1052,90 @@ def _write_new(out: Path, files: Mapping[str, bytes]) -> None:
         raise VouchError(f"{out}: cannot write the drafts: {e}") from e
 
 
+class Puller(NamedTuple):
+    """One tagger whose signed tags the tree's first-parent merges pulled."""
+
+    email: str  # lowercased
+    name: str  # from their newest pulled tag
+    pulls: int  # tags pulled; git records only signed ones
+    pgp: int  # of those, OpenPGP-signed
+    ssh: int  # of those, SSH-signed
+
+
+TAGGER_RE = re.compile(rb"tagger (.*?) <([^<>]*)> \d+ [+-]\d{4}")
+
+
+def _mergetags(commit: bytes) -> list[bytes]:
+    """Return the tag objects in a raw commit's ``mergetag`` headers."""
+    head = commit.split(b"\n\n", 1)[0]
+    tags: list[bytearray] = []
+    current: Optional[bytearray] = None
+    for line in head.split(b"\n"):
+        if line.startswith(b"mergetag "):
+            current = bytearray(line[len(b"mergetag ") :])
+            tags.append(current)
+        elif line.startswith(b" ") and current is not None:
+            current += b"\n" + line[1:]
+        else:
+            current = None
+    return [bytes(t) for t in tags]
+
+
+def pullers(repo: Path, since: str, until: str) -> tuple[str, str, list[Puller]]:
+    """Return the resolved range and the taggers of every tag merged on its first-parent line.
+
+    A merge on the first-parent line of ``since..until`` is the tree owner's
+    own pull; git records the pulled tag in the merge's ``mergetag`` header.
+    The answer depends only on the two commits, so anyone gets the same
+    list. Sorted by pulls, most first, then email.
+
+    Raises:
+        VouchError: A revision is not a commit, or git fails.
+    """
+
+    def git(*args: str, stdin: Optional[bytes] = None) -> bytes:
+        out: bytes = vouch.run([*vouch.GIT, *args], cwd=repo, stdin=stdin)
+        return out
+
+    ends = []
+    for flag, rev in (("--since", since), ("--until", until)):
+        try:
+            out = git("rev-parse", "--verify", "--end-of-options", rev + "^{commit}")
+        except VouchError as e:
+            raise VouchError(f"{flag} {rev}: not a commit in {repo}") from e
+        ends.append(out.decode().strip())
+    hashes = git(
+        "rev-list", "--first-parent", "--merges", "--end-of-options",
+        f"{ends[0]}..{ends[1]}",
+    ).split()  # fmt: skip
+    names: dict[str, str] = {}  # email -> name on their newest pulled tag
+    counts: dict[str, list[int]] = {}  # email -> [pulls, pgp, ssh]
+    if hashes:
+        batch = git("cat-file", "--batch", stdin=b"\n".join(hashes) + b"\n")
+        pos = 0
+        for _ in hashes:  # rev-list order: newest first
+            eol = batch.index(b"\n", pos)
+            size = int(batch[pos:eol].split()[2])
+            body = batch[eol + 1 : eol + 1 + size]
+            pos = eol + 1 + size + 1
+            for tag in _mergetags(body):
+                m = TAGGER_RE.search(tag)
+                if not m:
+                    continue
+                name = m.group(1).decode(errors="replace")
+                email = m.group(2).decode(errors="replace").lower()
+                names.setdefault(email, name)
+                row = counts.setdefault(email, [0, 0, 0])
+                row[0] += 1
+                if b"-----BEGIN PGP SIGNATURE-----" in tag:
+                    row[1] += 1
+                elif b"-----BEGIN SSH SIGNATURE-----" in tag:
+                    row[2] += 1
+    rows = [Puller(e, names[e], *counts[e]) for e in counts]
+    rows.sort(key=lambda r: (-r.pulls, r.email))
+    return ends[0], ends[1], rows
+
+
 @contextlib.contextmanager
 def keyring() -> Iterator[Path]:
     """Yield a new temporary gpg home; on exit, stop its gpg daemons and remove it."""
@@ -1139,6 +1223,15 @@ def cmd_drafts(args: argparse.Namespace) -> int:
         )
     with keyring() as home:
         drafts(_open_pgpkeys(args, home), Path(args.registry), args.handle, out)
+    return 0
+
+
+def cmd_pullers(args: argparse.Namespace) -> int:
+    """Print who the tree's owner pulled signed tags from in a range."""
+    since, until, rows = pullers(Path(args.tree), args.since, args.until)
+    print(f"pullers of {since}..{until}")
+    for r in rows:
+        print(f"{r.pulls} {r.pgp} {r.ssh} {r.email} {r.name}")
     return 0
 
 
@@ -1231,6 +1324,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--as", dest="handle", required=True, help="your own handle")
     p.add_argument("--out", required=True, help="new directory for the drafts")
     p.set_defaults(func=cmd_drafts)
+    p = sub.add_parser(
+        "pullers",
+        help="list who the tree's owner pulled tags from: the flag day's core set",
+        description=(
+            "Read the merges on the first-parent line of SINCE..UNTIL in a kernel "
+            "tree, which are its owner's own pulls, and the signed tags git recorded "
+            "in their mergetag headers (git records no unsigned tag there). Print the resolved range, then one line per "
+            "tagger email: pulls, how many were OpenPGP-signed, how many SSH-signed, "
+            "the email, and the name on their newest pulled tag; most pulls first. "
+            "Needs no gpg and no network, and gives the same answer for the same "
+            "two commits."
+        ),
+    )
+    p.add_argument("tree", help="a clone of the tree, e.g. Linus's linux.git")
+    p.add_argument("--since", required=True, help="start of the range, e.g. v6.12")
+    p.add_argument("--until", default="HEAD", help="end of the range (default HEAD)")
+    p.set_defaults(func=cmd_pullers)
     return parser
 
 

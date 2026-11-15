@@ -2,24 +2,27 @@
 
 **Status:** runbook, 2026-10-22. Facts come from `DESIGN.md` (Flag day).
 
-On one date, the flag day, the kernel stops accepting GPG-signed tags and
-pulls and starts verifying SSH signatures against the git-vouch registry.
-No period accepts both. Before that date every pgpkeys holder who still
-signs registers an SSH key; after it, nothing new needs `gpg`. The kernel
-team sets the dates and the anchor list, so this page leaves them blank.
+On one date, the flag day, Linus's tree and the release tags stop
+accepting GPG signatures and verify SSH signatures against the git-vouch
+registry. Only the core set, everyone whose signed tag Linus merged
+recently, must register before it. Every other tree keeps accepting both
+until its owner switches, by the late cutoff six months later, when GPG
+ends for tags and patches alike. `pgpkeys.git` freezes for everyone at
+the start. The kernel team sets the dates and the anchor list, so this
+page leaves them blank.
 The test suite runs every command block here end to end ([Rehearsal](#rehearsal)).
 
 ## Timeline
 
 > **What this does:** lists the four phases, their dates and who acts in each.\
-> **Why:** one switch date with no dual period, so after it nothing new needs `gpg` ([rationale](rationale.md#one-flag-day)).
+> **Why:** only Linus's tree applies one policy to everyone, so only it switches on one date; the freeze makes everyone else follow ([rationale](rationale.md#one-flag-day)).
 
 | Phase | When | Who acts | What happens |
 |---|---|---|---|
 | 1. Freeze | _freeze date_ | kernel.org | `pgpkeys.git` gets one last signed commit, the freeze commit, and becomes read-only. Its hash, the flag-day date and the late cutoff are published together. |
-| 2. Window | freeze to flag day (_window length_) | anchors first, then everyone | The first registry merge holds the anchors' person files and `anchors.json`. Everyone else registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and gets approved. Everyone who signs or checks patches installs the patatt fork and sets its keyring sources. |
-| 3. Flag day | _flag-day date_ | Linus, release tooling, every developer | Linus and the release tooling switch to files from `git vouch export`. GPG-signed tags and pulls stop being accepted. |
-| 4. Late cutoff | six months after the flag day | nobody; every patch checker deletes one config line | Continuity claims against the freeze commit are accepted until this date. After it, people register as newcomers. The GPG fallback for patch signing ends. |
+| 2. Window | freeze to flag day (_window length_) | anchors first, then the core set | The first registry merge holds the anchors' person files and `anchors.json`. The core set, everyone `pullers` lists, registers, adds a continuity proof if they had a pgpkeys key, signs endorsement drafts and is approved as maintainer. Anyone else may register now or later. Everyone who signs or checks patches installs the patatt fork and sets its keyring sources. |
+| 3. Flag day | _flag-day date_ | Linus, release tooling | Linus and the release tooling switch to files from `git vouch export`, and Linus's tree stops accepting GPG-signed tags. Every other tree keeps accepting both. |
+| 4. Late cutoff | six months after the flag day | every tree owner and patch checker | GPG-signed tags and patches stop being accepted anywhere. Continuity claims against the freeze commit are accepted until this date. After it, people register as newcomers. |
 
 ## Kernel-team calls
 
@@ -30,6 +33,7 @@ The kernel team decides:
 
 - the anchor list;
 - the freeze date and the window length;
+- N, the number of releases whose pulls define the core set;
 - who the registry maintainers are, who may merge into the registry
   (`DESIGN.md`, Open questions);
 - the registry's repository path on git.kernel.org (kernel.org
@@ -52,10 +56,12 @@ commit date.
 | kernel.org and the registry maintainer | Freezes pgpkeys and publishes the freeze commit. Merges each registry branch once `git vouch check` passes, and commits `anchors.json`. |
 | Anchor | Registers first. Drafts and signs endorsements from their own GPG certifications. Approves maintainers. |
 | pgpkeys holder | Ports pgpkeys, completes their person-file draft, adds a continuity proof. |
+| Core set: everyone whose signed tag Linus merged in the last N releases | Registers during the window and is approved as maintainer before the flag day. |
 | Developer with no GPG key (about 80% of maintainers) | Registers fresh and collects fresh endorsements. |
 | Certifier: any holder who certified others' GPG keys | Drafts endorsements locally, reads each one, signs the ones that are right. |
 | Maintainer | Endorses, and approves contributors. |
-| Linus and the release tooling | Switch to the exported allowed-signers files. |
+| Linus and the release tooling | Switch to the exported allowed-signers files on the flag day. |
+| Every other tree owner | Switches when they choose, by the late cutoff. |
 
 GPG supplies no tiers. Linus certified 2 keys in pgpkeys, so the web of
 trust says nothing about who is a maintainer. Anchors approve maintainers
@@ -156,6 +162,31 @@ Merge the person files first: `check` fails if `anchors.json` names a
 handle that has no person file. This first merge is the only
 fast-forward, because the registry is still empty and git cannot make a
 merge commit into an empty branch.
+
+### The core set
+
+> **What this does:** lists everyone who must register and be approved as maintainer before the flag day.\
+> **Why:** nobody picks names: the list comes from Linus's own merges, and anyone who reruns it gets the same answer ([rationale](rationale.md#one-flag-day)).
+
+The core set is everyone whose signed tag Linus merged in the last N
+releases. Anyone can list it from Linus's tree, here since `v6.98`:
+
+```sh
+git clone -q "$LINUX" linux
+git-vouch-migrate pullers linux --since v6.98
+```
+
+`pullers` reads the `mergetag` headers on the first-parent merges of the
+range, which are Linus's own pulls; git records a pulled tag there only
+if it is signed. It prints the resolved range, then
+one line per tagger email, most pulls first: pulls, how many were
+OpenPGP-signed, how many SSH-signed, the email and the name. The SSH
+column shows progress. Since v6.15 Linus merged 4,216 tags from 195
+emails, all OpenPGP-signed; the top 100 sent 90%.
+
+The anchors approve each of them as maintainer, as in
+[Endorsements from GPG certifications](#endorsements-from-gpg-certifications).
+Release signers are anchors.
 
 ### Everyone else registers
 
@@ -400,19 +431,22 @@ The registry maintainer merges it as above, with `branch=approve-alice`.
 
 ## 3. Flag day
 
-> **What this does:** Linus, the release tooling and every developer switch to SSH signatures checked against exported tiers.\
-> **Why:** after the flag day nothing new needs `gpg`; DESIGN gives no further reason for skipping a dual period ([rationale](rationale.md#one-flag-day)).
+> **What this does:** Linus and the release tooling switch to SSH signatures checked against exported tiers; no other tree has to.\
+> **Why:** Linus's pulls are the one place the kernel applies one policy to everyone ([rationale](rationale.md#one-flag-day)).
 
-Linus points git at the export of maintainers and above:
+Linus points git at the export of maintainers and above, and stops
+accepting OpenPGP signatures in his tree. `gpg.openpgp.program false`
+makes git fail every OpenPGP signature in that repository; SSH
+signatures still verify:
 
 ```sh
 git vouch setup --registry "$REGISTRY" --min-tier maintainer
 git vouch check
-git clone -q "$LINUX" linux
+cd linux
+git config gpg.openpgp.program false
 ```
 
-Every developer sets up git for SSH signing and signs their tags (here
-`who=alice`):
+The core set signs their tags with SSH (here `who=alice`):
 
 ```sh
 who=alice
@@ -457,11 +491,24 @@ git -c gpg.ssh.allowedSignersFile="$HOME/contrib-signers" \
     -c gpg.ssh.revocationFile="$HOME/contrib-revoked" verify-tag bob-6.99
 ```
 
-From this date a GPG-signed tag or pull is not accepted.
+In Linus's tree, alice's GPG-signed tag from before the flag day now
+fails. In a tree that has not switched, and for old tags in history,
+git still sends an OpenPGP signature to `gpg`, whatever `gpg.format`
+says:
+
+```sh
+git verify-tag alice-for-6.98    # fails: OpenPGP, in Linus's tree
+git -c gpg.openpgp.program=gpg verify-tag alice-for-6.98
+```
+
+Every other tree needs nothing on the flag day. Its owner runs
+`git vouch setup` when ready, so SSH tags verify against the registry
+while GPG tags still verify against their GPG keyring, and switches with
+the same `git config gpg.openpgp.program false` by the late cutoff.
 
 ## 4. Late cutoff
 
-> **What this does:** ends continuity claims and the GPG patch fallback six months after the flag day.\
+> **What this does:** ends GPG for tags and patches everywhere, and continuity claims, six months after the flag day.\
 > **Why:** it closes the window in which a stolen, unrevoked GPG key can claim its holder's identity ([rationale](rationale.md#late-cutoff)).
 
 Continuity claims against the freeze commit are accepted until six
@@ -471,20 +518,25 @@ maintainers merge no change that adds or alters `migratedFrom` or adds a
 `people/*.json.asc`; a branch merged after it is late, whenever it was
 committed.
 
-GPG-signed tags from before the flag day stay valid in history.
+From this date no tree accepts a new GPG-signed tag: every tree owner
+who has not switched runs `git config gpg.openpgp.program false`.
+
+GPG-signed tags from before the late cutoff stay valid in history.
 Verifying them uses `gpg` with the archived `pgpkeys.git` at the freeze
-commit. There is no manifest.
+commit, with `-c gpg.openpgp.program=gpg` in a tree that has switched.
+There is no manifest.
 
 ## Patch signing
 
 > **What this does:** moves patch signing to registry keys through the patatt fork, with the frozen pgpkeys keyring as a fallback until the late cutoff.\
-> **Why:** the registry is the keyring, so nothing is generated or trusted in between; DESIGN gives no reason why patches get a fallback and tags do not ([rationale](rationale.md#patch-fallback)).
+> **Why:** the registry is the keyring, so nothing is generated or trusted in between; patches and tags outside Linus's tree both keep GPG until the late cutoff ([rationale](rationale.md#patch-fallback)).
 
 Patches are signed with patatt and checked with `b4 am`. A fork of
 patatt adds the keyring source `vouch:`, which reads the registry
-through `git vouch keys`. Unlike tags, patches get a fallback: the
+through `git vouch keys`. As for tags outside Linus's tree, the
 frozen pgpkeys keyring keeps working, with a warning, until the late
-cutoff, six months after the flag day. The commands are in each guide's
+cutoff, six months after the flag day: the same date every tree stops
+accepting GPG-signed tags. The commands are in each guide's
 Patch signing section ([regulars](guide-regulars.md#patch-signing),
 [captains](guide-captains.md#patch-signing),
 [anchors](guide-anchors.md#patch-signing)).
@@ -530,7 +582,7 @@ Patch signing section ([regulars](guide-regulars.md#patch-signing),
 | A subject is missing from your drafts | They have not registered yet, or their proof does not hold | Run `drafts` again later, into a new `--out` directory. It drafts every subject again, including ones you already endorsed, so sign only the new ones. |
 | Another user's git cannot read `allowed_signers` or `revoked_keys` | An earlier git-vouch wrote them with mode 0600, and `export` and `sync` keep an existing file's mode | Run `chmod 0644` on both files once. |
 | `git verify-tag` says "No principal matched" | The signer has no tier at or above the export's minimum, has not been approved yet, or your registry copy is stale | Have them approved, or run `git vouch sync`. |
-| A GPG-signed tag after the flag day | GPG is no longer accepted | Re-sign the tag with `git tag -s` after `git vouch setup`. |
+| `git verify-tag` fails on a GPG-signed tag in a tree that has switched | The tree set `gpg.openpgp.program false`: Linus's tree from the flag day, every tree from the late cutoff | Re-sign the tag with `git tag -s` after `git vouch setup`. To check an old tag, add `-c gpg.openpgp.program=gpg`. |
 | Missed the late cutoff | Continuity claims have ended | Register fresh and collect fresh endorsements. |
 | `b4 am` prints `W: ... verified via legacy keyring ...` | The patch is signed with a GPG key or a key `patatt genkey` made | Register an SSH key and sign patches with it before the late cutoff. |
 | `b4 am` prints `No key` for every registered signer | The patatt installed is not the patatt fork, so `vouch:` finds nothing; `b4.keyringsrc` is set, so b4 ignores `patatt.keyringsrc`; or your registry copy is stale | Install both forks with the guides' install line; run `git config --global --unset-all b4.keyringsrc`; run `git vouch sync`. |
@@ -577,7 +629,7 @@ The names in the commands are the rehearsal's cast:
 |---|---|
 | `korg` | kernel.org and the registry maintainer |
 | `lena` | the anchor; also the certifier, and Linus and the release tooling |
-| `alice` | pgpkeys holder; also the maintainer |
+| `alice` | pgpkeys holder; also the maintainer, and the core set: Linus merged her GPG-signed tag `alice-for-6.98` before the flag day |
 | `bob` | pgpkeys holder whose key expired before the freeze commit |
 | `dave` | pgpkeys holder who reuses his GPG authentication subkey |
 | `carol` | developer with no GPG key, registering fresh |
